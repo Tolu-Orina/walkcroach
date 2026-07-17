@@ -8,7 +8,6 @@ locals {
     aws_api_gateway_resource.session_id.id,
     aws_api_gateway_resource.prompt.id,
     aws_api_gateway_resource.tool_result.id,
-    aws_api_gateway_resource.proxy.id,
   ])
 }
 
