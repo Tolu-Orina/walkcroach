@@ -8,6 +8,7 @@ locals {
     aws_api_gateway_resource.session_id.id,
     aws_api_gateway_resource.prompt.id,
     aws_api_gateway_resource.tool_result.id,
+    aws_api_gateway_resource.proxy.id,
   ])
 }
 
@@ -25,7 +26,7 @@ resource "aws_api_gateway_integration" "options" {
 
   rest_api_id = aws_api_gateway_rest_api.this.id
   resource_id = each.value.resource_id
-  http_method = "OPTIONS"
+  http_method = each.value.http_method
   type        = "MOCK"
 
   request_templates = {
@@ -38,7 +39,7 @@ resource "aws_api_gateway_method_response" "options" {
 
   rest_api_id = aws_api_gateway_rest_api.this.id
   resource_id = each.value.resource_id
-  http_method = "OPTIONS"
+  http_method = each.value.http_method
   status_code = "204"
 
   response_parameters = {
@@ -57,7 +58,7 @@ resource "aws_api_gateway_integration_response" "options" {
 
   rest_api_id = aws_api_gateway_rest_api.this.id
   resource_id = each.value.resource_id
-  http_method = "OPTIONS"
+  http_method = each.value.http_method
   status_code = aws_api_gateway_method_response.options[each.key].status_code
 
   response_parameters = {

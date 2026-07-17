@@ -208,7 +208,6 @@ resource "aws_api_gateway_deployment" "this" {
         aws_api_gateway_integration.prompt_post.id,
         aws_api_gateway_integration.tool_result_post.id,
         aws_api_gateway_integration.proxy_any.id,
-        aws_api_gateway_integration.proxy_options.id,
       ],
       [for k, v in aws_api_gateway_integration.options : v.id],
     )))
@@ -226,7 +225,6 @@ resource "aws_api_gateway_deployment" "this" {
     aws_api_gateway_integration.prompt_post,
     aws_api_gateway_integration.tool_result_post,
     aws_api_gateway_integration.proxy_any,
-    aws_api_gateway_integration.proxy_options,
     aws_api_gateway_integration.options,
   ]
 }
