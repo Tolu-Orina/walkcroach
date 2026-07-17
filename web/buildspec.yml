@@ -12,7 +12,7 @@ phases:
   pre_build:
     commands:
       - |
-        set -euo pipefail
+        set -eu
         ENV="${TF_VAR_environment:-${ENVIRONMENT:-}}"
         if [ -z "$ENV" ]; then
           echo "ERROR: TF_VAR_environment (or ENVIRONMENT) must be set by the CodeBuild project"
@@ -36,7 +36,7 @@ phases:
   post_build:
     commands:
       - |
-        set -euo pipefail
+        set -eu
         ENV="${TF_VAR_environment:-${ENVIRONMENT:-}}"
         if [ ! -d web/dist ]; then
           echo "ERROR: web/dist missing — build failed; skipping deploy"
