@@ -7,7 +7,7 @@ import {
   listProjects,
 } from '../api/client';
 import type { ProjectSummary } from '../api/types';
-import { useAuth } from '../auth/AuthContext';
+import { useAuth } from '../auth/useAuth';
 import { TemplateGallery } from '../features/onboarding/TemplateGallery';
 
 function statusLabel(status: string): string {

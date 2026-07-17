@@ -98,7 +98,7 @@ export function BuilderPage({ projectId, projectName, templateId }: BuilderPageP
         void wc.applyWriteFile(path, content);
       }
     },
-    [wc.applyWriteFile],
+    [wc],
   );
 
   return (

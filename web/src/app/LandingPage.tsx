@@ -1,5 +1,5 @@
 import { Navigate, useNavigate } from 'react-router-dom';
-import { useAuth } from '../auth/AuthContext';
+import { useAuth } from '../auth/useAuth';
 
 export function LandingPage() {
   const { status, signIn, signInAnonymous, cognitoEnabled, devAuthAllowed } = useAuth();

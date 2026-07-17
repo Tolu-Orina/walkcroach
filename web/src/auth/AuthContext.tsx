@@ -1,7 +1,5 @@
 import {
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useState,
@@ -14,6 +12,7 @@ import {
   refreshCognitoTokens,
   startCognitoSignIn,
 } from './cognito';
+import { AuthContext } from './auth-context';
 import type { AuthState, AuthUser } from './types';
 
 const STORAGE_KEY = 'walkcroach.auth.v1';
@@ -49,16 +48,6 @@ function makeUserId(prefix: 'user' | 'anon'): string {
 function devToken(ownerId: string): string {
   return `dev:${ownerId}`;
 }
-
-type AuthContextValue = AuthState & {
-  signIn: (displayName?: string) => void;
-  signInAnonymous: () => void;
-  signOut: () => void;
-  cognitoEnabled: boolean;
-  devAuthAllowed: boolean;
-};
-
-const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const cognitoEnabled = isCognitoEnabled();
@@ -174,10 +163,4 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
-}
-
-export function useAuth(): AuthContextValue {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error('useAuth must be used within AuthProvider');
-  return ctx;
 }

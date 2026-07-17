@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Navigate, Route, Routes, useParams } from 'react-router-dom';
 import { createProject, getProject } from '../api/client';
-import { useAuth } from '../auth/AuthContext';
+import { useAuth } from '../auth/useAuth';
 import { AuthCallbackPage } from './AuthCallbackPage';
 import { AuthGithubCallbackPage } from './AuthGithubCallbackPage';
 import { BuilderPage } from './BuilderPage';
