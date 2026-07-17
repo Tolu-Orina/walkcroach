@@ -21,5 +21,6 @@ output "app_domain" {
 
 output "api_url" {
   description = "Backend API URL (from SSM, set by infra-backend deploy)"
-  value       = data.aws_ssm_parameter.backend_api_url.value
+  # Public API Gateway URL — must be readable in terraform output -json for web CI
+  value = nonsensitive(data.aws_ssm_parameter.backend_api_url.value)
 }
