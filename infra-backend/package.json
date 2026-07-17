@@ -16,7 +16,7 @@
     "smoke:loop": "npm run smoke:loop -w @walkcroach/agent-harness",
     "local:demo": "npm run local:demo -w @walkcroach/agent-harness",
     "migrate": "npm run migrate -w @walkcroach/db",
-    "package:lambda": "node scripts/package-lambda.mjs"
+    "package:lambda": "npm run build:packages && node scripts/package-lambda.mjs"
   },
   "devDependencies": {
     "archiver": "^7.0.1",

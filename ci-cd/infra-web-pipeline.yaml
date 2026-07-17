@@ -265,17 +265,13 @@ Resources:
                 Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*'
 
   # ─── IAM Roles for CodeBuild - Terraform Operations, split per environment ──
-  # infra-web's Terraform config (main.tf + modules/{s3,cloudfront,route53,
-  # acm}) never creates DynamoDB, Lambda, Cognito, API Gateway, KMS, or IAM
-  # resources — the previous shared role granted dynamodb:*/lambda:*/
-  # cognito-idp:*/apigateway(v2):*/kms:*/iam:* anyway (likely copy-pasted
-  # from the backend pipeline template). Those are dropped entirely here as
-  # dead grants rather than merely narrowed. What's left (S3, CloudFront,
-  # Route53, ACM, SSM) is split into Dev/Test/Prod roles and scoped to that
-  # environment's "walkcroach-*-<env>" resources and "/walkcroach/<env>/*" SSM
-  # path. CloudFront/Route53/ACM stay on Resource: '*' because those
-  # services use AWS-generated opaque IDs that don't exist until Terraform
-  # creates them (no name-based ARN to scope to for Create* actions).
+  # infra-web's Terraform config (main.tf + modules/{s3,cloudfront,dns,acm})
+  # never creates DynamoDB/Lambda/Cognito/API GW/KMS/IAM resources — those
+  # broad grants from the backend template are omitted. Remaining grants
+  # (S3, CloudFront, Route53, ACM, SSM) are split per env. DynamoDB is
+  # limited to the shared Terraform state lock table only. CloudFront/
+  # Route53/ACM stay on Resource: '*' because those services use opaque
+  # AWS-generated IDs (no name-based ARN for Create*).
   CodeBuildTerraformRoleDev:
     Type: AWS::IAM::Role
     Properties:
@@ -331,6 +327,14 @@ Resources:
                   - s3:ListBucket
                   - s3:GetBucketVersioning
                 Resource: 'arn:aws:s3:::walkcroach-tf-state'
+              - Sid: TerraformStateLock
+                Effect: Allow
+                Action:
+                  - dynamodb:DescribeTable
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:DeleteItem
+                Resource: !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/walkcroach-tf-lock'
               - Effect: Allow
                 Action:
                   - cloudfront:*
@@ -412,6 +416,14 @@ Resources:
                   - s3:ListBucket
                   - s3:GetBucketVersioning
                 Resource: 'arn:aws:s3:::walkcroach-tf-state'
+              - Sid: TerraformStateLock
+                Effect: Allow
+                Action:
+                  - dynamodb:DescribeTable
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:DeleteItem
+                Resource: !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/walkcroach-tf-lock'
               - Effect: Allow
                 Action:
                   - cloudfront:*
@@ -493,6 +505,14 @@ Resources:
                   - s3:ListBucket
                   - s3:GetBucketVersioning
                 Resource: 'arn:aws:s3:::walkcroach-tf-state'
+              - Sid: TerraformStateLock
+                Effect: Allow
+                Action:
+                  - dynamodb:DescribeTable
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:DeleteItem
+                Resource: !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/walkcroach-tf-lock'
               - Effect: Allow
                 Action:
                   - cloudfront:*
