@@ -2,7 +2,8 @@ version: 0.2
 
 env:
   variables:
-    ENVIRONMENT: "dev"
+    # Overridden by CodeBuild project env (TF_VAR_environment). Do not hardcode env here.
+    ENVIRONMENT: ""
 
 phases:
   install:
@@ -11,25 +12,58 @@ phases:
   pre_build:
     commands:
       - |
-        ENV="${ENVIRONMENT:-dev}"
+        set -euo pipefail
+        ENV="${TF_VAR_environment:-${ENVIRONMENT:-}}"
+        if [ -z "$ENV" ]; then
+          echo "ERROR: TF_VAR_environment (or ENVIRONMENT) must be set by the CodeBuild project"
+          exit 1
+        fi
+        export ENVIRONMENT="$ENV"
+        echo "ENVIRONMENT=${ENVIRONMENT}"
         API_URL=$(aws ssm get-parameter --name "/walkcroach/${ENV}/web/api_url" --query 'Parameter.Value' --output text)
+        if [ -z "$API_URL" ] || [ "$API_URL" = "None" ]; then
+          echo "ERROR: SSM /walkcroach/${ENV}/web/api_url is empty"
+          exit 1
+        fi
         echo "VITE_API_URL=${API_URL}"
-        echo "VITE_API_URL=${API_URL}" >> web/.env.production
+        echo "VITE_API_URL=${API_URL}" > web/.env.production
   build:
     commands:
       - cd web
-      - npm ci
+      # NODE_ENV=production would skip devDependencies (typescript, vite); force them in
+      - npm ci --include=dev
       - npm run build
   post_build:
     commands:
       - |
-        WEB_BUCKET="walkcroach-web-${ENVIRONMENT}"
+        set -euo pipefail
+        ENV="${TF_VAR_environment:-${ENVIRONMENT:-}}"
+        if [ ! -d web/dist ]; then
+          echo "ERROR: web/dist missing — build failed; skipping deploy"
+          exit 1
+        fi
+        WEB_BUCKET="walkcroach-web-${ENV}"
         aws s3 sync web/dist "s3://${WEB_BUCKET}/" --delete
-        DIST_ID=$(aws cloudfront list-distributions --query "DistributionList.Items[?Comment=='walkcroach web ${ENVIRONMENT}'].Id | [0]" --output text)
-        if [ -n "${DIST_ID}" ] && [ "${DIST_ID}" != "None" ]; then
+
+        # Prefer distribution id from Terraform deploy artifact (no ListDistributions needed)
+        DIST_ID=""
+        for candidate in \
+          "${CODEBUILD_SRC_DIR_TerraformDeployOutputProd:-}" \
+          "${CODEBUILD_SRC_DIR_TerraformDeployOutputTest:-}" \
+          "${CODEBUILD_SRC_DIR_TerraformDeployOutputDev:-}"; do
+          if [ -n "$candidate" ] && [ -f "${candidate}/terraform-web-outputs.json" ]; then
+            DIST_ID=$(node -p "JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).cloudfront_distribution_id?.value || ''" \
+              "${candidate}/terraform-web-outputs.json")
+            break
+          fi
+        done
+        if [ -z "$DIST_ID" ]; then
+          echo "WARN: cloudfront_distribution_id not found in deploy artifact; skipping invalidation"
+        else
+          echo "Invalidating CloudFront distribution ${DIST_ID}"
           aws cloudfront create-invalidation --distribution-id "${DIST_ID}" --paths "/*"
         fi
 artifacts:
   files:
     - web/dist/**/*
-  name: web-app-build-${ENVIRONMENT}
+  name: web-app-build

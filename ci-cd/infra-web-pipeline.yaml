@@ -926,6 +926,8 @@ Resources:
             Value: !Ref AWS::Region
           - Name: NODE_ENV
             Value: production
+          - Name: ENVIRONMENT
+            Value: dev
           - Name: TF_VAR_environment
             Value: dev
           - Name: TF_VAR_domain_prefix
@@ -968,6 +970,8 @@ Resources:
             Value: !Ref AWS::Region
           - Name: NODE_ENV
             Value: production
+          - Name: ENVIRONMENT
+            Value: test
           - Name: TF_VAR_environment
             Value: test
           - Name: TF_VAR_domain_prefix
@@ -1010,6 +1014,8 @@ Resources:
             Value: !Ref AWS::Region
           - Name: NODE_ENV
             Value: production
+          - Name: ENVIRONMENT
+            Value: prod
           - Name: TF_VAR_environment
             Value: prod
           - Name: TF_VAR_domain_prefix
