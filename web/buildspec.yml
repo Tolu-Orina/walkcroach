@@ -54,14 +54,17 @@ phases:
         echo "VITE_API_URL=${API_URL}" > web/.env.production
   build:
     commands:
-      - cd web
-      # NODE_ENV=production would skip devDependencies (typescript, vite); force them in
-      - npm ci --include=dev
-      - npm run build
+      - |
+        set -eu
+        cd "${CODEBUILD_SRC_DIR}/web"
+        # NODE_ENV=production would skip devDependencies (typescript, vite); force them in
+        npm ci --include=dev
+        npm run build
   post_build:
     commands:
       - |
         set -eu
+        cd "${CODEBUILD_SRC_DIR}"
         ENV="${TF_VAR_environment:-${ENVIRONMENT:-}}"
         if [ ! -d web/dist ]; then
           echo "ERROR: web/dist missing — build failed; skipping deploy"
