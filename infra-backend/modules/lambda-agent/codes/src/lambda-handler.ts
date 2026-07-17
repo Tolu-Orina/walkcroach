@@ -7,6 +7,7 @@ import { runPromptStream, type PromptBody } from './handlers/prompt.js';
 import { runToolResultStream, type ToolResultBody } from './handlers/toolResult.js';
 import { handleRest } from './handlers/rest.js';
 import { ensureRuntimeSecrets } from './secrets.js';
+import { CORS_HEADERS } from './http.js';
 
 function writeHttp(
   responseStream: NodeJS.WritableStream,
@@ -31,6 +32,11 @@ async function streamHandler(
     await ensureRuntimeSecrets();
     const req = normalizeEvent(event);
 
+    if (req.method === 'OPTIONS') {
+      writeHttp(responseStream, 204, CORS_HEADERS, '');
+      return;
+    }
+
     const promptMatch = req.path.match(/\/sessions\/([^/]+)\/prompt\/?$/);
     if (req.method === 'POST' && promptMatch) {
       const body = JSON.parse(req.body ?? '{}') as PromptBody;
@@ -38,7 +44,7 @@ async function streamHandler(
         statusCode: 200,
         headers: {
           'content-type': 'application/x-ndjson',
-          'access-control-allow-origin': '*',
+          ...CORS_HEADERS,
         },
       });
       await runPromptStream(promptMatch[1]!, body, (chunk) => {
@@ -55,7 +61,7 @@ async function streamHandler(
         statusCode: 200,
         headers: {
           'content-type': 'application/x-ndjson',
-          'access-control-allow-origin': '*',
+          ...CORS_HEADERS,
         },
       });
       await runToolResultStream(toolMatch[1]!, body, (chunk) => {
@@ -85,7 +91,7 @@ async function streamHandler(
         500,
         {
           'content-type': 'application/json',
-          'access-control-allow-origin': '*',
+          ...CORS_HEADERS,
         },
         JSON.stringify({
           error: err instanceof Error ? err.message : String(err),

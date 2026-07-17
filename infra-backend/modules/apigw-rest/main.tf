@@ -194,14 +194,17 @@ resource "aws_api_gateway_deployment" "this" {
   rest_api_id = aws_api_gateway_rest_api.this.id
 
   triggers = {
-    redeploy = sha1(jsonencode([
-      aws_api_gateway_integration.health_get.id,
-      aws_api_gateway_integration.projects_post.id,
-      aws_api_gateway_integration.sessions_post.id,
-      aws_api_gateway_integration.session_get.id,
-      aws_api_gateway_integration.prompt_post.id,
-      aws_api_gateway_integration.tool_result_post.id,
-    ]))
+    redeploy = sha1(jsonencode(concat(
+      [
+        aws_api_gateway_integration.health_get.id,
+        aws_api_gateway_integration.projects_post.id,
+        aws_api_gateway_integration.sessions_post.id,
+        aws_api_gateway_integration.session_get.id,
+        aws_api_gateway_integration.prompt_post.id,
+        aws_api_gateway_integration.tool_result_post.id,
+      ],
+      [for k, v in aws_api_gateway_integration.options : v.id],
+    )))
   }
 
   lifecycle {
@@ -215,6 +218,7 @@ resource "aws_api_gateway_deployment" "this" {
     aws_api_gateway_integration.session_get,
     aws_api_gateway_integration.prompt_post,
     aws_api_gateway_integration.tool_result_post,
+    aws_api_gateway_integration.options,
   ]
 }
 

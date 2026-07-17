@@ -15,6 +15,12 @@ export async function writeNdjson(
   }
 }
 
+export const CORS_HEADERS: Record<string, string> = {
+  'access-control-allow-origin': '*',
+  'access-control-allow-headers': 'content-type, accept',
+  'access-control-allow-methods': 'GET, POST, OPTIONS',
+};
+
 export function jsonResponse(
   statusCode: number,
   body: unknown,
@@ -27,7 +33,7 @@ export function jsonResponse(
     statusCode,
     headers: {
       'content-type': 'application/json',
-      'access-control-allow-origin': '*',
+      ...CORS_HEADERS,
     },
     body: JSON.stringify(body),
   };
