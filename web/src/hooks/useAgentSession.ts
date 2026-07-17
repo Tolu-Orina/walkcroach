@@ -110,14 +110,17 @@ export function useAgentSession(
   const pendingResumed = useRef(false);
   const actionsRef = useRef(actions);
   actionsRef.current = actions;
+  const abortRef = useRef<AbortController | null>(null);
 
   const handleEvents = useCallback(
     async (
       events: AsyncIterable<AgentEvent>,
       sid: string,
       pid: string,
+      signal?: AbortSignal,
     ): Promise<void> => {
       for await (const event of events) {
+        if (signal?.aborted) break;
         if (event.type === 'token') {
           assistantBuf.current += event.text;
           const text = assistantBuf.current;
@@ -185,9 +188,10 @@ export function useAgentSession(
                 exitCode: result.exitCode,
                 stdout: result.stdout,
                 stderr: result.stderr,
-              }),
+              }, signal),
               sid,
               pid,
+              signal,
             );
           }
         } else if (event.type === 'error') {
@@ -357,6 +361,9 @@ export function useAgentSession(
   const sendPrompt = useCallback(
     async (message: string) => {
       if (!sessionId || !projectId || streaming || pendingPlan) return;
+      abortRef.current?.abort();
+      const ac = new AbortController();
+      abortRef.current = ac;
       setStreaming(true);
       assistantBuf.current = '';
       hadFileWrites.current = false;
@@ -366,11 +373,13 @@ export function useAgentSession(
       ]);
       try {
         await handleEvents(
-          streamPrompt(sessionId, { message, projectId, mode }),
+          streamPrompt(sessionId, { message, projectId, mode }, ac.signal),
           sessionId,
           projectId,
+          ac.signal,
         );
       } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') return;
         setMessages((prev) => [
           ...prev,
           {
@@ -380,11 +389,23 @@ export function useAgentSession(
           },
         ]);
       } finally {
+        if (abortRef.current === ac) abortRef.current = null;
         setStreaming(false);
       }
     },
     [sessionId, projectId, streaming, pendingPlan, mode, handleEvents],
   );
+
+  const cancelGeneration = useCallback(() => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    assistantBuf.current = '';
+    setStreaming(false);
+    setMessages((prev) => [
+      ...prev,
+      { id: uid(), role: 'system', content: 'Generation stopped.' },
+    ]);
+  }, []);
 
   const submitPlanDecision = useCallback(
     async (
@@ -392,6 +413,9 @@ export function useAgentSession(
       adjustment?: string,
     ) => {
       if (!sessionId || !projectId || !pendingPlan || streaming) return;
+      abortRef.current?.abort();
+      const ac = new AbortController();
+      abortRef.current = ac;
       setStreaming(true);
       assistantBuf.current = '';
       try {
@@ -401,11 +425,13 @@ export function useAgentSession(
             planId: pendingPlan.planId,
             decision,
             adjustment,
-          }),
+          }, ac.signal),
           sessionId,
           projectId,
+          ac.signal,
         );
       } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') return;
         setMessages((prev) => [
           ...prev,
           {
@@ -415,6 +441,7 @@ export function useAgentSession(
           },
         ]);
       } finally {
+        if (abortRef.current === ac) abortRef.current = null;
         setStreaming(false);
         if (decision !== 'approve') {
           setPendingPlan(null);
@@ -441,6 +468,7 @@ export function useAgentSession(
     checkpointRefresh,
     sendPrompt,
     submitPlanDecision,
+    cancelGeneration,
     newSession,
   };
 }

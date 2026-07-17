@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getInlineEditQuota, recordInlineEdit } from '../../api/client';
+import { AlertDialog } from '../../components/ConfirmDialog';
 import type { WebContainer } from '@webcontainer/api';
 import { ElementToolbar } from './ElementToolbar';
 import { applyInlineTextEdit } from './inlineEdit';
@@ -25,6 +26,7 @@ export function PreviewBridge({
   const [selection, setSelection] = useState<WcElementSelection | null>(null);
   const [remaining, setRemaining] = useState(50);
   const [busy, setBusy] = useState(false);
+  const [alertMessage, setAlertMessage] = useState<string | null>(null);
 
   useEffect(() => {
     void getInlineEditQuota(projectId).then((q) => setRemaining(q.remaining)).catch(() => {});
@@ -69,7 +71,7 @@ export function PreviewBridge({
       setSelection(null);
       setEditMode(false);
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : String(err));
+      setAlertMessage(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
     }
@@ -113,6 +115,12 @@ export function PreviewBridge({
           allow="cross-origin-isolated"
         />
       )}
+      <AlertDialog
+        open={alertMessage !== null}
+        title="Inline edit failed"
+        message={alertMessage ?? ''}
+        onClose={() => setAlertMessage(null)}
+      />
     </>
   );
 }

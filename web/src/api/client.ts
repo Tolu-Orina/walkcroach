@@ -140,6 +140,7 @@ export async function* streamPlanDecision(
     decision: PlanDecision;
     adjustment?: string;
   },
+  signal?: AbortSignal,
 ): AsyncGenerator<AgentEvent> {
   const res = await fetch(`${API_URL}/sessions/${sessionId}/plan-decision`, {
     method: 'POST',
@@ -148,8 +149,9 @@ export async function* streamPlanDecision(
       accept: 'application/x-ndjson',
     },
     body: JSON.stringify(body),
+    signal,
   });
-  yield* readNdjson(res);
+  yield* readNdjson(res, signal);
 }
 
 export async function syncProjectFiles(
@@ -222,7 +224,10 @@ export type ToolResultBody = {
   output?: string;
 };
 
-async function* readNdjson(res: Response): AsyncGenerator<AgentEvent> {
+async function* readNdjson(
+  res: Response,
+  signal?: AbortSignal,
+): AsyncGenerator<AgentEvent> {
   if (!res.ok || !res.body) {
     const text = await res.text();
     throw new Error(text || `${res.status} ${res.statusText}`);
@@ -232,26 +237,37 @@ async function* readNdjson(res: Response): AsyncGenerator<AgentEvent> {
   const decoder = new TextDecoder();
   let buffer = '';
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() ?? '';
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      yield JSON.parse(trimmed) as AgentEvent;
+  try {
+    while (true) {
+      if (signal?.aborted) {
+        await reader.cancel();
+        break;
+      }
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        yield JSON.parse(trimmed) as AgentEvent;
+      }
     }
-  }
 
-  const tail = buffer.trim();
-  if (tail) yield JSON.parse(tail) as AgentEvent;
+    if (!signal?.aborted) {
+      const tail = buffer.trim();
+      if (tail) yield JSON.parse(tail) as AgentEvent;
+    }
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 export async function* streamPrompt(
   sessionId: string,
   body: { message: string; projectId: string; mode: AgentMode },
+  signal?: AbortSignal,
 ): AsyncGenerator<AgentEvent> {
   const res = await fetch(`${API_URL}/sessions/${sessionId}/prompt`, {
     method: 'POST',
@@ -260,13 +276,15 @@ export async function* streamPrompt(
       accept: 'application/x-ndjson',
     },
     body: JSON.stringify(body),
+    signal,
   });
-  yield* readNdjson(res);
+  yield* readNdjson(res, signal);
 }
 
 export async function* streamToolResult(
   sessionId: string,
   body: ToolResultBody,
+  signal?: AbortSignal,
 ): AsyncGenerator<AgentEvent> {
   const res = await fetch(`${API_URL}/sessions/${sessionId}/tool-result`, {
     method: 'POST',
@@ -275,8 +293,9 @@ export async function* streamToolResult(
       accept: 'application/x-ndjson',
     },
     body: JSON.stringify(body),
+    signal,
   });
-  yield* readNdjson(res);
+  yield* readNdjson(res, signal);
 }
 
 export function getApiUrl(): string {

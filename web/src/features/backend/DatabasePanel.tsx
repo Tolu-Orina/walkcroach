@@ -8,9 +8,14 @@ import {
 type DatabasePanelProps = {
   projectId: string;
   onScaffoldFiles: (files: Record<string, string>) => void;
+  embedded?: boolean;
 };
 
-export function DatabasePanel({ projectId, onScaffoldFiles }: DatabasePanelProps) {
+export function DatabasePanel({
+  projectId,
+  onScaffoldFiles,
+  embedded = false,
+}: DatabasePanelProps) {
   const [resources, setResources] = useState<ProjectResources | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -46,7 +51,7 @@ export function DatabasePanel({ projectId, onScaffoldFiles }: DatabasePanelProps
   };
 
   return (
-    <div className="border-t border-line px-3 py-2">
+    <div className={embedded ? 'px-4 py-3' : 'border-t border-line px-3 py-2'}>
       <p className="text-[10px] uppercase tracking-wider text-mist">Generated database</p>
       {resources?.database ? (
         <div className="mt-1 font-mono text-[10px] text-mist">

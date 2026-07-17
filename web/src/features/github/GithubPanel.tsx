@@ -10,9 +10,15 @@ type GithubPanelProps = {
   projectId: string;
   listFiles: () => Promise<Array<{ path: string; content: string }>>;
   syncNow: () => Promise<Array<{ path: string; content: string }>>;
+  embedded?: boolean;
 };
 
-export function GithubPanel({ projectId, listFiles, syncNow }: GithubPanelProps) {
+export function GithubPanel({
+  projectId,
+  listFiles,
+  syncNow,
+  embedded = false,
+}: GithubPanelProps) {
   const [repo, setRepo] = useState('');
   const [token, setToken] = useState('');
   const [connectedRepo, setConnectedRepo] = useState<string | null>(null);
@@ -82,7 +88,7 @@ export function GithubPanel({ projectId, listFiles, syncNow }: GithubPanelProps)
   };
 
   return (
-    <div className="border-t border-line px-3 py-2">
+    <div className={embedded ? 'px-4 py-3' : 'border-t border-line px-3 py-2'}>
       <p className="text-[10px] uppercase tracking-wider text-mist">GitHub</p>
       {connectedRepo ? (
         <p className="mt-0.5 font-mono text-[10px] text-mist">

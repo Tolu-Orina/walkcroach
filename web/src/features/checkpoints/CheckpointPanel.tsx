@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { ConfirmDialog } from '../../components/ConfirmDialog';
 import {
   createCheckpoint,
   exportProject,
@@ -15,6 +16,7 @@ type CheckpointPanelProps = {
   listFiles: () => Promise<ProjectFile[]>;
   applySnapshot: (files: ProjectFile[]) => Promise<void>;
   refreshKey?: number;
+  embedded?: boolean;
 };
 
 export function CheckpointPanel({
@@ -23,13 +25,15 @@ export function CheckpointPanel({
   listFiles,
   applySnapshot,
   refreshKey = 0,
+  embedded = false,
 }: CheckpointPanelProps) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(!embedded);
   const [checkpoints, setCheckpoints] = useState<CheckpointSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [revertTarget, setRevertTarget] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -69,14 +73,19 @@ export function CheckpointPanel({
     }
   };
 
-  const handleRevert = async (checkpointId: string) => {
+  const handleRevert = (checkpointId: string) => {
     if (busy) return;
-    if (!window.confirm('Revert preview to this checkpoint?')) return;
+    setRevertTarget(checkpointId);
+  };
+
+  const confirmRevert = async () => {
+    if (!revertTarget || busy) return;
     setBusy(true);
     setError(null);
     try {
-      const { files } = await revertCheckpoint(checkpointId);
+      const { files } = await revertCheckpoint(revertTarget);
       await applySnapshot(files);
+      setRevertTarget(null);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -107,73 +116,104 @@ export function CheckpointPanel({
     }
   };
 
+  const body = (
+    <div className={embedded ? 'space-y-3 px-4 py-3' : 'space-y-3 px-4 pb-3'}>
+      {error && <p className="text-[10px] text-ember">{error}</p>}
+      <div className="flex flex-wrap gap-2">
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Checkpoint name (optional)"
+          className="field min-w-0 flex-1 px-2 py-1 text-[11px]"
+          disabled={busy}
+        />
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void handleManual()}
+          className="interactive rounded-sm border border-line px-2 py-1 text-[10px] text-paper hover:border-signal/40 disabled:opacity-40"
+        >
+          Save
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void handleExport()}
+          className="btn-primary px-2 py-1 text-[10px] disabled:opacity-40"
+        >
+          Export ZIP
+        </button>
+      </div>
+      {loading && <p className="text-[10px] text-mist">Loading…</p>}
+      <ul className="max-h-28 space-y-1 overflow-y-auto">
+        {checkpoints.map((c) => (
+          <li
+            key={c.id}
+            className="flex items-start justify-between gap-2 text-[10px] text-mist"
+          >
+            <div className="min-w-0">
+              <p className="truncate text-paper">{c.name ?? c.summary}</p>
+              <p className="text-mist/70">
+                {new Date(c.createdAt).toLocaleString()}
+              </p>
+            </div>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => handleRevert(c.id)}
+              className="interactive shrink-0 text-signal hover:underline disabled:opacity-40"
+            >
+              Revert
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+
+  if (embedded) {
+    return (
+      <>
+        <div className="bg-ink/40">{body}</div>
+        <ConfirmDialog
+          open={revertTarget !== null}
+          title="Revert checkpoint?"
+          message="The preview will be restored to this saved version. Unsaved changes in the preview may be lost."
+          confirmLabel="Revert"
+          destructive
+          busy={busy}
+          onConfirm={() => void confirmRevert()}
+          onCancel={() => setRevertTarget(null)}
+        />
+      </>
+    );
+  }
+
   return (
+    <>
     <div className="border-t border-line bg-ink/40">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center justify-between px-4 py-2 text-[11px] uppercase tracking-wider text-mist hover:text-paper"
+        className="interactive flex w-full items-center justify-between px-4 py-2 text-[11px] uppercase tracking-wider text-mist hover:text-paper"
+        aria-expanded={open}
       >
         <span>Versions</span>
         <span>{open ? '−' : '+'}</span>
       </button>
-      {open && (
-        <div className="space-y-3 px-4 pb-3">
-          {error && <p className="text-[10px] text-ember">{error}</p>}
-          <div className="flex flex-wrap gap-2">
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Checkpoint name (optional)"
-              className="min-w-0 flex-1 rounded-sm border border-line bg-ink/60 px-2 py-1 text-[11px] text-paper"
-              disabled={busy}
-            />
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => void handleManual()}
-              className="rounded-sm border border-line px-2 py-1 text-[10px] text-paper hover:border-signal/40 disabled:opacity-40"
-            >
-              Save
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => void handleExport()}
-              className="rounded-sm bg-signal px-2 py-1 text-[10px] font-medium text-ink disabled:opacity-40"
-            >
-              Export ZIP
-            </button>
-          </div>
-          {loading && <p className="text-[10px] text-mist">Loading…</p>}
-          <ul className="max-h-28 space-y-1 overflow-y-auto">
-            {checkpoints.map((c) => (
-              <li
-                key={c.id}
-                className="flex items-start justify-between gap-2 text-[10px] text-mist"
-              >
-                <div className="min-w-0">
-                  <p className="truncate text-paper">
-                    {c.name ?? c.summary}
-                  </p>
-                  <p className="text-mist/70">
-                    {new Date(c.createdAt).toLocaleString()}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void handleRevert(c.id)}
-                  className="shrink-0 text-signal hover:underline disabled:opacity-40"
-                >
-                  Revert
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+      {open && body}
     </div>
+    <ConfirmDialog
+      open={revertTarget !== null}
+      title="Revert checkpoint?"
+      message="The preview will be restored to this saved version. Unsaved changes in the preview may be lost."
+      confirmLabel="Revert"
+      destructive
+      busy={busy}
+      onConfirm={() => void confirmRevert()}
+      onCancel={() => setRevertTarget(null)}
+    />
+    </>
   );
 }

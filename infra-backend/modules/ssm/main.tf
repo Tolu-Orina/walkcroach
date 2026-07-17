@@ -14,19 +14,16 @@ variable "api_url" {
 variable "cognito_user_pool_id" {
   type        = string
   description = "Cognito user pool ID for web SPA"
-  default     = ""
 }
 
 variable "cognito_client_id" {
   type        = string
   description = "Cognito app client ID for web SPA"
-  default     = ""
 }
 
-variable "cognito_hosted_domain" {
+variable "cognito_region" {
   type        = string
-  description = "Cognito hosted UI domain (no scheme)"
-  default     = ""
+  description = "AWS region of the Cognito user pool (for in-app auth API)"
 }
 
 variable "tags" {
@@ -44,7 +41,6 @@ resource "aws_ssm_parameter" "api_url" {
 }
 
 resource "aws_ssm_parameter" "cognito_user_pool_id" {
-  count       = var.cognito_user_pool_id != "" ? 1 : 0
   name        = "/${var.name_prefix}/${var.environment}/web/cognito_user_pool_id"
   description = "Cognito user pool ID for WalkCroach web SPA"
   type        = "String"
@@ -54,7 +50,6 @@ resource "aws_ssm_parameter" "cognito_user_pool_id" {
 }
 
 resource "aws_ssm_parameter" "cognito_client_id" {
-  count       = var.cognito_client_id != "" ? 1 : 0
   name        = "/${var.name_prefix}/${var.environment}/web/cognito_client_id"
   description = "Cognito app client ID for WalkCroach web SPA"
   type        = "String"
@@ -63,12 +58,11 @@ resource "aws_ssm_parameter" "cognito_client_id" {
   tags        = var.tags
 }
 
-resource "aws_ssm_parameter" "cognito_hosted_domain" {
-  count       = var.cognito_hosted_domain != "" ? 1 : 0
-  name        = "/${var.name_prefix}/${var.environment}/web/cognito_hosted_domain"
-  description = "Cognito hosted UI domain for WalkCroach web SPA"
+resource "aws_ssm_parameter" "cognito_region" {
+  name        = "/${var.name_prefix}/${var.environment}/web/cognito_region"
+  description = "Cognito user pool region for WalkCroach in-app auth"
   type        = "String"
-  value       = var.cognito_hosted_domain
+  value       = var.cognito_region
   overwrite   = true
   tags        = var.tags
 }

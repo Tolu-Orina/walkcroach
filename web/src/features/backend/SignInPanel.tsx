@@ -64,11 +64,12 @@ export function LoginForm() {
 
 type SignInPanelProps = {
   onScaffold: (files: Record<string, string>) => void;
+  embedded?: boolean;
 };
 
-export function SignInPanel({ onScaffold }: SignInPanelProps) {
+export function SignInPanel({ onScaffold, embedded = false }: SignInPanelProps) {
   return (
-    <div className="border-t border-line px-3 py-2">
+    <div className={embedded ? 'px-4 py-3' : 'border-t border-line px-3 py-2'}>
       <p className="text-[10px] uppercase tracking-wider text-mist">Sign-in scaffold</p>
       <p className="mt-0.5 text-[10px] text-mist/80">
         Adds email/password auth via project DB proxy (FR-22).

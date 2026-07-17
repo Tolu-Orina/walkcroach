@@ -6,8 +6,8 @@ output "cognito_client_id" {
   value = module.cognito.client_id
 }
 
-output "cognito_hosted_ui_domain" {
-  value = module.cognito.hosted_ui_domain
+output "cognito_region" {
+  value = module.cognito.region
 }
 
 output "api_invoke_url" {

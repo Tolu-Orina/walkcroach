@@ -155,8 +155,9 @@ Resources:
                 Resource: !Ref GitHubConnectionArn
 
   # IAM Role for CodeBuild - Terraform Operations
-  # Matched to infra-backend modules: artefacts (S3), lambda-agent (Lambda/
-  # IAM/Logs), apigw-rest, secrets (lookup), ssm, plus remote state lock.
+  # Matched to infra-backend modules: artefacts (S3), apps-hosting (S3/CF/R53/ACM/
+  # CodeBuild), cognito, lambda-agent (Lambda/IAM/Logs), apigw-rest, secrets
+  # (lookup), ssm, plus remote state lock.
   CodeBuildTerraformRole:
     Type: AWS::IAM::Role
     Properties:
@@ -223,6 +224,34 @@ Resources:
                 Resource:
                   - 'arn:aws:s3:::walkcroach-artefacts-*'
                   - 'arn:aws:s3:::walkcroach-artefacts-*/*'
+              # module.apps_hosting — walkcroach-apps-{env}
+              - Sid: AppsHostingBuckets
+                Effect: Allow
+                Action:
+                  - s3:*
+                Resource:
+                  - 'arn:aws:s3:::walkcroach-apps-*'
+                  - 'arn:aws:s3:::walkcroach-apps-*/*'
+              # module.apps_hosting — CloudFront + ACM + Route53
+              - Sid: AppsHostingEdge
+                Effect: Allow
+                Action:
+                  - cloudfront:*
+                  - route53:*
+                  - acm:*
+                Resource: '*'
+              # module.apps_hosting — app deploy CodeBuild project
+              - Sid: AppsHostingCodeBuild
+                Effect: Allow
+                Action:
+                  - codebuild:*
+                Resource: '*'
+              # module.cognito
+              - Sid: Cognito
+                Effect: Allow
+                Action:
+                  - cognito-idp:*
+                Resource: '*'
               # module.lambda_agent
               - Sid: Lambda
                 Effect: Allow
@@ -272,6 +301,10 @@ Resources:
                   - secretsmanager:GetSecretValue
                   - secretsmanager:GetResourcePolicy
                   - secretsmanager:ListSecretVersionIds
+                  - secretsmanager:CreateSecret
+                  - secretsmanager:PutSecretValue
+                  - secretsmanager:TagResource
+                  - secretsmanager:DeleteSecret
                 Resource: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:walkcroach/*'
               # module.ssm (Terraform provider also calls DescribeParameters)
               - Sid: SsmDescribeParameters

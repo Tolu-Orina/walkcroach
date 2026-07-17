@@ -6,20 +6,12 @@ variable "environment" {
   type = string
 }
 
-variable "spa_callback_urls" {
-  type        = list(string)
-  description = "OAuth redirect URIs for the web SPA"
-}
-
-variable "spa_logout_urls" {
-  type        = list(string)
-  description = "OAuth logout URIs for the web SPA"
-}
-
 variable "tags" {
   type    = map(string)
   default = {}
 }
+
+data "aws_region" "current" {}
 
 resource "aws_cognito_user_pool" "this" {
   name = "${var.name_prefix}-${var.environment}"
@@ -52,24 +44,17 @@ resource "aws_cognito_user_pool" "this" {
   tags = var.tags
 }
 
+# Public SPA client — in-app auth via USER_PASSWORD_AUTH (no Hosted UI / OAuth redirect).
 resource "aws_cognito_user_pool_client" "spa" {
   name         = "${var.name_prefix}-web-spa"
   user_pool_id = aws_cognito_user_pool.this.id
 
   generate_secret = false
 
-  allowed_oauth_flows_user_pool_client = true
-  allowed_oauth_flows                  = ["code"]
-  allowed_oauth_scopes                 = ["openid", "email", "profile"]
-
-  supported_identity_providers = ["COGNITO"]
-
-  callback_urls = var.spa_callback_urls
-  logout_urls   = var.spa_logout_urls
+  allowed_oauth_flows_user_pool_client = false
 
   explicit_auth_flows = [
     "ALLOW_REFRESH_TOKEN_AUTH",
-    "ALLOW_USER_SRP_AUTH",
     "ALLOW_USER_PASSWORD_AUTH",
   ]
 
@@ -87,11 +72,6 @@ resource "aws_cognito_user_pool_client" "spa" {
   }
 }
 
-resource "aws_cognito_user_pool_domain" "this" {
-  domain       = "${var.name_prefix}-${var.environment}"
-  user_pool_id = aws_cognito_user_pool.this.id
-}
-
 output "user_pool_id" {
   value = aws_cognito_user_pool.this.id
 }
@@ -104,12 +84,10 @@ output "client_id" {
   value = aws_cognito_user_pool_client.spa.id
 }
 
-output "hosted_ui_domain" {
-  value = "${aws_cognito_user_pool_domain.this.domain}.auth.${data.aws_region.current.region}.amazoncognito.com"
+output "region" {
+  value = data.aws_region.current.region
 }
 
 output "issuer_url" {
   value = "https://cognito-idp.${data.aws_region.current.region}.amazonaws.com/${aws_cognito_user_pool.this.id}"
 }
-
-data "aws_region" "current" {}

@@ -1,74 +1,40 @@
-import { useCallback, useEffect, useState } from 'react';
-import {
-  getDeployments,
-  triggerDeploy,
-  type DeploymentSummary,
-} from '../../api/client';
+import type { DeploymentSummary } from '../../api/client';
 
 type DeployPanelProps = {
-  projectId: string;
-  projectName: string;
-  listFiles: () => Promise<Array<{ path: string; content: string }>>;
-  syncNow: () => Promise<Array<{ path: string; content: string }>>;
+  deployments: DeploymentSummary[];
+  busy: boolean;
+  error: string | null;
+  onDeploy: () => void;
   disabled?: boolean;
+  embedded?: boolean;
+  hideButton?: boolean;
 };
 
 export function DeployPanel({
-  projectId,
-  projectName,
-  listFiles,
-  syncNow,
+  deployments,
+  busy,
+  error,
+  onDeploy,
   disabled,
+  embedded = false,
+  hideButton = false,
 }: DeployPanelProps) {
-  const [deployments, setDeployments] = useState<DeploymentSummary[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    try {
-      const rows = await getDeployments(projectId);
-      setDeployments(rows);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  }, [projectId]);
-
-  useEffect(() => {
-    void load();
-    const timer = window.setInterval(() => void load(), 8000);
-    return () => window.clearInterval(timer);
-  }, [load]);
-
-  const deploy = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const files = await syncNow();
-      const payload = files.length > 0 ? files : await listFiles();
-      await triggerDeploy(projectId, { files: payload, projectName });
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const latest = deployments[0];
 
   return (
-    <div className="border-t border-line px-3 py-2">
+    <div className={embedded ? 'px-4 py-3' : 'border-t border-line px-3 py-2'}>
       <div className="flex items-center justify-between gap-2">
         <p className="text-[10px] uppercase tracking-wider text-mist">Deploy</p>
-        <button
-          type="button"
-          disabled={disabled || busy}
-          onClick={() => void deploy()}
-          className="rounded-sm bg-signal px-2 py-1 text-[10px] font-medium text-ink disabled:opacity-40"
-        >
-          {busy ? 'Deploying…' : 'Deploy'}
-        </button>
+        {!hideButton && (
+          <button
+            type="button"
+            disabled={disabled || busy}
+            onClick={onDeploy}
+            className="btn-primary px-2 py-1 text-[10px] disabled:opacity-40"
+          >
+            {busy ? 'Deploying…' : 'Deploy'}
+          </button>
+        )}
       </div>
       <p className="mt-0.5 text-[10px] text-mist/80">
         Publishes to{' '}

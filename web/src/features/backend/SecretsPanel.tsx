@@ -3,9 +3,10 @@ import { getProjectSecrets, putProjectSecret } from '../../api/client';
 
 type SecretsPanelProps = {
   projectId: string;
+  embedded?: boolean;
 };
 
-export function SecretsPanel({ projectId }: SecretsPanelProps) {
+export function SecretsPanel({ projectId, embedded = false }: SecretsPanelProps) {
   const [keys, setKeys] = useState<Array<{ key: string; masked: string }>>([]);
   const [keyName, setKeyName] = useState('');
   const [value, setValue] = useState('');
@@ -43,7 +44,7 @@ export function SecretsPanel({ projectId }: SecretsPanelProps) {
   };
 
   return (
-    <div className="border-t border-line px-3 py-2">
+    <div className={embedded ? 'px-4 py-3' : 'border-t border-line px-3 py-2'}>
       <p className="text-[10px] uppercase tracking-wider text-mist">Secrets vault</p>
       <p className="mt-0.5 text-[10px] text-mist/80">
         Write-only — values never shown again. Used via proxy in generated apps.

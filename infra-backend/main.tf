@@ -5,15 +5,6 @@ locals {
     Environment = var.environment
   }
 
-  cognito_callback_urls = compact([
-    var.web_app_url != "" ? "${var.web_app_url}/auth/callback" : "",
-    "http://localhost:5173/auth/callback",
-  ])
-  cognito_logout_urls = compact([
-    var.web_app_url != "" ? var.web_app_url : "",
-    "http://localhost:5173/",
-  ])
-
   # Built by CI / local package step from modules/lambda-agent/codes
   lambda_zip = var.lambda_zip_path != "" ? var.lambda_zip_path : "${path.module}/modules/lambda-agent/.build/lambda.zip"
 }
@@ -48,11 +39,9 @@ module "apps_hosting" {
 module "cognito" {
   source = "./modules/cognito"
 
-  name_prefix       = local.name_prefix
-  environment       = var.environment
-  spa_callback_urls = local.cognito_callback_urls
-  spa_logout_urls   = local.cognito_logout_urls
-  tags              = local.tags
+  name_prefix = local.name_prefix
+  environment = var.environment
+  tags        = local.tags
 }
 
 module "lambda_agent" {
@@ -101,11 +90,11 @@ module "apigw" {
 module "ssm" {
   source = "./modules/ssm"
 
-  name_prefix           = local.name_prefix
-  environment           = var.environment
-  api_url               = module.apigw.invoke_url
-  cognito_user_pool_id  = module.cognito.user_pool_id
-  cognito_client_id     = module.cognito.client_id
-  cognito_hosted_domain = module.cognito.hosted_ui_domain
-  tags                  = local.tags
+  name_prefix          = local.name_prefix
+  environment          = var.environment
+  api_url              = module.apigw.invoke_url
+  cognito_user_pool_id = module.cognito.user_pool_id
+  cognito_client_id    = module.cognito.client_id
+  cognito_region       = module.cognito.region
+  tags                 = local.tags
 }

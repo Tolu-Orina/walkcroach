@@ -16,6 +16,8 @@ import {
 
 export type WcStatus = 'idle' | 'booting' | 'ready' | 'error';
 
+export type WcBootPhase = 'container' | 'mount' | 'preview' | 'ready';
+
 export function useWebContainer(
   projectId: string,
   projectName: string,
@@ -23,6 +25,7 @@ export function useWebContainer(
   onFilesMutated?: () => void,
 ) {
   const [status, setStatus] = useState<WcStatus>('idle');
+  const [bootPhase, setBootPhase] = useState<WcBootPhase>('container');
   const [error, setError] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
@@ -54,6 +57,7 @@ export function useWebContainer(
   useEffect(() => {
     let cancelled = false;
     setStatus('booting');
+    setBootPhase('container');
     setError(null);
     setPreviewUrl(null);
 
@@ -68,7 +72,9 @@ export function useWebContainer(
         if (cancelled) return;
         wcRef.current = wc;
 
+        setBootPhase('mount');
         await mountProjectWorkspace(wc, projectId, projectName, templateId);
+        setBootPhase('preview');
         await startPreview(
           wc,
           (url) => {
@@ -79,7 +85,10 @@ export function useWebContainer(
           },
         );
 
-        if (!cancelled) setStatus('ready');
+        if (!cancelled) {
+          setBootPhase('ready');
+          setStatus('ready');
+        }
       } catch (err) {
         if (!cancelled) {
           setStatus('error');
@@ -149,6 +158,7 @@ export function useWebContainer(
 
   return {
     status,
+    bootPhase,
     error,
     previewUrl,
     logs,

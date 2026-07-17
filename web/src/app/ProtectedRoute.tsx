@@ -1,5 +1,7 @@
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
+import { loadStoredAuth } from '../auth/storage';
 import { useAuth } from '../auth/useAuth';
+import { LoadingScreen } from '../components/LoadingScreen';
 
 type ProtectedRouteProps = {
   children: React.ReactNode;
@@ -11,19 +13,19 @@ export function ProtectedRoute({
   requireSignedIn = false,
 }: ProtectedRouteProps) {
   const { status } = useAuth();
+  const location = useLocation();
 
   if (status === 'loading') {
-    return (
-      <div className="grid h-full place-items-center text-sm text-mist">Loading…</div>
-    );
+    return <LoadingScreen />;
   }
 
   if (requireSignedIn && status !== 'authenticated') {
-    return <Navigate to="/" replace />;
+    const next = encodeURIComponent(location.pathname + location.search);
+    return <Navigate to={`/signin?next=${next}`} replace />;
   }
 
-  if (!requireSignedIn && status === 'anonymous' && !localStorage.getItem('walkcroach.auth.v1')) {
-    return <Navigate to="/" replace />;
+  if (!requireSignedIn && status === 'anonymous' && !loadStoredAuth()) {
+    return <Navigate to="/signin" replace />;
   }
 
   return <>{children}</>;

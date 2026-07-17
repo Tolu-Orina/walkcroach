@@ -8,6 +8,9 @@ import {
 } from '../api/client';
 import type { ProjectSummary } from '../api/types';
 import { useAuth } from '../auth/useAuth';
+import { AppShell } from '../components/AppShell';
+import { ConfirmDialog } from '../components/ConfirmDialog';
+import { ProjectCardSkeleton } from '../components/Skeleton';
 import { TemplateGallery } from '../features/onboarding/TemplateGallery';
 
 function statusLabel(status: string): string {
@@ -35,10 +38,13 @@ function ProjectCard({
   onDelete: (id: string) => void;
 }) {
   return (
-    <div className="rounded-sm border border-line bg-panel/50 p-4 transition hover:border-signal/40 hover:bg-panel/80">
+    <div className="interactive rounded-sm border border-line bg-panel/50 p-4 transition hover:border-signal/40 hover:bg-panel/80">
       <div className="flex items-start justify-between gap-3">
-        <Link to={`/project/${project.id}`} className="min-w-0 flex-1">
-          <h2 className="font-display text-lg font-bold text-paper">{project.name}</h2>
+        <Link
+          to={`/project/${project.id}`}
+          className="interactive min-w-0 flex-1 font-display text-lg font-bold text-paper hover:text-signal"
+        >
+          {project.name}
         </Link>
         <span className="shrink-0 rounded-sm border border-line px-2 py-0.5 text-[10px] uppercase tracking-wider text-mist">
           {statusLabel(project.status)}
@@ -57,14 +63,14 @@ function ProjectCard({
           <button
             type="button"
             onClick={() => onArchive(project.id)}
-            className="text-mist hover:text-paper"
+            className="interactive min-h-8 px-2 text-mist hover:text-paper"
           >
             Archive
           </button>
           <button
             type="button"
             onClick={() => onDelete(project.id)}
-            className="text-ember/90 hover:text-ember"
+            className="interactive min-h-8 px-2 text-ember/90 hover:text-ember"
           >
             Delete
           </button>
@@ -75,13 +81,15 @@ function ProjectCard({
 }
 
 export function DashboardPage() {
-  const { user, signOut } = useAuth();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [galleryOpen, setGalleryOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -125,80 +133,102 @@ export function DashboardPage() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!window.confirm('Delete this project? This cannot be undone.')) return;
+    setDeleteTarget(id);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleteBusy(true);
     setError(null);
     try {
-      await deleteProject(id);
+      await deleteProject(deleteTarget);
+      setDeleteTarget(null);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDeleteBusy(false);
     }
   };
 
   return (
-    <div className="mx-auto flex h-full max-w-5xl flex-col px-6 py-8">
-      <header className="flex flex-wrap items-end justify-between gap-4 border-b border-line pb-6">
-        <div>
+    <AppShell>
+      <div className="flex h-full min-h-0 flex-col px-4 py-8 sm:px-6">
+        <header className="border-b border-line pb-6">
           <p className="text-[11px] uppercase tracking-[0.2em] text-signal">Dashboard</p>
-          <h1 className="mt-2 font-display text-3xl font-extrabold text-paper">
-            Your projects
-          </h1>
-          <p className="mt-1 text-sm text-mist">
-            {user?.displayName ?? 'Builder'} · memory persists across sessions
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => setGalleryOpen(true)}
-            disabled={creating}
-            className="rounded-sm bg-signal px-4 py-2 text-xs font-medium uppercase tracking-wide text-ink disabled:opacity-50"
-          >
-            {creating ? 'Creating…' : 'New project'}
-          </button>
-          <button
-            type="button"
-            onClick={signOut}
-            className="text-[11px] text-mist underline-offset-2 hover:text-paper hover:underline"
-          >
-            Sign out
-          </button>
-        </div>
-      </header>
-
-      <div className="min-h-0 flex-1 overflow-y-auto py-6">
-        {loading && <p className="text-sm text-mist">Loading projects…</p>}
-        {error && <p className="text-sm text-ember">{error}</p>}
-        {!loading && !error && projects.length === 0 && (
-          <div className="rounded-sm border border-dashed border-line px-6 py-12 text-center">
-            <p className="text-sm text-mist">No projects yet.</p>
+          <div className="mt-2 flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <h1 className="font-display text-3xl font-extrabold text-paper">
+                Your projects
+              </h1>
+              <p className="mt-1 text-sm text-mist">
+                {user?.displayName ?? 'Builder'} · memory persists across sessions
+              </p>
+            </div>
             <button
               type="button"
               onClick={() => setGalleryOpen(true)}
-              className="mt-4 text-sm text-signal underline-offset-2 hover:underline"
+              disabled={creating}
+              className="btn-primary text-xs"
             >
-              Create your first project
+              {creating ? 'Creating…' : 'New project'}
             </button>
           </div>
-        )}
-        <div className="grid gap-4 sm:grid-cols-2">
-          {projects.map((p) => (
-            <ProjectCard
-              key={p.id}
-              project={p}
-              onArchive={(id) => void handleArchive(id)}
-              onDelete={(id) => void handleDelete(id)}
-            />
-          ))}
-        </div>
-      </div>
+        </header>
 
-      <TemplateGallery
-        open={galleryOpen}
-        onClose={() => setGalleryOpen(false)}
-        onSelect={(templateId, name) => void handleCreate(templateId, name)}
-        creating={creating}
-      />
-    </div>
+        <div className="min-h-0 flex-1 overflow-y-auto py-6">
+          {loading && (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <ProjectCardSkeleton />
+              <ProjectCardSkeleton />
+              <ProjectCardSkeleton />
+              <ProjectCardSkeleton />
+            </div>
+          )}
+          {error && <p className="text-sm text-ember">{error}</p>}
+          {!loading && !error && projects.length === 0 && (
+            <div className="rounded-sm border border-dashed border-line px-6 py-12 text-center">
+              <p className="text-sm text-mist">No projects yet.</p>
+              <button
+                type="button"
+                onClick={() => setGalleryOpen(true)}
+                className="interactive mt-4 text-sm text-signal underline-offset-2 hover:underline"
+              >
+                Create your first project
+              </button>
+            </div>
+          )}
+          {!loading && (
+            <div className="grid gap-4 sm:grid-cols-2">
+              {projects.map((p) => (
+                <ProjectCard
+                  key={p.id}
+                  project={p}
+                  onArchive={(id) => void handleArchive(id)}
+                  onDelete={(id) => void handleDelete(id)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+
+        <TemplateGallery
+          open={galleryOpen}
+          onClose={() => setGalleryOpen(false)}
+          onSelect={(templateId, name) => void handleCreate(templateId, name)}
+          creating={creating}
+        />
+        <ConfirmDialog
+          open={deleteTarget !== null}
+          title="Delete project?"
+          message="This permanently removes the project and cannot be undone."
+          confirmLabel="Delete"
+          destructive
+          busy={deleteBusy}
+          onConfirm={() => void confirmDelete()}
+          onCancel={() => setDeleteTarget(null)}
+        />
+      </div>
+    </AppShell>
   );
 }

@@ -59,13 +59,13 @@ phases:
 
         COGNITO_POOL=$(read_ssm "/walkcroach/${ENV}/web/cognito_user_pool_id")
         COGNITO_CLIENT=$(read_ssm "/walkcroach/${ENV}/web/cognito_client_id")
-        COGNITO_DOMAIN=$(read_ssm "/walkcroach/${ENV}/web/cognito_hosted_domain")
+        COGNITO_REGION=$(read_ssm "/walkcroach/${ENV}/web/cognito_region")
 
         if [ -n "$COGNITO_CLIENT" ] && [ "$COGNITO_CLIENT" != "None" ]; then
           echo "VITE_COGNITO_CLIENT_ID=${COGNITO_CLIENT}" >> web/.env.production
         fi
-        if [ -n "$COGNITO_DOMAIN" ] && [ "$COGNITO_DOMAIN" != "None" ]; then
-          echo "VITE_COGNITO_HOSTED_DOMAIN=${COGNITO_DOMAIN}" >> web/.env.production
+        if [ -n "$COGNITO_REGION" ] && [ "$COGNITO_REGION" != "None" ]; then
+          echo "VITE_COGNITO_REGION=${COGNITO_REGION}" >> web/.env.production
         fi
         if [ "$ENV" = "prod" ]; then
           echo "VITE_ALLOW_DEV_AUTH=false" >> web/.env.production

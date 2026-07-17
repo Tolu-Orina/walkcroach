@@ -3,6 +3,7 @@
 @theme {
   --font-display: "Syne", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --font-sans: "Syne", ui-sans-serif, system-ui, sans-serif;
   --color-ink: #0c1210;
   --color-panel: #141c18;
   --color-line: #24302a;
@@ -31,4 +32,69 @@ body {
 
 ::selection {
   background: color-mix(in oklab, var(--color-signal) 40%, transparent);
+}
+
+/* Phase A: keyboard focus + shared control styles */
+@utility interactive {
+  &:focus {
+    outline: none;
+  }
+
+  &:focus-visible {
+    outline: 2px solid color-mix(in oklab, var(--color-signal) 75%, white);
+    outline-offset: 2px;
+  }
+}
+
+.btn-primary {
+  @apply interactive rounded-sm bg-signal px-4 py-2 font-medium text-ink transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50;
+}
+
+.btn-secondary {
+  @apply interactive rounded-sm border border-line px-4 py-2 text-paper transition hover:border-signal/40 disabled:cursor-not-allowed disabled:opacity-50;
+}
+
+.btn-ghost {
+  @apply interactive rounded-sm px-2 py-1 text-mist transition hover:text-paper disabled:cursor-not-allowed disabled:opacity-50;
+}
+
+.field {
+  @apply interactive w-full rounded-sm border border-line bg-ink/60 px-3 py-2 text-sm text-paper placeholder:text-mist/60 focus:border-signal/50;
+}
+
+.prose-marketing {
+  font-family: var(--font-sans);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Phase D: optional light theme */
+html[data-theme='light'] {
+  color-scheme: light;
+  --color-ink: #eef3ef;
+  --color-panel: #ffffff;
+  --color-line: #c8d6cc;
+  --color-mist: #4f6358;
+  --color-paper: #0c1210;
+  --color-signal: #6a9e00;
+  --color-ember: #c2410c;
+}
+
+html[data-theme='light'] body {
+  background:
+    radial-gradient(1200px 600px at 10% -10%, #d8eadf 0%, transparent 55%),
+    radial-gradient(900px 500px at 100% 0%, #e2ebe5 0%, transparent 50%),
+    var(--color-ink);
+}
+
+html[data-theme='light'] .btn-primary {
+  @apply text-paper;
 }

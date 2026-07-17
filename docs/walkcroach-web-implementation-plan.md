@@ -5,15 +5,15 @@
 **Live product:** https://walkcroach.conquerorfoundation.com  
 **Deployed apps:** `https://{slug}.walkcroach.conquerorfoundation.com`  
 **Timeline:** July 17 → August 18, 2026 (~32 days)  
-**Version:** 1.2 — July 17, 2026 (Phases 1–3 + Cognito/JWT hardening implemented; pending prod GitOps deploy)
+**Version:** 1.3 — July 17, 2026 (Phases 1–3 + production hardening in code; pending prod GitOps deploy + verification)
 
 ---
 
 ## 1. Executive summary
 
-WalkCroach Web has a **working product core**: Bedrock Nova streaming agent, CockroachDB memory, WebContainer preview, prod builder on Lambda + CloudFront, checkpoints, generated-app backend (secrets + DB proxy), visual editing, one-click deploy, GitHub sync, and usage metering. That is roughly **70–80% of the PRD surface area** (Phases 1–3 implemented; Phase 4 + production hardening remain).
+WalkCroach Web has a **working product core**: Bedrock Nova streaming agent, CockroachDB memory, WebContainer preview, prod builder on Lambda + CloudFront, checkpoints, generated-app backend (secrets + DB proxy), visual editing, one-click deploy, GitHub App sync, Cognito auth, usage metering, and CI test gates. That is roughly **~80% of the PRD surface area** (Phases 1–3 + hardening implemented in code; Phase 4 polish and prod verification remain).
 
-The remaining work is **submission polish, breadth features, and production verification**: prod Cognito sign-up flow, Stripe billing, custom domains, E2E smoke tests, demo video, and Phase 4 items (share link, social auth, annotation).
+The remaining work is **submission polish and production verification**: prod deploy of latest code, Cognito/GitHub App end-to-end checks, Stripe billing, E2E smoke tests, demo video, and Phase 4 items (share link, social auth, annotation).
 
 This plan sequences that work across **four phases** aligned with the PRD, with concrete engineering tasks, schema/API changes, infra additions, and exit criteria. It assumes:
 
@@ -37,8 +37,9 @@ This plan sequences that work across **four phases** aligned with the PRD, with 
 | Deploy / export | **Good** | CodeBuild → S3 → CloudFront; `*.walkcroach.conquerorfoundation.com` |
 | Billing | **Early** | Credit meter + ledger; Stripe not integrated |
 | Visual editing | **Good** | Element picker, inline edit, scoped prompt |
-| GitHub | **Good** | GitHub App OAuth + installation tokens; PAT fallback in dev |
-| **Overall PRD** | **~70–80%** | Phase 4 + auth/billing hardening remain |
+| GitHub | **Good** | GitHub App install OAuth; installation tokens (SSM-backed); PAT fallback dev-only |
+| Testing / CI | **Good** | 42 Vitest tests + NFR-13 bundle scan in `buildspec-test.yml` |
+| **Overall PRD** | **~80%** | Phase 4 + Stripe + prod E2E remain |
 
 ---
 
@@ -128,17 +129,17 @@ This is the PRD's largest new trust boundary (FR-18–21).
 
 ### 3.2 What we add
 
-| Layer | Addition | Phase |
-|-------|----------|-------|
-| **Web app structure** | React Router, layout shells, feature folders | 1 |
-| **Auth** | Cognito User Pool (or Clerk if speed > AWS-native) | 1 (basic) / 3 (OAuth) |
-| **File durability** | `project_files` snapshots + S3 blobs | 1 |
-| **Checkpoints** | `checkpoints` table + revert API | 1 |
-| **Secrets proxy** | New Lambda routes + IAM | 2 |
-| **App DB provisioner** | Admin automation against Cockroach Cloud | 2 |
-| **Deploy worker** | Lambda: zip WC tree → build → S3 → CF invalidation | 3 |
-| **Billing** | Stripe + `usage_ledger` in CRDB | 3 |
-| **GitHub App** | OAuth + push Lambda | 3–4 |
+| Layer | Addition | Phase | Status |
+|-------|----------|-------|--------|
+| **Web app structure** | React Router, layout shells, feature folders | 1 | ✅ |
+| **Auth** | Cognito User Pool (Hosted UI + PKCE) | 1 / hardening | ✅ |
+| **File durability** | `project_files` snapshots + S3 blobs | 1 | ✅ |
+| **Checkpoints** | `checkpoints` table + revert API | 1 | ✅ |
+| **Secrets proxy** | New Lambda routes + IAM | 2 | ✅ |
+| **App DB provisioner** | Admin automation against Cockroach Cloud | 2 | ✅ |
+| **Deploy worker** | Lambda: zip WC tree → build → S3 → CF invalidation | 3 | ✅ |
+| **Billing** | Stripe + `usage_ledger` in CRDB | 3 | ⏳ counter-only |
+| **GitHub App** | Install OAuth + push Lambda | 3 | ✅ |
 
 ### 3.3 Recommended web app restructure (Phase 1, week 1)
 
@@ -278,7 +279,8 @@ CREATE VECTOR INDEX IF NOT EXISTS memory_entries_embedding_idx
 | GET/POST | `/projects/:id/inline-edit/*` | ✅ |
 | POST | `/projects/:id/deploy` | ✅ |
 | GET | `/projects/:id/deployments` | ✅ |
-| GET/POST | `/projects/:id/github/*` | ✅ (PAT MVP) |
+| GET/POST | `/projects/:id/github/*` | ✅ GitHub App + PAT (dev) |
+| POST | `/github/callback` | ✅ GitHub App install completion |
 | GET | `/me/usage` | ✅ |
 | POST | `/webhooks/stripe` | ⏳ not implemented |
 
@@ -329,7 +331,8 @@ CREATE VECTOR INDEX IF NOT EXISTS memory_entries_embedding_idx
 |--------|-------|---------|
 | POST | `/projects/:id/deploy` | Trigger deploy |
 | GET | `/projects/:id/deployments` | History |
-| POST | `/projects/:id/github/connect` | OAuth handoff |
+| POST | `/projects/:id/github/connect` | Returns `installUrl` (App) or accepts PAT (dev) |
+| POST | `/github/callback` | Completes App install (`installation_id` + state) |
 | POST | `/projects/:id/github/push` | FR-25 |
 | GET | `/me/usage` | Credit balance |
 | POST | `/webhooks/stripe` | Billing events |
@@ -495,7 +498,7 @@ Dedicated review against NFR-13/14:
 ## 8. Phase 3 — Ownership, deploy, billing ✅ **IMPLEMENTED** (partial billing)
 
 **Dates:** Aug 6 → Aug 12, 2026 (~7 days)  
-**Status:** Code complete; migration `005_phase3.sql` applied locally. Infra module `apps-hosting` added to `infra-backend`. Pending prod Terraform apply (wildcard cert + CodeBuild).  
+**Status:** Code complete; migrations `005_phase3.sql`, `006_github_app.sql` applied locally. GitHub App OAuth + Cognito hardening in code. Pending prod Terraform apply + GitOps deploy.  
 **Theme:** Ship it and meter it.  
 **PRD:** FR-22, FR-25, FR-27–28, FR-35–36
 
@@ -519,8 +522,8 @@ Dedicated review against NFR-13/14:
 
 | Task | Detail | Status |
 |------|--------|--------|
-| P3.8 | GitHub App registration | ✅ manual — SSM parameters |
-| P3.9 | OAuth connect flow; store installation token in SM | ✅ installation_id in CRDB + short-lived tokens |
+| P3.8 | GitHub App registration + SSM params | ✅ manual in Parameter Store |
+| P3.9 | OAuth install flow; `github_installation_id` in CRDB | ✅ short-lived tokens minted in Lambda |
 | P3.10 | Manual "Sync to GitHub" | ✅ |
 | P3.11 | Commit message from checkpoint summary | ⏳ uses fixed "WalkCroach sync" |
 
@@ -550,7 +553,7 @@ Dedicated review against NFR-13/14:
 
 - [ ] Deploy → public `https://{slug}.walkcroach.conquerorfoundation.com` loads built app (verify after prod apply)
 - [x] Deployment history visible; failed deploy doesn't take down previous (`staging/` → `live/` promotion)
-- [x] GitHub push updates repo with current files (PAT MVP)
+- [x] GitHub push updates repo with current files (GitHub App or dev PAT)
 - [x] Credit meter visible; free tier enforced (100 credits/mo default)
 - [ ] Deploy p50 < 90s measured in prod (NFR-05)
 
@@ -590,12 +593,14 @@ Dedicated review against NFR-13/14:
 
 | Layer | Approach | When | Status |
 |-------|----------|------|--------|
-| Harness | Existing smoke scripts + plan approval unit tests | Phase 1 | Partial — `tools.test.ts`, `memory.test.ts`; smoke scripts manual |
-| API | Supertest against `local-server.ts` | Phase 1 | ✅ `local-api.integration.test.ts` (auth gate); `local-api.db.integration.test.ts` (CRDB) |
-| Web | Vitest + RTL for dashboard, plan approval | Phase 1 | Partial — `scaffold.test.ts`, secret-scan unit tests |
+| Harness | Existing smoke scripts + unit tests | Phase 1 | ✅ `tools.test.ts`, `memory.test.ts` (7) |
+| API | Supertest against `local-app.ts` | Phase 1 | ✅ 17 integration tests (9 auth-only + 8 CRDB-gated) |
+| Web | Vitest unit tests | Phase 1 | ✅ `scaffold.test.ts`, `secret-bundle-scan.test.mjs` (8) |
 | E2E | Playwright against prod (scheduled) | Phase 3–4 | ⏳ deferred (`buildspec-e2e.yml` stub) |
-| Security | Secret leak scan on export bundle | Phase 2 | ✅ `scan:secrets` + `secret-bundle-scan.test.mjs` |
-| Auth | Vitest for `resolveAuth` / Cognito JWT | Hardening | ✅ `auth.test.ts` |
+| Security | NFR-13 secret leak scan | Phase 2 | ✅ `npm run scan:secrets` in `web/buildspec-test.yml` |
+| Auth | Cognito JWT + GitHub App JWT | Hardening | ✅ `auth.test.ts`, `github-oauth.test.ts` |
+
+**CI commands (local):** `cd infra-backend && npm test` (34 tests) · `cd web && npm test && npm run scan:secrets` (8 + bundle gate)
 
 ### 10.2 Observability (NFR-24–26)
 
@@ -622,7 +627,9 @@ Dedicated review against NFR-13/14:
 | Vector index commented out | Enable in migration 003 | ✅ (may fail on some CRDB clusters) |
 | DB connection per request | Consider `pg` pool singleton in Lambda | ⏳ |
 | `previewStarted` global | Per-project WC instance map | ✅ (`mountProjectWorkspace` remount key) |
-| Cognito / JWT auth | Replace dev tokens in prod | ✅ implemented; verify after prod deploy |
+| Cognito / JWT auth | Replace dev tokens in prod | ✅ code done; verify after prod deploy |
+| GitHub App OAuth | Replace PAT in prod | ✅ code done; SSM params in place |
+| NFR-13 CI scan | Generated-app bundle grep | ✅ `web/scripts/nfr13-secret-leak-scan.mjs` |
 
 ---
 
@@ -676,17 +683,31 @@ Inherited from PRD §10 — **do not cut unless a phase exit bar is missed:**
 
 ## 14. Immediate next actions (post Phase 3)
 
-### A. Ship Phases 1–3 + Cognito to production (do first)
+### A. Ship to production (do first)
 
 1. **Commit + push** `infra-backend/**` and `web/**` through GitOps pipelines.
-2. **Run migrations `002`–`005`** against prod CRDB if not already applied there.
-3. **Terraform apply** `infra-backend` prod — creates Cognito User Pool, `apps-hosting`, API GW JWT authorizer + `{proxy+}` catch-all. Allow 5–15 min for cert validation.
-4. **Verify in prod:**
+2. **Migrations `001`–`006`** — applied on shared CRDB (including `006_github_app.sql` for GitHub App OAuth). Re-run `npm run migrate` only when new migration files are added.
+3. **Terraform apply** `infra-backend` prod — Cognito, `apps-hosting`, API GW JWT authorizer, Lambda SSM IAM for GitHub App. Allow 5–15 min for cert validation.
+4. **Verify GitHub App** callback URL on the app: `https://walkcroach.conquerorfoundation.com/auth/github/callback`
+5. **Verify in prod:**
    - Sign up / sign in via Cognito Hosted UI → dashboard → builder
    - API calls succeed with Cognito access token (no `dev:*` tokens)
    - Template → preview → Deploy → `https://{slug}.walkcroach.conquerorfoundation.com`
    - Credit meter decrements on agent turn / deploy
-   - GitHub sync with PAT
+   - GitHub: Connect with GitHub → install app → Sync to GitHub
+
+**Note:** In prod, `projects.owner_id` is the Cognito `sub`. Projects created with `dev:*` tokens before cutover will not appear on the signed-in user's dashboard.
+
+### A.1 GitHub App SSM parameters (manual, prod)
+
+| SSM path | Type | Purpose |
+|----------|------|---------|
+| `/walkcroach/prod/github/app_id` | String | App JWT `iss` |
+| `/walkcroach/prod/github/client_id` | String | App client ID |
+| `/walkcroach/prod/github/app_slug` | String | Install URL + `VITE_GITHUB_APP_ENABLED` |
+| `/walkcroach/prod/github/app_private_key` | SecureString (KMS) | RS256 signing PEM |
+
+Lambda reads via `GITHUB_SSM_PREFIX` (default `/walkcroach/{env}/github`). Prod: `allow_github_pat = false`.
 
 ### B. Phase 4 — submission polish (Aug 13–18)
 
@@ -696,31 +717,34 @@ Inherited from PRD §10 — **do not cut unless a phase exit bar is missed:**
 4. **Share link** (view-only preview URL) — high demo value, low effort  
 5. **Custom domain** on deployed project (FR-29) — if deploy stable  
 
-### C. Hardening (parallel or post-hackathon)
+### C. Hardening (remaining)
 
-| Item | Priority |
-|------|----------|
-| Cognito prod verification (first user sign-up, token refresh, sign-out) | High — code done |
-| Stripe billing (P3.15, P3.19) | Medium — counter-only works for demo |
-| GitHub App OAuth (replace PAT) | Medium |
-| NFR-13 secret leak scan in CI | Medium | ✅ wired in `web/buildspec-test.yml` |
-| Session cookies via proxy domain (P3.14) | Low |
-| Two-way GitHub sync (FR-26) | Low — descope if time slips |
+| Item | Priority | Status |
+|------|----------|--------|
+| Cognito prod verification | High | ⏳ code done |
+| GitHub App prod verification | High | ⏳ SSM done; verify install + push |
+| Stripe billing (P3.15, P3.19) | Medium | ⏳ counter-only works for demo |
+| Prod E2E smoke test (NFR-26) | Medium | ⏳ |
+| RTL component tests | Low | ⏳ |
+| Session cookies via proxy domain (P3.14) | Low | ⏳ |
+| Two-way GitHub sync (FR-26) | Low | descope if time slips |
 
 ---
 
 ## 14.1 Completed work log (July 17, 2026)
 
-| Phase | Migrations | Key deliverables |
+| Track | Migrations | Key deliverables |
 |-------|------------|------------------|
 | **1** | `002_product.sql`, `003_checkpoints.sql` | Router, dashboard, 8 templates, plan approval, checkpoints, ZIP export, file sync |
 | **2** | `004_phase2.sql` | Visual editor, secrets vault, DB provision, SQL/HTTP proxy, `wc-bridge` |
-| **3** | `005_phase3.sql` | `apps-hosting` infra, CodeBuild deploy, GitHub PAT push, usage meter, sign-in scaffold |
-| **Auth** | — | Cognito User Pool + SPA client, SSM params, Lambda `aws-jwt-verify`, API GW JWT authorizer, web PKCE + `/auth/callback`, buildspec env wiring |
-| **Security** | — | NFR-13 generated-app bundle secret-leak scan (`scan:secrets` in unit-test CI) |
-| **Tests** | — | Vitest: 41 tests (auth, API supertest, secrets/proxy, harness, scaffold, NFR-13) |
+| **3** | `005_phase3.sql` | `apps-hosting` infra, CodeBuild deploy, usage meter, sign-in scaffold |
+| **Auth** | — | Cognito User Pool + SPA client, SSM, Lambda `aws-jwt-verify`, API GW JWT authorizer, web PKCE `/auth/callback` |
+| **GitHub** | `006_github_app.sql` | App install OAuth, `/github/callback`, installation tokens, SSM PEM, web `/auth/github/callback` |
+| **Security** | — | NFR-13 bundle scan (`scan:secrets` in unit-test CI) |
+| **Tests** | — | Vitest: 42 tests (harness, auth, API supertest, secrets/proxy, scaffold, oauth state, NFR-13 patterns) |
+| **Infra hygiene** | — | `tflint` clean on `apps-hosting` + `cognito` `versions.tf` |
 
-**Migrations applied locally:** 001–005. **Not committed** unless user requests git commit.
+**Migrations:** `001`–`006` applied on shared CRDB cluster (single `CRDB_CONNECTION_STRING`). Re-run migrate when adding `007+`.
 
 ---
 
