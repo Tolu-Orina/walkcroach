@@ -22,6 +22,31 @@ phases:
           prod) export KEY="backend/prod/terraform.tfstate" ;;
           *) echo "Unknown TF_VAR_environment=${TF_VAR_environment}"; exit 1 ;;
         esac
+      - |
+        # tfplan is in the secondary InputArtifact (TerraformPlanOutput*), not Source
+        PLAN_DIR=""
+        for candidate in \
+          "${CODEBUILD_SRC_DIR_TerraformPlanOutputProd:-}" \
+          "${CODEBUILD_SRC_DIR_TerraformPlanOutputTest:-}" \
+          "${CODEBUILD_SRC_DIR_TerraformPlanOutputDev:-}"; do
+          if [ -n "$candidate" ] && [ -f "${candidate}/infra-backend/tfplan" ]; then
+            PLAN_DIR="$candidate"
+            break
+          fi
+        done
+        if [ -z "$PLAN_DIR" ]; then
+          echo "ERROR: infra-backend/tfplan not found in any TerraformPlanOutput* artifact"
+          env | grep '^CODEBUILD_SRC_DIR' || true
+          exit 1
+        fi
+        mkdir -p "${CODEBUILD_SRC_DIR}/infra-backend/modules/lambda-agent/.build"
+        cp "${PLAN_DIR}/infra-backend/tfplan" "${CODEBUILD_SRC_DIR}/infra-backend/tfplan"
+        # Lambda zip is produced during plan and referenced by TF; keep it next to the plan
+        if [ -f "${PLAN_DIR}/infra-backend/modules/lambda-agent/.build/lambda.zip" ]; then
+          cp "${PLAN_DIR}/infra-backend/modules/lambda-agent/.build/lambda.zip" \
+            "${CODEBUILD_SRC_DIR}/infra-backend/modules/lambda-agent/.build/lambda.zip"
+        fi
+        echo "Copied tfplan (and lambda.zip if present) from ${PLAN_DIR}"
   build:
     commands:
       - cd infra-backend

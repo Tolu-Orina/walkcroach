@@ -8,12 +8,6 @@ terraform {
     }
   }
 
-  # Uncomment after creating the state bucket (once per account):
-  # backend "s3" {
-  #   bucket         = "walkcroach-tf-state"
-  #   key            = "web/dev/terraform.tfstate"
-  #   region         = "eu-west-2"
-  #   encrypt        = true
-  #   dynamodb_table = "walkcroach-tf-lock"
-  # }
+  # Partial backend — bucket/key/region/lock filled via -backend-config in CI
+  backend "s3" {}
 }

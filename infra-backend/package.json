@@ -11,7 +11,7 @@
     "build": "npm run build -w @walkcroach/db && npm run build -w @walkcroach/agent-harness && npm run build -w @walkcroach/backend",
     "build:packages": "npm run build -w @walkcroach/db && npm run build -w @walkcroach/agent-harness",
     "dev": "npm run dev -w @walkcroach/backend",
-    "typecheck": "npm run typecheck --workspaces --if-present",
+    "typecheck": "npm run build:packages && npm run typecheck --workspaces --if-present",
     "smoke:memory": "npm run smoke:memory -w @walkcroach/agent-harness",
     "smoke:loop": "npm run smoke:loop -w @walkcroach/agent-harness",
     "local:demo": "npm run local:demo -w @walkcroach/agent-harness",

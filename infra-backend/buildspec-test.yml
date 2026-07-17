@@ -13,6 +13,7 @@ phases:
     commands:
       - cd infra-backend
       - npm ci
+      # Root typecheck builds packages (dist/) then runs tsc in each workspace
       - npm run typecheck
 artifacts:
   files:
