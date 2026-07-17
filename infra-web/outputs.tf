@@ -18,3 +18,8 @@ output "cloudfront_url" {
 output "app_domain" {
   value = var.domain_name != "" ? var.domain_name : module.cloudfront.domain_name
 }
+
+output "api_url" {
+  description = "Backend API URL (from SSM, set by infra-backend deploy)"
+  value       = data.aws_ssm_parameter.backend_api_url.value
+}

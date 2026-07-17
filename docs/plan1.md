@@ -409,7 +409,7 @@ Each phase has **exit criteria**. Do not start the next phase until the previous
 |---|------|-------|
 | 2.1 | Lambda handlers wrapping harness (`prompt`, `toolResult`, `api`) | ✅ `streamifyResponse` router in `modules/lambda-agent/codes` |
 | 2.2 | `infra-backend` Terraform modules | ✅ baseline: API GW REST, Lambda, Secrets, SSM, IAM, logs |
-| 2.3 | Streaming integration URI | ✅ all routes use `response-streaming-invocations` + `STREAM` |
+| 2.3 | Streaming integration URI | ✅ `2021-11-15/functions/{lambdaArn}/response-streaming-invocations` + `STREAM` |
 | 2.4 | Package Lambda zip from monorepo build | ✅ `npm run package:lambda` → `.build/lambda.zip` |
 | 2.5 | Wire Secrets Manager → CRDB + Bedrock region | ✅ runtime load; put real secret values in console |
 | 2.6 | Deploy to **dev** (manual TF apply OK before pipeline) | Get `api_url` in SSM |

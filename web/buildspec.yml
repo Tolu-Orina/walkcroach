@@ -20,11 +20,36 @@ phases:
         fi
         export ENVIRONMENT="$ENV"
         echo "ENVIRONMENT=${ENVIRONMENT}"
-        API_URL=$(aws ssm get-parameter --name "/walkcroach/${ENV}/web/api_url" --query 'Parameter.Value' --output text)
+
+        # Prefer api_url from frontend Terraform deploy artifact (reads backend SSM at TF apply)
+        API_URL=""
+        for candidate in \
+          "${CODEBUILD_SRC_DIR_TerraformDeployOutputProd:-}" \
+          "${CODEBUILD_SRC_DIR_TerraformDeployOutputTest:-}" \
+          "${CODEBUILD_SRC_DIR_TerraformDeployOutputDev:-}"; do
+          if [ -n "$candidate" ] && [ -f "${candidate}/terraform-web-outputs.json" ]; then
+            API_URL=$(node -e "const j=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'));process.stdout.write(j.api_url?.value||'');" \
+              "${candidate}/terraform-web-outputs.json")
+            if [ -n "$API_URL" ]; then
+              echo "API_URL from terraform-web-outputs.json"
+              break
+            fi
+          fi
+        done
+
+        if [ -z "$API_URL" ]; then
+          echo "API_URL not in deploy artifact; reading SSM /walkcroach/${ENV}/web/api_url"
+          API_URL=$(aws ssm get-parameter --name "/walkcroach/${ENV}/web/api_url" --query 'Parameter.Value' --output text 2>/dev/null) || API_URL=""
+        fi
+
         if [ -z "$API_URL" ] || [ "$API_URL" = "None" ]; then
-          echo "ERROR: SSM /walkcroach/${ENV}/web/api_url is empty"
+          echo "ERROR: Backend API URL not found."
+          echo "  SSM path: /walkcroach/${ENV}/web/api_url"
+          echo "  Deploy infra-backend to ${ENV} first (module.ssm publishes the API Gateway URL)."
+          echo "  Then re-run frontend Terraform deploy so terraform-web-outputs.json includes api_url."
           exit 1
         fi
+
         echo "VITE_API_URL=${API_URL}"
         echo "VITE_API_URL=${API_URL}" > web/.env.production
   build:
@@ -52,9 +77,11 @@ phases:
           "${CODEBUILD_SRC_DIR_TerraformDeployOutputTest:-}" \
           "${CODEBUILD_SRC_DIR_TerraformDeployOutputDev:-}"; do
           if [ -n "$candidate" ] && [ -f "${candidate}/terraform-web-outputs.json" ]; then
-            DIST_ID=$(node -p "JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).cloudfront_distribution_id?.value || ''" \
+            DIST_ID=$(node -e "const j=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'));process.stdout.write(j.cloudfront_distribution_id?.value||'');" \
               "${candidate}/terraform-web-outputs.json")
-            break
+            if [ -n "$DIST_ID" ]; then
+              break
+            fi
           fi
         done
         if [ -z "$DIST_ID" ]; then

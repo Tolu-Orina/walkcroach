@@ -14,7 +14,11 @@ variable "lambda_function_name" {
   type = string
 }
 
-variable "lambda_invoke_arn" {
+variable "lambda_function_arn" {
+  type = string
+}
+
+variable "aws_region" {
   type = string
 }
 
@@ -71,12 +75,9 @@ resource "aws_api_gateway_resource" "tool_result" {
 }
 
 locals {
-  # Single streamifyResponse Lambda — all routes use response-streaming invocations.
-  streaming_uri = replace(
-    var.lambda_invoke_arn,
-    "/invocations",
-    "/response-streaming-invocations",
-  )
+  # REST streaming integrations require the 2021-11-15 path + full Lambda ARN.
+  # See: https://docs.aws.amazon.com/apigateway/latest/developerguide/response-transfer-mode-lambda.html
+  streaming_uri = "arn:aws:apigateway:${var.aws_region}:lambda:path/2021-11-15/functions/${var.lambda_function_arn}/response-streaming-invocations"
 }
 
 resource "aws_api_gateway_method" "health_get" {

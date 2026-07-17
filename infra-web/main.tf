@@ -47,3 +47,8 @@ module "dns" {
   hosted_zone_id         = module.acm[0].hosted_zone_id
   cloudfront_domain_name = module.cloudfront.domain_name
 }
+
+# Published by infra-backend (module.ssm) after API Gateway deploy
+data "aws_ssm_parameter" "backend_api_url" {
+  name = "/${var.project_name}/${var.environment}/web/api_url"
+}

@@ -46,8 +46,9 @@ module "apigw" {
   name_prefix          = local.name_prefix
   environment          = var.environment
   stage_name           = var.api_stage_name
+  aws_region           = var.aws_region
   lambda_function_name = module.lambda_agent.function_name
-  lambda_invoke_arn    = module.lambda_agent.invoke_arn
+  lambda_function_arn  = module.lambda_agent.function_arn
   tags                 = local.tags
 }
 
