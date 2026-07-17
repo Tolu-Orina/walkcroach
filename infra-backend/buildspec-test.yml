@@ -1,0 +1,20 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 20
+  pre_build:
+    commands:
+      - echo "Backend unit / typecheck"
+      - node -v
+      - npm -v
+  build:
+    commands:
+      - cd infra-backend
+      - npm ci
+      - npm run typecheck
+artifacts:
+  files:
+    - '**/*'
+  name: backend-unit-test

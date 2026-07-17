@@ -1,0 +1,20 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      golang: 1.21
+    commands:
+      - curl -fsSL https://releases.hashicorp.com/terraform/1.9.8/terraform_1.9.8_linux_amd64.zip -o /tmp/terraform.zip
+      - unzip -o /tmp/terraform.zip -d /usr/local/bin
+      - terraform version
+  build:
+    commands:
+      - cd infra-web
+      - terraform fmt -check -recursive
+      - terraform init -input=false -backend=false
+      - terraform validate
+artifacts:
+  files:
+    - '**/*'
+  name: terraform-validate-web

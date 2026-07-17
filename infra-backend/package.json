@@ -1,0 +1,29 @@
+{
+  "name": "@walkcroach/infra-backend",
+  "private": true,
+  "version": "0.1.0",
+  "description": "WalkCroach backend packages + Lambda codes",
+  "workspaces": [
+    "packages/*",
+    "modules/lambda-agent/codes"
+  ],
+  "scripts": {
+    "build": "npm run build -w @walkcroach/db && npm run build -w @walkcroach/agent-harness && npm run build -w @walkcroach/backend",
+    "build:packages": "npm run build -w @walkcroach/db && npm run build -w @walkcroach/agent-harness",
+    "dev": "npm run dev -w @walkcroach/backend",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "smoke:memory": "npm run smoke:memory -w @walkcroach/agent-harness",
+    "smoke:loop": "npm run smoke:loop -w @walkcroach/agent-harness",
+    "local:demo": "npm run local:demo -w @walkcroach/agent-harness",
+    "migrate": "npm run migrate -w @walkcroach/db",
+    "package:lambda": "node scripts/package-lambda.mjs"
+  },
+  "devDependencies": {
+    "archiver": "^7.0.1",
+    "esbuild": "^0.25.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}

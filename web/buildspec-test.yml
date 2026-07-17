@@ -1,0 +1,18 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 20
+  pre_build:
+    commands:
+      - echo "Web unit / typecheck"
+  build:
+    commands:
+      - cd web
+      - npm ci
+      - npm run typecheck
+artifacts:
+  files:
+    - '**/*'
+  name: web-unit-test

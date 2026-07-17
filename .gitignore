@@ -1,0 +1,58 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build
+dist/
+build/
+*.tsbuildinfo
+.turbo/
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# IDE / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Logs / coverage
+logs/
+*.log
+npm-debug.log*
+coverage/
+.nyc_output/
+
+# Lambda packaging
+infra-backend/modules/lambda-agent/.build/
+*.zip
+
+# Terraform
+**/.terraform/
+**/*.tfstate
+**/*.tfstate.*
+**/crash.log
+**/override.tf
+**/*_override.tf
+# Keep .terraform.lock.hcl committed for provider pinning
+
+# Leftover empty dir if OneDrive/Cursor locks a move — safe to delete manually
+/packages/
+
+# WebContainer / Vite
+web/dist/
+*.local
+
+# Misc
+.cache/
+tmp/
+temp/
+
+# Local agent run artefacts
+results/
+

@@ -1,0 +1,35 @@
+version: 0.2
+
+env:
+  variables:
+    ENVIRONMENT: "dev"
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 20
+  pre_build:
+    commands:
+      - |
+        ENV="${ENVIRONMENT:-dev}"
+        API_URL=$(aws ssm get-parameter --name "/walkcroach/${ENV}/web/api_url" --query 'Parameter.Value' --output text)
+        echo "VITE_API_URL=${API_URL}"
+        echo "VITE_API_URL=${API_URL}" >> web/.env.production
+  build:
+    commands:
+      - cd web
+      - npm ci
+      - npm run build
+  post_build:
+    commands:
+      - |
+        WEB_BUCKET="walkcroach-web-${ENVIRONMENT}"
+        aws s3 sync web/dist "s3://${WEB_BUCKET}/" --delete
+        DIST_ID=$(aws cloudfront list-distributions --query "DistributionList.Items[?Comment=='walkcroach web ${ENVIRONMENT}'].Id | [0]" --output text)
+        if [ -n "${DIST_ID}" ] && [ "${DIST_ID}" != "None" ]; then
+          aws cloudfront create-invalidation --distribution-id "${DIST_ID}" --paths "/*"
+        fi
+artifacts:
+  files:
+    - web/dist/**/*
+  name: web-app-build-${ENVIRONMENT}

@@ -1,0 +1,41 @@
+version: 0.2
+
+env:
+  variables:
+    TF_IN_AUTOMATION: "true"
+
+phases:
+  install:
+    runtime-versions:
+      golang: 1.21
+      nodejs: 20
+    commands:
+      - curl -fsSL https://releases.hashicorp.com/terraform/1.9.8/terraform_1.9.8_linux_amd64.zip -o /tmp/terraform.zip
+      - unzip -o /tmp/terraform.zip -d /usr/local/bin
+      - terraform version
+  pre_build:
+    commands:
+      - |
+        case "${TF_VAR_environment}" in
+          dev)  export KEY="backend/dev/terraform.tfstate" ;;
+          test) export KEY="backend/test/terraform.tfstate" ;;
+          prod) export KEY="backend/prod/terraform.tfstate" ;;
+          *) echo "Unknown TF_VAR_environment=${TF_VAR_environment}"; exit 1 ;;
+        esac
+  build:
+    commands:
+      - cd infra-backend
+      - |
+        terraform init -input=false \
+          -backend-config="bucket=walkcroach-tf-state" \
+          -backend-config="key=${KEY}" \
+          -backend-config="region=eu-west-2" \
+          -backend-config="encrypt=true" \
+          -backend-config="dynamodb_table=walkcroach-tf-lock"
+      - terraform apply -input=false -auto-approve tfplan
+      - terraform output -json > ../terraform-outputs.json
+artifacts:
+  files:
+    - terraform-outputs.json
+    - infra-backend/**/*
+  name: terraform-deploy-${TF_VAR_environment}

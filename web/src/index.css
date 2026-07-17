@@ -1,0 +1,34 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Syne", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --color-ink: #0c1210;
+  --color-panel: #141c18;
+  --color-line: #24302a;
+  --color-mist: #9aada2;
+  --color-paper: #e8f0eb;
+  --color-signal: #c8f542;
+  --color-ember: #ff6b4a;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(1200px 600px at 10% -10%, #1a3328 0%, transparent 55%),
+    radial-gradient(900px 500px at 100% 0%, #1f2a22 0%, transparent 50%),
+    var(--color-ink);
+  color: var(--color-paper);
+  font-family: var(--font-mono);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--color-signal) 40%, transparent);
+}

@@ -1,0 +1,1801 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'WalkCroach Web Infra CI/CD Pipeline - CodePipeline with GitHub, CodeBuild for Terraform'
+
+Parameters:
+  GitHubOwner:
+    Type: String
+    Description: GitHub repository owner/username
+    Default: 'Tolu-Orina'
+  
+  GitHubRepo:
+    Type: String
+    Description: GitHub repository name
+    Default: 'walkcroach'
+  
+  GitHubConnectionArn:
+    Type: AWS::SSM::Parameter::Value<String>
+    Description: SSM parameter that holds the CodeConnections GitHub ARN
+    Default: /walkcroach/cicd/codeconnections_arn
+
+# Mappings:
+#   BranchToEnvironment:
+#     Note: This mapping is kept for reference/documentation purposes.
+#     The actual branch-to-environment mapping is handled in BuildSpec files
+#     via shell scripts that detect the branch and set TF_VAR_environment.
+#     develop:
+#       Environment: dev
+#       DomainPrefix: dev
+#     test:
+#       Environment: test
+#       DomainPrefix: test
+#     main:
+#       Environment: prod
+#       DomainPrefix: ""
+
+Resources:
+  # S3 Bucket for CodePipeline artifacts
+  # Note: S3 bucket names must be lowercase and globally unique
+  # We don't specify BucketName to let AWS auto-generate a unique lowercase name
+  PipelineArtifactsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      # AWS will auto-generate a unique lowercase bucket name
+      # We'll reference it via !Ref in other resources
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldArtifacts
+            Status: Enabled
+            ExpirationInDays: 30
+      Tags:
+        - Key: Project
+          Value: WalkCroach
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: Purpose
+          Value: PipelineArtifacts
+
+  # IAM Role for CodePipeline
+  CodePipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-pipeline-role'
+      Tags:
+        - Key: Project
+          Value: WalkCroach
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: Purpose
+          Value: CodePipeline
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CodePipelinePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:PutObject
+                  - s3:GetBucketVersioning
+                  - s3:GetBucketLocation
+                Resource:
+                  - !Sub '${PipelineArtifactsBucket.Arn}/*'
+                  - !GetAtt PipelineArtifactsBucket.Arn
+              - Effect: Allow
+                Action:
+                  - codebuild:BatchGetBuilds
+                  - codebuild:StartBuild
+                Resource: !GetAtt TerraformValidateBuild.Arn
+              - Effect: Allow
+                Action:
+                  - codebuild:BatchGetBuilds
+                  - codebuild:StartBuild
+                Resource: !GetAtt TerraformPlanBuild.Arn
+              - Effect: Allow
+                Action:
+                  - codebuild:BatchGetBuilds
+                  - codebuild:StartBuild
+                Resource: !GetAtt TerraformDeployBuild.Arn
+              - Effect: Allow
+                Action:
+                  - codebuild:BatchGetBuilds
+                  - codebuild:StartBuild
+                Resource: !GetAtt TerraformValidateTestBuild.Arn
+              - Effect: Allow
+                Action:
+                  - codebuild:BatchGetBuilds
+                  - codebuild:StartBuild
+                Resource: !GetAtt TerraformPlanTestBuild.Arn
+              - Effect: Allow
+                Action:
+                  - codebuild:BatchGetBuilds
+                  - codebuild:StartBuild
+                Resource: !GetAtt TerraformDeployTestBuild.Arn
+              - Effect: Allow
+                Action:
+                  - codebuild:BatchGetBuilds
+                  - codebuild:StartBuild
+                Resource: !GetAtt TerraformValidateProdBuild.Arn
+              - Effect: Allow
+                Action:
+                  - codebuild:BatchGetBuilds
+                  - codebuild:StartBuild
+                Resource: !GetAtt TerraformPlanProdBuild.Arn
+              - Effect: Allow
+                Action:
+                  - codebuild:BatchGetBuilds
+                  - codebuild:StartBuild
+                Resource: !GetAtt TerraformDeployProdBuild.Arn
+              - Effect: Allow
+                Action:
+                  - codebuild:BatchGetBuilds
+                  - codebuild:StartBuild
+                Resource:
+                  - !GetAtt WebAppBuildDev.Arn
+                  - !GetAtt WebAppBuildTest.Arn
+                  - !GetAtt WebAppBuildProd.Arn
+              - Effect: Allow
+                Action:
+                  - codebuild:BatchGetBuilds
+                  - codebuild:StartBuild
+                Resource: !GetAtt UnitTestBuild.Arn
+              - Effect: Allow
+                Action:
+                  - codebuild:BatchGetBuilds
+                  - codebuild:StartBuild
+                Resource: !GetAtt IntegrationTestBuild.Arn
+              - Effect: Allow
+                Action:
+                  - codebuild:BatchGetBuilds
+                  - codebuild:StartBuild
+                Resource: !GetAtt E2ETestBuild.Arn
+              - Effect: Allow
+                Action:
+                  - codestar-connections:UseConnection
+                Resource: !Ref GitHubConnectionArn
+
+  # IAM Role for CodeBuild - unit tests only (web/buildspec-test.yml makes no
+  # AWS API calls at all — needs no permissions beyond the shared artifact
+  # bucket and CloudWatch Logs).
+  CodeBuildUnitTestRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-codebuild-unit-test-role'
+      Tags:
+        - Key: Project
+          Value: WalkCroach
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: Purpose
+          Value: UnitTestBuild
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CodeBuildUnitTestPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:GetBucketVersioning
+                  - s3:GetBucketLocation
+                  - s3:ListBucket
+                Resource:
+                  - !Sub '${PipelineArtifactsBucket.Arn}/*'
+                  - !GetAtt PipelineArtifactsBucket.Arn
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*'
+
+  # IAM Role shared by Integration/E2E test runners. Both buildspecs
+  # (web/buildspec-integration.yml, web/buildspec-e2e.yml) only ever read
+  # SSM parameters under /walkcroach/test/web/* — they always exercise the
+  # already-deployed Test environment as a stable target, regardless of
+  # which branch triggered the pipeline.
+  CodeBuildTestRunnerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-codebuild-test-runner-role'
+      Tags:
+        - Key: Project
+          Value: WalkCroach
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: Purpose
+          Value: IntegrationE2ETestBuild
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CodeBuildTestRunnerPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:GetBucketVersioning
+                  - s3:GetBucketLocation
+                  - s3:ListBucket
+                Resource:
+                  - !Sub '${PipelineArtifactsBucket.Arn}/*'
+                  - !GetAtt PipelineArtifactsBucket.Arn
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                Resource: !Sub 'arn:aws:ssm:*:${AWS::AccountId}:parameter/walkcroach/test/web/*'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*'
+
+  # ─── IAM Roles for CodeBuild - Terraform Operations, split per environment ──
+  # infra-web's Terraform config (main.tf + modules/{s3,cloudfront,route53,
+  # acm}) never creates DynamoDB, Lambda, Cognito, API Gateway, KMS, or IAM
+  # resources — the previous shared role granted dynamodb:*/lambda:*/
+  # cognito-idp:*/apigateway(v2):*/kms:*/iam:* anyway (likely copy-pasted
+  # from the backend pipeline template). Those are dropped entirely here as
+  # dead grants rather than merely narrowed. What's left (S3, CloudFront,
+  # Route53, ACM, SSM) is split into Dev/Test/Prod roles and scoped to that
+  # environment's "walkcroach-*-<env>" resources and "/walkcroach/<env>/*" SSM
+  # path. CloudFront/Route53/ACM stay on Resource: '*' because those
+  # services use AWS-generated opaque IDs that don't exist until Terraform
+  # creates them (no name-based ARN to scope to for Create* actions).
+  CodeBuildTerraformRoleDev:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-codebuild-terraform-dev-role'
+      Tags:
+        - Key: Project
+          Value: WalkCroach
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: Purpose
+          Value: TerraformBuildDev
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CodeBuildTerraformDevPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:GetBucketVersioning
+                  - s3:GetBucketLocation
+                  - s3:ListBucket
+                Resource:
+                  - !Sub '${PipelineArtifactsBucket.Arn}/*'
+                  - !GetAtt PipelineArtifactsBucket.Arn
+              - Sid: WebLogBucketsDev
+                Effect: Allow
+                Action:
+                  - s3:*
+                Resource:
+                  - 'arn:aws:s3:::walkcroach-web-dev'
+                  - 'arn:aws:s3:::walkcroach-web-dev/*'
+                  - 'arn:aws:s3:::walkcroach-logs-dev'
+                  - 'arn:aws:s3:::walkcroach-logs-dev/*'
+              - Sid: TerraformStateObjectsDev
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource: 'arn:aws:s3:::walkcroach-tf-state/web/dev/*'
+              - Sid: TerraformStateBucketList
+                Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetBucketVersioning
+                Resource: 'arn:aws:s3:::walkcroach-tf-state'
+              - Effect: Allow
+                Action:
+                  - cloudfront:*
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - route53:*
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - acm:*
+                Resource: '*'
+              - Sid: SsmParametersDev
+                Effect: Allow
+                Action:
+                  - ssm:PutParameter
+                  - ssm:GetParameter
+                  - ssm:AddTagsToResource
+                Resource: !Sub 'arn:aws:ssm:*:${AWS::AccountId}:parameter/walkcroach/dev/web/*'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*'
+
+  CodeBuildTerraformRoleTest:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-codebuild-terraform-test-role'
+      Tags:
+        - Key: Project
+          Value: WalkCroach
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: Purpose
+          Value: TerraformBuildTest
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CodeBuildTerraformTestPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:GetBucketVersioning
+                  - s3:GetBucketLocation
+                  - s3:ListBucket
+                Resource:
+                  - !Sub '${PipelineArtifactsBucket.Arn}/*'
+                  - !GetAtt PipelineArtifactsBucket.Arn
+              - Sid: WebLogBucketsTest
+                Effect: Allow
+                Action:
+                  - s3:*
+                Resource:
+                  - 'arn:aws:s3:::walkcroach-web-test'
+                  - 'arn:aws:s3:::walkcroach-web-test/*'
+                  - 'arn:aws:s3:::walkcroach-logs-test'
+                  - 'arn:aws:s3:::walkcroach-logs-test/*'
+              - Sid: TerraformStateObjectsTest
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource: 'arn:aws:s3:::walkcroach-tf-state/web/test/*'
+              - Sid: TerraformStateBucketList
+                Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetBucketVersioning
+                Resource: 'arn:aws:s3:::walkcroach-tf-state'
+              - Effect: Allow
+                Action:
+                  - cloudfront:*
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - route53:*
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - acm:*
+                Resource: '*'
+              - Sid: SsmParametersTest
+                Effect: Allow
+                Action:
+                  - ssm:PutParameter
+                  - ssm:GetParameter
+                  - ssm:AddTagsToResource
+                Resource: !Sub 'arn:aws:ssm:*:${AWS::AccountId}:parameter/walkcroach/test/web/*'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*'
+
+  CodeBuildTerraformRoleProd:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-codebuild-terraform-prod-role'
+      Tags:
+        - Key: Project
+          Value: WalkCroach
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: Purpose
+          Value: TerraformBuildProd
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CodeBuildTerraformProdPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:GetBucketVersioning
+                  - s3:GetBucketLocation
+                  - s3:ListBucket
+                Resource:
+                  - !Sub '${PipelineArtifactsBucket.Arn}/*'
+                  - !GetAtt PipelineArtifactsBucket.Arn
+              - Sid: WebLogBucketsProd
+                Effect: Allow
+                Action:
+                  - s3:*
+                Resource:
+                  - 'arn:aws:s3:::walkcroach-web-prod'
+                  - 'arn:aws:s3:::walkcroach-web-prod/*'
+                  - 'arn:aws:s3:::walkcroach-logs-prod'
+                  - 'arn:aws:s3:::walkcroach-logs-prod/*'
+              - Sid: TerraformStateObjectsProd
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource: 'arn:aws:s3:::walkcroach-tf-state/web/prod/*'
+              - Sid: TerraformStateBucketList
+                Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetBucketVersioning
+                Resource: 'arn:aws:s3:::walkcroach-tf-state'
+              - Effect: Allow
+                Action:
+                  - cloudfront:*
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - route53:*
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - acm:*
+                Resource: '*'
+              - Sid: SsmParametersProd
+                Effect: Allow
+                Action:
+                  - ssm:PutParameter
+                  - ssm:GetParameter
+                  - ssm:AddTagsToResource
+                Resource: !Sub 'arn:aws:ssm:*:${AWS::AccountId}:parameter/walkcroach/prod/web/*'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*'
+
+  # ─── IAM Roles for CodeBuild - Web App Build (sync to S3 + CloudFront
+  # invalidation), split per environment so WebAppBuildDev can't touch the
+  # Prod S3 bucket or Prod CloudFront distribution. dynamodb:* dropped
+  # entirely (dead grant — web/buildspec.yml never calls DynamoDB).
+  CodeBuildWebAppRoleDev:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-codebuild-webapp-dev-role'
+      Tags:
+        - Key: Project
+          Value: WalkCroach
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: Purpose
+          Value: WebAppBuildDev
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CodeBuildWebAppDevPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:GetBucketVersioning
+                  - s3:GetBucketLocation
+                  - s3:ListBucket
+                Resource:
+                  - !Sub '${PipelineArtifactsBucket.Arn}/*'
+                  - !GetAtt PipelineArtifactsBucket.Arn
+              - Sid: WebBucketSyncDev
+                Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                Resource:
+                  - 'arn:aws:s3:::walkcroach-web-dev'
+                  - 'arn:aws:s3:::walkcroach-web-dev/*'
+              - Effect: Allow
+                Action:
+                  - cloudfront:CreateInvalidation
+                  - cloudfront:GetInvalidation
+                  - cloudfront:GetDistribution
+                Resource: '*'
+              - Sid: SsmParametersReadDev
+                Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                  - ssm:GetParametersByPath
+                Resource: !Sub 'arn:aws:ssm:*:${AWS::AccountId}:parameter/walkcroach/dev/web/*'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*'
+
+  CodeBuildWebAppRoleTest:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-codebuild-webapp-test-role'
+      Tags:
+        - Key: Project
+          Value: WalkCroach
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: Purpose
+          Value: WebAppBuildTest
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CodeBuildWebAppTestPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:GetBucketVersioning
+                  - s3:GetBucketLocation
+                  - s3:ListBucket
+                Resource:
+                  - !Sub '${PipelineArtifactsBucket.Arn}/*'
+                  - !GetAtt PipelineArtifactsBucket.Arn
+              - Sid: WebBucketSyncTest
+                Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                Resource:
+                  - 'arn:aws:s3:::walkcroach-web-test'
+                  - 'arn:aws:s3:::walkcroach-web-test/*'
+              - Effect: Allow
+                Action:
+                  - cloudfront:CreateInvalidation
+                  - cloudfront:GetInvalidation
+                  - cloudfront:GetDistribution
+                Resource: '*'
+              - Sid: SsmParametersReadTest
+                Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                  - ssm:GetParametersByPath
+                Resource: !Sub 'arn:aws:ssm:*:${AWS::AccountId}:parameter/walkcroach/test/web/*'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*'
+
+  CodeBuildWebAppRoleProd:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-codebuild-webapp-prod-role'
+      Tags:
+        - Key: Project
+          Value: WalkCroach
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: Purpose
+          Value: WebAppBuildProd
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CodeBuildWebAppProdPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:GetBucketVersioning
+                  - s3:GetBucketLocation
+                  - s3:ListBucket
+                Resource:
+                  - !Sub '${PipelineArtifactsBucket.Arn}/*'
+                  - !GetAtt PipelineArtifactsBucket.Arn
+              - Sid: WebBucketSyncProd
+                Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                Resource:
+                  - 'arn:aws:s3:::walkcroach-web-prod'
+                  - 'arn:aws:s3:::walkcroach-web-prod/*'
+              - Effect: Allow
+                Action:
+                  - cloudfront:CreateInvalidation
+                  - cloudfront:GetInvalidation
+                  - cloudfront:GetDistribution
+                Resource: '*'
+              - Sid: SsmParametersReadProd
+                Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                  - ssm:GetParametersByPath
+                Resource: !Sub 'arn:aws:ssm:*:${AWS::AccountId}:parameter/walkcroach/prod/web/*'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*'
+
+  # CloudWatch Log Groups
+  TerraformValidateLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/codebuild/${AWS::StackName}-terraform-validate'
+      RetentionInDays: 7
+      Tags:
+        - Key: Project
+          Value: WalkCroach
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  TerraformPlanLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/codebuild/${AWS::StackName}-terraform-plan'
+      RetentionInDays: 7
+      Tags:
+        - Key: Project
+          Value: WalkCroach
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  TerraformDeployLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/codebuild/${AWS::StackName}-terraform-deploy'
+      RetentionInDays: 7
+      Tags:
+        - Key: Project
+          Value: WalkCroach
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  WebAppBuildLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/codebuild/${AWS::StackName}-webapp-build'
+      RetentionInDays: 7
+      Tags:
+        - Key: Project
+          Value: WalkCroach
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  UnitTestLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/codebuild/${AWS::StackName}-unit-test'
+      RetentionInDays: 7
+      Tags:
+        - Key: Project
+          Value: WalkCroach
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  IntegrationTestLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/codebuild/${AWS::StackName}-integration-test'
+      RetentionInDays: 7
+      Tags:
+        - Key: Project
+          Value: WalkCroach
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  E2ETestLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/codebuild/${AWS::StackName}-e2e-test'
+      RetentionInDays: 7
+      Tags:
+        - Key: Project
+          Value: WalkCroach
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # CodeBuild Project - Unit Tests
+  UnitTestBuild:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub '${AWS::StackName}-unit-test'
+      Description: 'Run unit tests for web application'
+      ServiceRole: !GetAtt CodeBuildUnitTestRole.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:7.0
+        ImagePullCredentialsType: CODEBUILD
+      Cache:
+        Type: S3
+        Location: !Sub '${PipelineArtifactsBucket}/cache/unit-test'
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: web/buildspec-test.yml
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref UnitTestLogGroup
+      Tags:
+        - Key: Project
+          Value: WalkCroach
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # CodeBuild Project - Integration Tests (API against deployed dev backend)
+  IntegrationTestBuild:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub '${AWS::StackName}-integration-test'
+      Description: 'Run web API integration tests against deployed dev backend'
+      ServiceRole: !GetAtt CodeBuildTestRunnerRole.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:7.0
+        ImagePullCredentialsType: CODEBUILD
+        EnvironmentVariables:
+          - Name: AWS_DEFAULT_REGION
+            Value: !Ref AWS::Region
+      Cache:
+        Type: S3
+        Location: !Sub '${PipelineArtifactsBucket}/cache/integration-test'
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: web/buildspec-integration.yml
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref IntegrationTestLogGroup
+      Tags:
+        - Key: Project
+          Value: WalkCroach
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # CodeBuild Project - E2E Tests (Playwright against deployed dev app)
+  E2ETestBuild:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub '${AWS::StackName}-e2e-test'
+      Description: 'Run web E2E tests (Playwright) against deployed dev app'
+      ServiceRole: !GetAtt CodeBuildTestRunnerRole.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:7.0
+        ImagePullCredentialsType: CODEBUILD
+        EnvironmentVariables:
+          - Name: AWS_DEFAULT_REGION
+            Value: !Ref AWS::Region
+      Cache:
+        Type: S3
+        Location: !Sub '${PipelineArtifactsBucket}/cache/e2e-test'
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: web/buildspec-e2e.yml
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref E2ETestLogGroup
+      Tags:
+        - Key: Project
+          Value: WalkCroach
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # CodeBuild Project - Web App Build - Dev
+  WebAppBuildDev:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub '${AWS::StackName}-webapp-build-dev'
+      Description: 'Build and deploy web application to S3 - Dev environment'
+      ServiceRole: !GetAtt CodeBuildWebAppRoleDev.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_MEDIUM
+        Image: aws/codebuild/standard:7.0
+        PrivilegedMode: true
+        ImagePullCredentialsType: CODEBUILD
+        EnvironmentVariables:
+          - Name: AWS_DEFAULT_REGION
+            Value: !Ref AWS::Region
+          - Name: NODE_ENV
+            Value: production
+          - Name: TF_VAR_environment
+            Value: dev
+          - Name: TF_VAR_domain_prefix
+            Value: dev
+      Cache:
+        Type: S3
+        Location: !Sub '${PipelineArtifactsBucket}/cache/webapp-build-dev'
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: web/buildspec.yml
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref WebAppBuildLogGroup
+      Tags:
+        - Key: Project
+          Value: WalkCroach
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: Environment
+          Value: dev
+
+  # CodeBuild Project - Web App Build - Test
+  WebAppBuildTest:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub '${AWS::StackName}-webapp-build-test'
+      Description: 'Build and deploy web application to S3 - Test environment'
+      ServiceRole: !GetAtt CodeBuildWebAppRoleTest.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_MEDIUM
+        Image: aws/codebuild/standard:7.0
+        PrivilegedMode: true
+        ImagePullCredentialsType: CODEBUILD
+        EnvironmentVariables:
+          - Name: AWS_DEFAULT_REGION
+            Value: !Ref AWS::Region
+          - Name: NODE_ENV
+            Value: production
+          - Name: TF_VAR_environment
+            Value: test
+          - Name: TF_VAR_domain_prefix
+            Value: test
+      Cache:
+        Type: S3
+        Location: !Sub '${PipelineArtifactsBucket}/cache/webapp-build-test'
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: web/buildspec.yml
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref WebAppBuildLogGroup
+      Tags:
+        - Key: Project
+          Value: WalkCroach
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: Environment
+          Value: test
+
+  # CodeBuild Project - Web App Build - Prod
+  WebAppBuildProd:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub '${AWS::StackName}-webapp-build-prod'
+      Description: 'Build and deploy web application to S3 - Prod environment'
+      ServiceRole: !GetAtt CodeBuildWebAppRoleProd.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_MEDIUM
+        Image: aws/codebuild/standard:7.0
+        PrivilegedMode: true
+        ImagePullCredentialsType: CODEBUILD
+        EnvironmentVariables:
+          - Name: AWS_DEFAULT_REGION
+            Value: !Ref AWS::Region
+          - Name: NODE_ENV
+            Value: production
+          - Name: TF_VAR_environment
+            Value: prod
+          - Name: TF_VAR_domain_prefix
+            Value: ""
+      Cache:
+        Type: S3
+        Location: !Sub '${PipelineArtifactsBucket}/cache/webapp-build-prod'
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: web/buildspec.yml
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref WebAppBuildLogGroup
+      Tags:
+        - Key: Project
+          Value: WalkCroach
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: Environment
+          Value: prod
+
+  # CodeBuild Project - Terraform Validate (fmt, validate, tflint) - Dev
+  TerraformValidateBuild:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub '${AWS::StackName}-terraform-validate'
+      Description: 'Terraform format, validate, and lint checks'
+      ServiceRole: !GetAtt CodeBuildTerraformRoleDev.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:7.0
+        PrivilegedMode: true
+        ImagePullCredentialsType: CODEBUILD
+        EnvironmentVariables:
+          - Name: TF_VAR_environment
+            Value: dev
+      Cache:
+        Type: S3
+        Location: !Sub '${PipelineArtifactsBucket}/cache/terraform-validate'
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: infra-web/buildspec-validate.yml
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref TerraformValidateLogGroup
+      Tags:
+        - Key: Project
+          Value: WalkCroach
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # CodeBuild Project - Terraform Validate (fmt, validate, tflint) - Test
+  TerraformValidateTestBuild:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub '${AWS::StackName}-terraform-validate-test'
+      Description: 'Terraform format, validate, and lint checks for Test'
+      ServiceRole: !GetAtt CodeBuildTerraformRoleTest.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:7.0
+        PrivilegedMode: true
+        ImagePullCredentialsType: CODEBUILD
+        EnvironmentVariables:
+          - Name: TF_VAR_environment
+            Value: test
+      Cache:
+        Type: S3
+        Location: !Sub '${PipelineArtifactsBucket}/cache/terraform-validate-test'
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: infra-web/buildspec-validate.yml
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref TerraformValidateLogGroup
+      Tags:
+        - Key: Project
+          Value: WalkCroach
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # CodeBuild Project - Terraform Plan - Dev
+  TerraformPlanBuild:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub '${AWS::StackName}-terraform-plan'
+      Description: 'Terraform plan to preview changes'
+      ServiceRole: !GetAtt CodeBuildTerraformRoleDev.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:7.0
+        PrivilegedMode: true
+        ImagePullCredentialsType: CODEBUILD
+        EnvironmentVariables:
+          - Name: AWS_DEFAULT_REGION
+            Value: !Ref AWS::Region
+          - Name: TF_VAR_environment
+            Value: dev
+          - Name: TF_VAR_domain_prefix
+            Value: dev
+      Cache:
+        Type: S3
+        Location: !Sub '${PipelineArtifactsBucket}/cache/terraform-plan'
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: infra-web/buildspec-plan.yml
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref TerraformPlanLogGroup
+      Tags:
+        - Key: Project
+          Value: WalkCroach
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # CodeBuild Project - Terraform Plan - Test
+  TerraformPlanTestBuild:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub '${AWS::StackName}-terraform-plan-test'
+      Description: 'Terraform plan to preview changes for Test'
+      ServiceRole: !GetAtt CodeBuildTerraformRoleTest.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:7.0
+        PrivilegedMode: true
+        ImagePullCredentialsType: CODEBUILD
+        EnvironmentVariables:
+          - Name: AWS_DEFAULT_REGION
+            Value: !Ref AWS::Region
+          - Name: TF_VAR_environment
+            Value: test
+          - Name: TF_VAR_domain_prefix
+            Value: test
+      Cache:
+        Type: S3
+        Location: !Sub '${PipelineArtifactsBucket}/cache/terraform-plan-test'
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: infra-web/buildspec-plan.yml
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref TerraformPlanLogGroup
+      Tags:
+        - Key: Project
+          Value: WalkCroach
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # CodeBuild Project - Terraform Deploy - Dev
+  TerraformDeployBuild:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub '${AWS::StackName}-terraform-deploy'
+      Description: 'Terraform apply to deploy infrastructure'
+      ServiceRole: !GetAtt CodeBuildTerraformRoleDev.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:7.0
+        PrivilegedMode: true
+        ImagePullCredentialsType: CODEBUILD
+        EnvironmentVariables:
+          - Name: AWS_DEFAULT_REGION
+            Value: !Ref AWS::Region
+          - Name: TF_VAR_environment
+            Value: dev
+          - Name: TF_VAR_domain_prefix
+            Value: dev
+      Cache:
+        Type: S3
+        Location: !Sub '${PipelineArtifactsBucket}/cache/terraform-deploy'
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: infra-web/buildspec-deploy.yml
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref TerraformDeployLogGroup
+      Tags:
+        - Key: Project
+          Value: WalkCroach
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # CodeBuild Project - Terraform Deploy - Test
+  TerraformDeployTestBuild:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub '${AWS::StackName}-terraform-deploy-test'
+      Description: 'Terraform apply to deploy infrastructure for Test'
+      ServiceRole: !GetAtt CodeBuildTerraformRoleTest.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:7.0
+        PrivilegedMode: true
+        ImagePullCredentialsType: CODEBUILD
+        EnvironmentVariables:
+          - Name: AWS_DEFAULT_REGION
+            Value: !Ref AWS::Region
+          - Name: TF_VAR_environment
+            Value: test
+          - Name: TF_VAR_domain_prefix
+            Value: test
+      Cache:
+        Type: S3
+        Location: !Sub '${PipelineArtifactsBucket}/cache/terraform-deploy-test'
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: infra-web/buildspec-deploy.yml
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref TerraformDeployLogGroup
+      Tags:
+        - Key: Project
+          Value: WalkCroach
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # CodeBuild Project - Terraform Validate - Prod
+  TerraformValidateProdBuild:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub '${AWS::StackName}-terraform-validate-prod'
+      Description: 'Terraform format, validate, and lint checks for Prod'
+      ServiceRole: !GetAtt CodeBuildTerraformRoleProd.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:7.0
+        PrivilegedMode: true
+        ImagePullCredentialsType: CODEBUILD
+        EnvironmentVariables:
+          - Name: TF_VAR_environment
+            Value: prod
+      Cache:
+        Type: S3
+        Location: !Sub '${PipelineArtifactsBucket}/cache/terraform-validate-prod'
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: infra-web/buildspec-validate.yml
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref TerraformValidateLogGroup
+      Tags:
+        - Key: Project
+          Value: WalkCroach
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: Environment
+          Value: prod
+
+  # CodeBuild Project - Terraform Plan - Prod
+  TerraformPlanProdBuild:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub '${AWS::StackName}-terraform-plan-prod'
+      Description: 'Terraform plan to preview changes for Prod'
+      ServiceRole: !GetAtt CodeBuildTerraformRoleProd.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:7.0
+        PrivilegedMode: true
+        ImagePullCredentialsType: CODEBUILD
+        EnvironmentVariables:
+          - Name: AWS_DEFAULT_REGION
+            Value: !Ref AWS::Region
+          - Name: TF_VAR_environment
+            Value: prod
+          - Name: TF_VAR_domain_prefix
+            Value: ""
+      Cache:
+        Type: S3
+        Location: !Sub '${PipelineArtifactsBucket}/cache/terraform-plan-prod'
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: infra-web/buildspec-plan.yml
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref TerraformPlanLogGroup
+      Tags:
+        - Key: Project
+          Value: WalkCroach
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: Environment
+          Value: prod
+
+  # CodeBuild Project - Terraform Deploy - Prod
+  TerraformDeployProdBuild:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub '${AWS::StackName}-terraform-deploy-prod'
+      Description: 'Terraform apply to deploy infrastructure for Prod'
+      ServiceRole: !GetAtt CodeBuildTerraformRoleProd.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:7.0
+        PrivilegedMode: true
+        ImagePullCredentialsType: CODEBUILD
+        EnvironmentVariables:
+          - Name: AWS_DEFAULT_REGION
+            Value: !Ref AWS::Region
+          - Name: TF_VAR_environment
+            Value: prod
+          - Name: TF_VAR_domain_prefix
+            Value: ""
+      Cache:
+        Type: S3
+        Location: !Sub '${PipelineArtifactsBucket}/cache/terraform-deploy-prod'
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: infra-web/buildspec-deploy.yml
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref TerraformDeployLogGroup
+      Tags:
+        - Key: Project
+          Value: WalkCroach
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: Environment
+          Value: prod
+
+  # Non-Prod Pipeline (Dev + Test) - Parallel columns for visual organization
+  NonProdPipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      PipelineType: V2
+      Name: !Sub '${AWS::StackName}-nonprod-pipeline'
+      RoleArn: !GetAtt CodePipelineRole.Arn
+      Triggers:
+        - ProviderType: CodeStarSourceConnection
+          GitConfiguration:
+            SourceActionName: SourceDev
+            Push:
+              - Branches:
+                  Includes:
+                    - develop
+                FilePaths:
+                  Includes:
+                    - infra-web/**
+                    - web/**
+                    - ci-cd/infra-web-pipeline.yaml
+      ArtifactStore:
+        Type: S3
+        Location: !Ref PipelineArtifactsBucket
+      Tags:
+        - Key: Project
+          Value: WalkCroach
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: Environment
+          Value: NonProd
+      Stages:
+        # Stage 1: Source - Only Source actions (CodePipeline requirement)
+        - Name: Source
+          Actions:
+            # Develop branch source
+            - Name: SourceDev
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: CodeStarSourceConnection
+                Version: '1'
+              OutputArtifacts:
+                - Name: SourceOutputDev
+              Configuration:
+                ConnectionArn: !Ref GitHubConnectionArn
+                FullRepositoryId: !Sub '${GitHubOwner}/${GitHubRepo}'
+                BranchName: develop
+                OutputArtifactFormat: CODE_ZIP
+              RunOrder: 1
+        
+        # Stage 2: Test - Run unit tests on the code
+        - Name: Test
+          Actions:
+            # Run unit tests
+            - Name: UnitTest
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              InputArtifacts:
+                - Name: SourceOutputDev
+              OutputArtifacts:
+                - Name: UnitTestOutput
+              Configuration:
+                ProjectName: !Ref UnitTestBuild
+              RunOrder: 1
+
+        # Stage 3: Deploy Dev - Deploy to Dev environment
+        - Name: DeployDev
+          Actions:
+            # 1. Infrastructure Validation
+            - Name: TerraformValidateDev
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              InputArtifacts:
+                - Name: SourceOutputDev
+              OutputArtifacts:
+                - Name: TerraformValidateOutputDev
+              Configuration:
+                ProjectName: !Ref TerraformValidateBuild
+              RunOrder: 1
+            
+            # 2. Infrastructure Plan
+            - Name: TerraformPlanDev
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              InputArtifacts:
+                - Name: SourceOutputDev
+              OutputArtifacts:
+                - Name: TerraformPlanOutputDev
+              Configuration:
+                ProjectName: !Ref TerraformPlanBuild
+                PrimarySource: SourceOutputDev
+              RunOrder: 2
+            
+            # 3. Manual Approval - Review the Terraform plan (see TerraformPlanDev action logs) before applying
+            - Name: ApproveDevDeploy
+              ActionTypeId:
+                Category: Approval
+                Owner: AWS
+                Provider: Manual
+                Version: '1'
+              Configuration:
+                CustomData: |
+                  DEV ENVIRONMENT DEPLOYMENT APPROVAL
+
+                  Branch: develop
+                  Environment: dev
+
+                  Before approving, review the Terraform plan output in the
+                  "TerraformPlanDev" action's CodeBuild logs above (click
+                  "Details" on that action in this pipeline execution).
+
+                  Click "Approve" to apply the plan to the DEV environment.
+                  Click "Reject" to cancel this deployment.
+              RunOrder: 3
+
+            # 4. Infrastructure Deploy
+            - Name: TerraformDeployDev
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              InputArtifacts:
+                - Name: SourceOutputDev
+                - Name: TerraformPlanOutputDev
+              OutputArtifacts:
+                - Name: TerraformDeployOutputDev
+              Configuration:
+                ProjectName: !Ref TerraformDeployBuild
+                PrimarySource: SourceOutputDev
+              RunOrder: 4
+
+            # 5. Web Application Build and Deploy
+            - Name: WebAppBuildDev
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              InputArtifacts:
+                - Name: SourceOutputDev
+                - Name: TerraformDeployOutputDev
+              OutputArtifacts:
+                - Name: WebAppBuildOutputDev
+              Configuration:
+                ProjectName: !Ref WebAppBuildDev
+                PrimarySource: SourceOutputDev
+              RunOrder: 5
+            
+        # Stage 4: Deploy Test - Deploy to Test environment (with manual approval); then integration and E2E run against test
+        - Name: DeployTest
+          Actions:
+            # 1. Infrastructure Validation
+            - Name: TerraformValidateTest
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              InputArtifacts:
+                - Name: SourceOutputDev
+              OutputArtifacts:
+                - Name: TerraformValidateOutputTest
+              Configuration:
+                ProjectName: !Ref TerraformValidateTestBuild
+              RunOrder: 1
+
+            # 2. Infrastructure Plan
+            - Name: TerraformPlanTest
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              InputArtifacts:
+                - Name: SourceOutputDev
+              OutputArtifacts:
+                - Name: TerraformPlanOutputTest
+              Configuration:
+                ProjectName: !Ref TerraformPlanTestBuild
+                PrimarySource: SourceOutputDev
+              RunOrder: 2
+
+            # 3. Manual Approval - Review the Terraform plan (see TerraformPlanTest action logs) before applying
+            - Name: ApproveTestDeploy
+              ActionTypeId:
+                Category: Approval
+                Owner: AWS
+                Provider: Manual
+                Version: '1'
+              Configuration:
+                CustomData: |
+                  TEST ENVIRONMENT DEPLOYMENT APPROVAL
+
+                  Branch: develop
+                  Environment: test
+
+                  Unit tests have passed. Before approving, review the
+                  Terraform plan output in the "TerraformPlanTest" action's
+                  CodeBuild logs above (click "Details" on that action in
+                  this pipeline execution).
+
+                  Click "Approve" to proceed with Test deployment.
+                  Click "Reject" to skip Test deployment.
+              RunOrder: 3
+
+            # 4. Infrastructure Deploy
+            - Name: TerraformDeployTest
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              InputArtifacts:
+                - Name: SourceOutputDev
+                - Name: TerraformPlanOutputTest
+              OutputArtifacts:
+                - Name: TerraformDeployOutputTest
+              Configuration:
+                ProjectName: !Ref TerraformDeployTestBuild
+                PrimarySource: SourceOutputDev
+              RunOrder: 4
+
+            # 5. Web Application Build and Deploy
+            - Name: WebAppBuildTest
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              InputArtifacts:
+                - Name: SourceOutputDev
+                - Name: TerraformDeployOutputTest
+              OutputArtifacts:
+                - Name: WebAppBuildOutputTest
+              Configuration:
+                ProjectName: !Ref WebAppBuildTest
+                PrimarySource: SourceOutputDev
+              RunOrder: 5
+            
+        # Stage 5: Integration Test - API tests against deployed test backend
+        - Name: IntegrationTest
+          Actions:
+            - Name: IntegrationTest
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              InputArtifacts:
+                - Name: SourceOutputDev
+              OutputArtifacts:
+                - Name: IntegrationTestOutput
+              Configuration:
+                ProjectName: !Ref IntegrationTestBuild
+              RunOrder: 1
+            
+        # Stage 6: E2E Test - Playwright against deployed test app (environment domain)
+        - Name: E2ETest
+          Actions:
+            - Name: E2ETest
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              InputArtifacts:
+                - Name: SourceOutputDev
+              OutputArtifacts:
+                - Name: E2ETestOutput
+              Configuration:
+                ProjectName: !Ref E2ETestBuild
+              RunOrder: 1
+            
+  # Production Pipeline - Separate pipeline with manual approval
+  ProdPipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      PipelineType: V2
+      Name: !Sub '${AWS::StackName}-prod-pipeline'
+      RoleArn: !GetAtt CodePipelineRole.Arn
+      Triggers:
+        - ProviderType: CodeStarSourceConnection
+          GitConfiguration:
+            SourceActionName: SourceProd
+            Push:
+              - Branches:
+                  Includes:
+                    - main
+                FilePaths:
+                  Includes:
+                    - infra-web/**
+                    - web/**
+                    - ci-cd/infra-web-pipeline.yaml
+      ArtifactStore:
+        Type: S3
+        Location: !Ref PipelineArtifactsBucket
+      Tags:
+        - Key: Project
+          Value: WalkCroach
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: Environment
+          Value: Prod
+      Stages:
+        # Stage 1: Source - Only Source actions (CodePipeline requirement)
+        - Name: Source
+          Actions:
+            # Production branch source
+            - Name: SourceProd
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: CodeStarSourceConnection
+                Version: '1'
+              OutputArtifacts:
+                - Name: SourceOutputProd
+              Configuration:
+                ConnectionArn: !Ref GitHubConnectionArn
+                FullRepositoryId: !Sub '${GitHubOwner}/${GitHubRepo}'
+                BranchName: main
+                OutputArtifactFormat: CODE_ZIP
+              RunOrder: 1
+        
+        # Stage 2: Deploy - All deployment actions stacked vertically
+        - Name: Deploy
+          Actions:
+            # 1. Infrastructure Validation
+            - Name: TerraformValidateProd
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              InputArtifacts:
+                - Name: SourceOutputProd
+              OutputArtifacts:
+                - Name: TerraformValidateOutputProd
+              Configuration:
+                ProjectName: !Ref TerraformValidateProdBuild
+              RunOrder: 1
+            
+            # 2. Infrastructure Plan
+            - Name: TerraformPlanProd
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              InputArtifacts:
+                - Name: SourceOutputProd
+              OutputArtifacts:
+                - Name: TerraformPlanOutputProd
+              Configuration:
+                ProjectName: !Ref TerraformPlanProdBuild
+                PrimarySource: SourceOutputProd
+              RunOrder: 2
+            
+            # 3. Manual Approval
+            - Name: ApproveProductionDeploy
+              ActionTypeId:
+                Category: Approval
+                Owner: AWS
+                Provider: Manual
+                Version: '1'
+              Configuration:
+                CustomData: |
+                  PRODUCTION DEPLOYMENT APPROVAL REQUIRED
+
+                  Branch: main
+                  Environment: prod
+
+                  This will deploy infrastructure changes to PRODUCTION.
+                  Before approving, review the Terraform plan output in the
+                  "TerraformPlanProd" action's CodeBuild logs above (click
+                  "Details" on that action in this pipeline execution).
+
+                  Click "Approve" to apply the plan to PRODUCTION.
+                  Click "Reject" to cancel this deployment.
+              RunOrder: 3
+            
+            # 4. Infrastructure Deploy
+            - Name: TerraformDeployProd
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              InputArtifacts:
+                - Name: SourceOutputProd
+                - Name: TerraformPlanOutputProd
+              OutputArtifacts:
+                - Name: TerraformDeployOutputProd
+              Configuration:
+                ProjectName: !Ref TerraformDeployProdBuild
+                PrimarySource: SourceOutputProd
+              RunOrder: 4
+            
+            # 5. Web Application Build and Deploy
+            - Name: WebAppBuildProd
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              InputArtifacts:
+                - Name: SourceOutputProd
+                - Name: TerraformDeployOutputProd
+              OutputArtifacts:
+                - Name: WebAppBuildOutputProd
+              Configuration:
+                ProjectName: !Ref WebAppBuildProd
+                PrimarySource: SourceOutputProd
+              RunOrder: 5
+            
+Outputs:
+  NonProdPipelineName:
+    Description: Name of the Non-Prod Web Infra + App CodePipeline (Dev + Test)
+    Value: !Ref NonProdPipeline
+    Export:
+      Name: !Sub '${AWS::StackName}-NonProdPipelineName'
+  
+  NonProdPipelineUrl:
+    Description: URL to the Non-Prod Web Infra + App CodePipeline console
+    Value: !Sub 'https://${AWS::Region}.console.aws.amazon.com/codesuite/codepipeline/pipelines/${NonProdPipeline}/view'
+  
+  ProdPipelineName:
+    Description: Name of the Production Web Infra + App CodePipeline
+    Value: !Ref ProdPipeline
+    Export:
+      Name: !Sub '${AWS::StackName}-ProdPipelineName'
+  
+  ProdPipelineUrl:
+    Description: URL to the Production Web Infra + App CodePipeline console
+    Value: !Sub 'https://${AWS::Region}.console.aws.amazon.com/codesuite/codepipeline/pipelines/${ProdPipeline}/view'
+  
+  ArtifactsBucket:
+    Description: S3 bucket for pipeline artifacts
+    Value: !Ref PipelineArtifactsBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-ArtifactsBucket'
+
