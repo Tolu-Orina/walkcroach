@@ -462,18 +462,22 @@ Each phase has **exit criteria**. Do not start the next phase until the previous
 | # | Task | Notes |
 |---|------|-------|
 | 4.1 | `infra-web` Terraform: S3 + CloudFront + COOP/COEP | ✅ + ACM/Route53 for `walkcroach.conquerorfoundation.com` |
-| 4.2 | Build inject `VITE_API_URL` from SSM | ✅ `web/buildspec.yml` |
-| 4.3 | Adapt `ci-cd/infra-web-pipeline.yaml` | ✅ walkcroach paths |
-| 4.4 | One-click export / deploy generated app to S3 | Optional MVP stretch; document if deferred |
-| 4.5 | Memory debug panel (dev-only) | Show recalled entries for demo |
-| 4.6 | Script demo scenario | Session 1 preference → Session 2 recall |
-| 4.7 | `AS OF SYSTEM TIME` query example in README | Provenance story |
+| 4.2 | Build inject `VITE_API_URL` from SSM | ✅ `web/buildspec.yml` + TF output `api_url` |
+| 4.3 | Adapt `ci-cd/infra-web-pipeline.yaml` | ✅ walkcroach paths; prod pipeline deploys SPA |
+| 4.4 | One-click export / deploy generated app to S3 | ⏭ deferred (stretch) |
+| 4.5 | Memory debug panel (dev-only) | ⏭ deferred → Phase 6 demo prep |
+| 4.6 | Script demo scenario | ⏭ deferred → Phase 6 demo prep |
+| 4.7 | `AS OF SYSTEM TIME` query example in README | ⏭ deferred → Phase 6 submission polish |
 
 **Exit criteria**
 
-- [ ] Stable CloudFront URL for judges
-- [ ] Demo script runs end-to-end in &lt;3 minutes of screen time
-- [ ] README documents CRDB tools used + AWS services used
+- [x] Stable CloudFront URL for judges — **https://walkcroach.conquerorfoundation.com**
+- [x] Backend API live (Lambda + streaming APIGW); SSM `/walkcroach/prod/web/api_url` set
+- [x] Prod CI: backend + frontend pipelines deploy end-to-end
+- [ ] Demo script runs end-to-end in &lt;3 minutes of screen time (verify after Bedrock IAM fix deploy)
+- [ ] README documents CRDB tools used + AWS services used (Phase 6.5)
+
+**Done July 2026 (prod)** — infra-web + demo URL shipped. Optional memory-polish items (4.4–4.7) moved to Phase 6.
 
 **Estimated effort:** 3–5 days
 

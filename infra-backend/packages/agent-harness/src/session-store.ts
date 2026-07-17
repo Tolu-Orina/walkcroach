@@ -19,6 +19,12 @@ export type PendingToolState = {
   resolvedResults: BedrockToolResult[];
   /** Assistant content blocks from the tool_use turn (for Converse continuity) */
   assistantContent: unknown[];
+  /** File writes held for plan approval (tool === plan_approval) */
+  deferredToolUses?: Array<{
+    toolUseId: string;
+    name: string;
+    input: Record<string, unknown>;
+  }>;
 };
 
 export type BedrockToolResult = {
@@ -107,6 +113,71 @@ export async function listMessages(
     role: r.role,
     content:
       typeof r.content === 'string' ? JSON.parse(r.content) : r.content,
+  }));
+}
+
+export async function getLatestSessionForProject(
+  db: DbClient,
+  projectId: string,
+): Promise<{ id: string } | null> {
+  const { rows } = await db.query<{ id: string }>(
+    `SELECT id FROM sessions
+     WHERE project_id = $1::uuid
+     ORDER BY updated_at DESC
+     LIMIT 1`,
+    [projectId],
+  );
+  return rows[0] ?? null;
+}
+
+export async function countProjectsForOwner(
+  db: DbClient,
+  ownerId: string,
+): Promise<number> {
+  const { rows } = await db.query<{ count: string }>(
+    `SELECT count(*)::string AS count FROM projects
+     WHERE owner_id = $1 AND deleted_at IS NULL`,
+    [ownerId],
+  );
+  return Number(rows[0]?.count ?? 0);
+}
+
+export type BuildEventRow = {
+  id: string;
+  tool_name: string;
+  tool_args: Record<string, unknown>;
+  result_summary: string | null;
+  created_at: Date;
+};
+
+export async function listBuildEvents(
+  db: DbClient,
+  sessionId: string,
+  limit = 100,
+): Promise<BuildEventRow[]> {
+  const { rows } = await db.query<{
+    id: string;
+    tool_name: string;
+    tool_args: unknown;
+    result_summary: string | null;
+    created_at: Date;
+  }>(
+    `SELECT id, tool_name, tool_args, result_summary, created_at
+     FROM build_events
+     WHERE session_id = $1::uuid
+     ORDER BY created_at DESC
+     LIMIT $2`,
+    [sessionId, limit],
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    tool_name: r.tool_name,
+    tool_args:
+      typeof r.tool_args === 'string'
+        ? (JSON.parse(r.tool_args) as Record<string, unknown>)
+        : (r.tool_args as Record<string, unknown>) ?? {},
+    result_summary: r.result_summary,
+    created_at: r.created_at,
   }));
 }
 

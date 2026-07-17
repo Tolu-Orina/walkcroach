@@ -14,6 +14,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
     "smoke:memory": "node --import tsx src/smoke-memory.ts",
     "smoke:loop": "node --import tsx src/smoke-loop.ts",
     "local:demo": "node --import tsx src/run-local-demo.ts"
@@ -25,6 +26,7 @@
   "devDependencies": {
     "@types/node": "^22.15.0",
     "tsx": "^4.19.0",
-    "typescript": "^5.8.0"
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.4"
   }
 }

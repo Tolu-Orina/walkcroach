@@ -9,6 +9,7 @@
 import { createDbClient } from '@walkcroach/db';
 import { runPromptTurn } from '@walkcroach/agent-harness';
 import { writeNdjson } from '../http.js';
+import { assertCredits, debitCredits } from './billing.js';
 
 export type PromptBody = {
   message: string;
@@ -20,9 +21,27 @@ export async function runPromptStream(
   sessionId: string,
   body: PromptBody,
   write: (chunk: string) => void,
+  ownerId?: string,
 ): Promise<void> {
   const db = createDbClient();
   try {
+    if (ownerId) {
+      const credits = await assertCredits(db, ownerId, 'agent_turn');
+      if (!credits.ok) {
+        await writeNdjson(
+          write,
+          (async function* () {
+            yield {
+              type: 'error' as const,
+              message: `insufficient credits (${credits.remaining} remaining)`,
+            };
+          })(),
+        );
+        return;
+      }
+      await debitCredits(db, ownerId, 'agent_turn', body.projectId);
+    }
+
     await writeNdjson(
       write,
       runPromptTurn({

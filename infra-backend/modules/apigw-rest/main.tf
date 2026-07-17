@@ -101,7 +101,8 @@ resource "aws_api_gateway_method" "projects_post" {
   rest_api_id   = aws_api_gateway_rest_api.this.id
   resource_id   = aws_api_gateway_resource.projects.id
   http_method   = "POST"
-  authorization = "NONE"
+  authorization = local.protected_authorization
+  authorizer_id = local.protected_authorizer_id
 }
 
 resource "aws_api_gateway_integration" "projects_post" {
@@ -118,7 +119,8 @@ resource "aws_api_gateway_method" "sessions_post" {
   rest_api_id   = aws_api_gateway_rest_api.this.id
   resource_id   = aws_api_gateway_resource.sessions.id
   http_method   = "POST"
-  authorization = "NONE"
+  authorization = local.protected_authorization
+  authorizer_id = local.protected_authorizer_id
 }
 
 resource "aws_api_gateway_integration" "sessions_post" {
@@ -135,7 +137,8 @@ resource "aws_api_gateway_method" "session_get" {
   rest_api_id   = aws_api_gateway_rest_api.this.id
   resource_id   = aws_api_gateway_resource.session_id.id
   http_method   = "GET"
-  authorization = "NONE"
+  authorization = local.protected_authorization
+  authorizer_id = local.protected_authorizer_id
 }
 
 resource "aws_api_gateway_integration" "session_get" {
@@ -152,7 +155,8 @@ resource "aws_api_gateway_method" "prompt_post" {
   rest_api_id   = aws_api_gateway_rest_api.this.id
   resource_id   = aws_api_gateway_resource.prompt.id
   http_method   = "POST"
-  authorization = "NONE"
+  authorization = local.protected_authorization
+  authorizer_id = local.protected_authorizer_id
 }
 
 resource "aws_api_gateway_integration" "prompt_post" {
@@ -169,7 +173,8 @@ resource "aws_api_gateway_method" "tool_result_post" {
   rest_api_id   = aws_api_gateway_rest_api.this.id
   resource_id   = aws_api_gateway_resource.tool_result.id
   http_method   = "POST"
-  authorization = "NONE"
+  authorization = local.protected_authorization
+  authorizer_id = local.protected_authorizer_id
 }
 
 resource "aws_api_gateway_integration" "tool_result_post" {
@@ -202,6 +207,8 @@ resource "aws_api_gateway_deployment" "this" {
         aws_api_gateway_integration.session_get.id,
         aws_api_gateway_integration.prompt_post.id,
         aws_api_gateway_integration.tool_result_post.id,
+        aws_api_gateway_integration.proxy_any.id,
+        aws_api_gateway_integration.proxy_options.id,
       ],
       [for k, v in aws_api_gateway_integration.options : v.id],
     )))
@@ -218,6 +225,8 @@ resource "aws_api_gateway_deployment" "this" {
     aws_api_gateway_integration.session_get,
     aws_api_gateway_integration.prompt_post,
     aws_api_gateway_integration.tool_result_post,
+    aws_api_gateway_integration.proxy_any,
+    aws_api_gateway_integration.proxy_options,
     aws_api_gateway_integration.options,
   ]
 }

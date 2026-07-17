@@ -8,8 +8,25 @@ export type AgentEvent =
       args: Record<string, unknown>;
       awaitResult?: boolean;
     }
-  | { type: 'done'; reason: 'complete' | 'awaiting_tool' }
+  | {
+      type: 'plan_preview';
+      planId: string;
+      files: Array<{ path: string; reason: string }>;
+    }
+  | { type: 'plan_awaiting_approval'; planId: string }
+  | {
+      type: 'done';
+      reason: 'complete' | 'awaiting_tool' | 'awaiting_plan_approval';
+    }
   | { type: 'error'; message: string };
+
+export type PlanDecision = 'approve' | 'adjust' | 'cancel';
+
+export type PlanDecisionInput = {
+  planId: string;
+  decision: PlanDecision;
+  adjustment?: string;
+};
 
 export type ToolResultInput = {
   toolCallId: string;

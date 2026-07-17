@@ -6,7 +6,19 @@ export type HttpRequest = {
   path: string;
   body: string | undefined;
   pathParameters: Record<string, string | undefined>;
+  headers: Record<string, string | undefined>;
 };
+
+function normalizeHeaders(
+  raw: Record<string, string | undefined> | undefined,
+): Record<string, string | undefined> {
+  if (!raw) return {};
+  const out: Record<string, string | undefined> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    out[k.toLowerCase()] = v;
+  }
+  return out;
+}
 
 export function normalizeEvent(event: unknown): HttpRequest {
   const e = event as Record<string, unknown>;
@@ -22,6 +34,9 @@ export function normalizeEvent(event: unknown): HttpRequest {
         body: (e.body as string | undefined) ?? undefined,
         pathParameters:
           (e.pathParameters as Record<string, string | undefined>) ?? {},
+        headers: normalizeHeaders(
+          e.headers as Record<string, string | undefined> | undefined,
+        ),
       };
     }
   }
@@ -33,5 +48,8 @@ export function normalizeEvent(event: unknown): HttpRequest {
     body: (e.body as string | undefined) ?? undefined,
     pathParameters:
       (e.pathParameters as Record<string, string | undefined>) ?? {},
+    headers: normalizeHeaders(
+      e.headers as Record<string, string | undefined> | undefined,
+    ),
   };
 }

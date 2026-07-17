@@ -1,33 +1,37 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  createProject,
   createSession,
+  getLatestSession,
   getSession,
+  streamPlanDecision,
   streamPrompt,
   streamToolResult,
 } from '../api/client';
-import type { AgentEvent, AgentMode, ChatMessage } from '../api/types';
+import type { AgentEvent, AgentMode, ChatMessage, PendingPlan } from '../api/types';
 
-const STORAGE_KEY = 'walkcroach.session.v1';
+function storageKey(projectId: string): string {
+  return `walkcroach.session.v1.${projectId}`;
+}
 
 type StoredSession = {
   projectId: string;
   sessionId: string;
-  projectName: string;
 };
 
-function loadStored(): StoredSession | null {
+function loadStored(projectId: string): StoredSession | null {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(storageKey(projectId));
     if (!raw) return null;
-    return JSON.parse(raw) as StoredSession;
+    const parsed = JSON.parse(raw) as StoredSession;
+    if (parsed.projectId !== projectId) return null;
+    return parsed;
   } catch {
     return null;
   }
 }
 
 function saveStored(s: StoredSession): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
+  localStorage.setItem(storageKey(s.projectId), JSON.stringify(s));
 }
 
 function uid(): string {
@@ -62,19 +66,47 @@ function storedToChat(
   }));
 }
 
+function hydratePendingPlan(detail: {
+  status: string;
+  pendingTool: {
+    tool: string;
+    args: Record<string, unknown>;
+    files?: Array<{ path: string; reason: string }>;
+  } | null;
+}): PendingPlan | null {
+  if (detail.status !== 'awaiting_plan_approval' || !detail.pendingTool) return null;
+  if (detail.pendingTool.tool !== 'plan_approval') return null;
+  const planId = String(detail.pendingTool.args.planId ?? '');
+  const files =
+    detail.pendingTool.files ??
+    (detail.pendingTool.args.files as Array<{ path: string; reason: string }>) ??
+    [];
+  if (!planId) return null;
+  return { planId, files };
+}
+
 export function useAgentSession(
+  projectId: string,
   projectName: string,
   mode: AgentMode,
   actions: FileActions,
   workspaceReady: boolean,
+  onAfterFileTurn?: (sessionId: string) => Promise<void>,
 ) {
-  const [projectId, setProjectId] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [bootError, setBootError] = useState<string | null>(null);
   const [status, setStatus] = useState<'booting' | 'ready' | 'error'>('booting');
+  const [pendingPlan, setPendingPlan] = useState<PendingPlan | null>(null);
+  const [activityRefresh, setActivityRefresh] = useState(0);
+  const [checkpointRefresh, setCheckpointRefresh] = useState(0);
   const assistantBuf = useRef('');
+  const hadFileWrites = useRef(false);
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
+  const onAfterFileTurnRef = useRef(onAfterFileTurn);
+  onAfterFileTurnRef.current = onAfterFileTurn;
   const pendingResumed = useRef(false);
   const actionsRef = useRef(actions);
   actionsRef.current = actions;
@@ -108,6 +140,12 @@ export function useAgentSession(
               content: `Recalled ${event.count} memor${event.count === 1 ? 'y' : 'ies'} from CockroachDB`,
             },
           ]);
+        } else if (event.type === 'plan_preview') {
+          setPendingPlan({ planId: event.planId, files: event.files });
+        } else if (event.type === 'plan_awaiting_approval') {
+          setPendingPlan((prev) =>
+            prev?.planId === event.planId ? prev : { planId: event.planId, files: [] },
+          );
         } else if (event.type === 'tool_call') {
           setMessages((prev) => [
             ...prev,
@@ -121,6 +159,9 @@ export function useAgentSession(
           ]);
 
           const act = actionsRef.current;
+          if (event.tool === 'write_file' || event.tool === 'edit_file') {
+            hadFileWrites.current = true;
+          }
           if (event.tool === 'write_file') {
             await act.applyWriteFile(
               String(event.args.path ?? ''),
@@ -156,6 +197,20 @@ export function useAgentSession(
           ]);
         } else if (event.type === 'done') {
           assistantBuf.current = '';
+          if (event.reason !== 'awaiting_plan_approval') {
+            setPendingPlan(null);
+          }
+          setActivityRefresh((n) => n + 1);
+          if (
+            event.reason === 'complete' &&
+            hadFileWrites.current &&
+            modeRef.current === 'build'
+          ) {
+            hadFileWrites.current = false;
+            void onAfterFileTurnRef.current?.(sid).then(() => {
+              setCheckpointRefresh((n) => n + 1);
+            });
+          }
         }
       }
     },
@@ -166,45 +221,66 @@ export function useAgentSession(
     let cancelled = false;
     (async () => {
       try {
-        const existing = loadStored();
-        if (existing?.projectId && existing?.sessionId) {
+        const existing = loadStored(projectId);
+        if (existing?.sessionId) {
           try {
             const detail = await getSession(existing.sessionId);
             if (cancelled) return;
-            setProjectId(detail.projectId);
-            setSessionId(detail.id);
-            setMessages([
-              {
-                id: uid(),
-                role: 'system',
-                content: `Resumed session ${detail.id.slice(0, 8)}… — hydrated from CockroachDB.`,
-              },
-              ...storedToChat(detail.messages),
-            ]);
-            setStatus('ready');
-            return;
+            if (detail.projectId !== projectId) {
+              localStorage.removeItem(storageKey(projectId));
+            } else {
+              setSessionId(detail.id);
+              setPendingPlan(hydratePendingPlan(detail));
+              setMessages([
+                {
+                  id: uid(),
+                  role: 'system',
+                  content: `Resumed session ${detail.id.slice(0, 8)}… — hydrated from CockroachDB.`,
+                },
+                ...storedToChat(detail.messages),
+              ]);
+              setStatus('ready');
+              return;
+            }
           } catch {
-            localStorage.removeItem(STORAGE_KEY);
+            localStorage.removeItem(storageKey(projectId));
           }
         }
 
-        const project = await createProject(projectName);
-        const session = await createSession(project.id);
-        saveStored({
-          projectId: project.id,
-          sessionId: session.id,
-          projectName,
-        });
+        try {
+          const latest = await getLatestSession(projectId);
+          if (!cancelled && latest.sessionId) {
+            const detail = await getSession(latest.sessionId);
+            if (!cancelled && detail.projectId === projectId) {
+              saveStored({ projectId, sessionId: detail.id });
+              setSessionId(detail.id);
+              setPendingPlan(hydratePendingPlan(detail));
+              setMessages([
+                {
+                  id: uid(),
+                  role: 'system',
+                  content: `Continued latest session ${detail.id.slice(0, 8)}…`,
+                },
+                ...storedToChat(detail.messages),
+              ]);
+              setStatus('ready');
+              return;
+            }
+          }
+        } catch {
+          /* no sessions yet — create below */
+        }
+
+        const session = await createSession(projectId);
+        saveStored({ projectId, sessionId: session.id });
         if (!cancelled) {
-          setProjectId(project.id);
           setSessionId(session.id);
           setStatus('ready');
           setMessages([
             {
               id: uid(),
               role: 'system',
-              content:
-                'Session ready. Preferences and build decisions will persist in CockroachDB.',
+              content: `Session ready for ${projectName}. Preferences and build decisions persist in CockroachDB.`,
             },
           ]);
         }
@@ -218,9 +294,8 @@ export function useAgentSession(
     return () => {
       cancelled = true;
     };
-  }, [projectName]);
+  }, [projectId, projectName]);
 
-  // Resume pending shell tool after WebContainer is ready (Phase 3.9).
   useEffect(() => {
     if (!workspaceReady || !sessionId || !projectId || pendingResumed.current) {
       return;
@@ -281,9 +356,10 @@ export function useAgentSession(
 
   const sendPrompt = useCallback(
     async (message: string) => {
-      if (!sessionId || !projectId || streaming) return;
+      if (!sessionId || !projectId || streaming || pendingPlan) return;
       setStreaming(true);
       assistantBuf.current = '';
+      hadFileWrites.current = false;
       setMessages((prev) => [
         ...prev,
         { id: uid(), role: 'user', content: message },
@@ -307,13 +383,51 @@ export function useAgentSession(
         setStreaming(false);
       }
     },
-    [sessionId, projectId, streaming, mode, handleEvents],
+    [sessionId, projectId, streaming, pendingPlan, mode, handleEvents],
+  );
+
+  const submitPlanDecision = useCallback(
+    async (
+      decision: 'approve' | 'adjust' | 'cancel',
+      adjustment?: string,
+    ) => {
+      if (!sessionId || !projectId || !pendingPlan || streaming) return;
+      setStreaming(true);
+      assistantBuf.current = '';
+      try {
+        await handleEvents(
+          streamPlanDecision(sessionId, {
+            projectId,
+            planId: pendingPlan.planId,
+            decision,
+            adjustment,
+          }),
+          sessionId,
+          projectId,
+        );
+      } catch (err) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: uid(),
+            role: 'system',
+            content: `Plan decision failed: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        ]);
+      } finally {
+        setStreaming(false);
+        if (decision !== 'approve') {
+          setPendingPlan(null);
+        }
+      }
+    },
+    [sessionId, projectId, pendingPlan, streaming, handleEvents],
   );
 
   const newSession = useCallback(async () => {
-    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(storageKey(projectId));
     window.location.reload();
-  }, []);
+  }, [projectId]);
 
   return {
     projectId,
@@ -322,7 +436,11 @@ export function useAgentSession(
     streaming,
     status,
     bootError,
+    pendingPlan,
+    activityRefresh,
+    checkpointRefresh,
     sendPrompt,
+    submitPlanDecision,
     newSession,
   };
 }

@@ -1,0 +1,30 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 20
+  build:
+    commands:
+      - set -eu
+      - echo "Deploying slug=$DEPLOY_SLUG deployment=$DEPLOYMENT_ID"
+      - mkdir -p /tmp/app && cd /tmp/app
+      - aws s3 cp "s3://${SOURCE_BUCKET}/${SOURCE_KEY}" /tmp/source.zip
+      - unzip -q /tmp/source.zip -d /tmp/app
+      - npm ci
+      - npm run build
+      - STAGING_PREFIX="${DEPLOY_SLUG}/staging/${DEPLOYMENT_ID}"
+      - LIVE_PREFIX="${DEPLOY_SLUG}/live"
+      - aws s3 sync dist/ "s3://${APPS_BUCKET}/${STAGING_PREFIX}/" --delete
+      - |
+        if [ -n "${APPS_WILDCARD_DOMAIN:-}" ]; then
+          HEALTH_URL="https://${DEPLOY_SLUG}.${APPS_WILDCARD_DOMAIN}/"
+        else
+          HEALTH_URL="https://${APPS_CF_DOMAIN}/${DEPLOY_SLUG}/live/index.html"
+        fi
+        echo "Health check ${HEALTH_URL} (after live promotion)"
+      - aws s3 sync "s3://${APPS_BUCKET}/${STAGING_PREFIX}/" "s3://${APPS_BUCKET}/${LIVE_PREFIX}/" --delete
+      - |
+        echo "{\"status\":\"live\",\"slug\":\"${DEPLOY_SLUG}\",\"deploymentId\":\"${DEPLOYMENT_ID}\",\"at\":\"$(date -Iseconds)\"}" \
+          | aws s3 cp - "s3://${APPS_BUCKET}/_deployments/${DEPLOYMENT_ID}.json" \
+            --content-type application/json

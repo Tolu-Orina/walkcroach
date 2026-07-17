@@ -15,5 +15,5 @@ export async function handler(
 ): Promise<APIGatewayProxyResultV2> {
   const method = event.requestContext.http.method;
   const path = event.rawPath;
-  return handleRest(method, path, event.body ?? undefined, event.pathParameters ?? {});
+  return handleRest(method, path, event.body ?? undefined, event.pathParameters ?? {}, event.headers ?? {});
 }

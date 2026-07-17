@@ -1,7 +1,10 @@
 import { WebContainer, type WebContainerProcess } from '@webcontainer/api';
-import { defaultTemplate } from './template';
+import { getApiUrl } from '../api/client';
+import { templateTree } from '../templates/template';
 
 let bootPromise: Promise<WebContainer> | null = null;
+let previewStarted = false;
+let mountedKey: string | null = null;
 
 export function bootWebContainer(): Promise<WebContainer> {
   if (!bootPromise) {
@@ -10,11 +13,42 @@ export function bootWebContainer(): Promise<WebContainer> {
   return bootPromise;
 }
 
-export async function mountStarter(
+export async function mountProjectWorkspace(
   wc: WebContainer,
+  projectId: string,
   projectName: string,
+  templateId: string | null | undefined,
 ): Promise<void> {
-  await wc.mount(defaultTemplate(projectName));
+  const key = `${projectId}:${templateId ?? 'blank'}`;
+  if (mountedKey === key) return;
+  await wc.mount(templateTree(templateId, projectName));
+  await writeProjectEnv(wc, projectId);
+  mountedKey = key;
+  previewStarted = false;
+}
+
+function readAuthToken(): string {
+  try {
+    const raw = localStorage.getItem('walkcroach.auth.v1');
+    if (!raw) return '';
+    const parsed = JSON.parse(raw) as { token?: string };
+    return parsed.token ?? '';
+  } catch {
+    return '';
+  }
+}
+
+export async function writeProjectEnv(
+  wc: WebContainer,
+  projectId: string,
+): Promise<void> {
+  const apiUrl = getApiUrl();
+  const token = readAuthToken();
+  const lines = [
+    `VITE_WALKCROACH_PROXY=${apiUrl}/proxy/${projectId}`,
+    token ? `VITE_WALKCROACH_TOKEN=${token}` : '',
+  ].filter(Boolean);
+  await writeFile(wc, '.env.local', `${lines.join('\n')}\n`);
 }
 
 export async function ensureDir(
@@ -86,7 +120,6 @@ export async function runTerminal(
   wc: WebContainer,
   cmd: string,
 ): Promise<{ ok: boolean; exitCode: number; stdout: string; stderr: string }> {
-  // Agent sometimes asks to start vite — we manage preview ourselves.
   if (/\bnpm\s+run\s+dev\b/.test(cmd) || /\bvite\b/.test(cmd)) {
     return {
       ok: true,
@@ -113,6 +146,9 @@ export async function startPreview(
   onReady: (url: string) => void,
   onLog: (line: string) => void,
 ): Promise<void> {
+  if (previewStarted) return;
+  previewStarted = true;
+
   onLog('$ npm install');
   const install = await wc.spawn('npm', ['install']);
   install.output.pipeTo(
@@ -124,6 +160,7 @@ export async function startPreview(
   );
   const code = await install.exit;
   if (code !== 0) {
+    previewStarted = false;
     throw new Error(`npm install failed (exit ${code})`);
   }
 

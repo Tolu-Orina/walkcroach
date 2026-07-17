@@ -1,29 +1,27 @@
-output "api_url" {
-  description = "API Gateway invoke URL (also written to SSM)"
-  value       = module.apigw.invoke_url
+output "cognito_user_pool_id" {
+  value = module.cognito.user_pool_id
 }
 
-output "api_url_ssm_parameter" {
-  description = "SSM parameter name for web builds"
-  value       = module.ssm.api_url_parameter_name
+output "cognito_client_id" {
+  value = module.cognito.client_id
+}
+
+output "cognito_hosted_ui_domain" {
+  value = module.cognito.hosted_ui_domain
+}
+
+output "api_invoke_url" {
+  value = module.apigw.invoke_url
 }
 
 output "lambda_function_name" {
   value = module.lambda_agent.function_name
 }
 
-output "lambda_function_arn" {
-  value = module.lambda_agent.function_arn
+output "apps_deploy_url_pattern" {
+  value = module.apps_hosting.deploy_url_pattern
 }
 
-output "runtime_secret_arn" {
-  value = module.secrets.runtime_secret_arn
-}
-
-output "artefacts_bucket" {
-  value = module.artefacts.bucket_id
-}
-
-output "health_url" {
-  value = "${module.apigw.invoke_url}/health"
+output "apps_bucket" {
+  value = module.apps_hosting.apps_bucket_id
 }

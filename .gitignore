@@ -52,6 +52,7 @@ web/dist/
 .cache/
 tmp/
 temp/
+.nfr13-build/
 
 # Local agent run artefacts
 results/

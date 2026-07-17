@@ -5,6 +5,7 @@ import {
   type ParsedToolUse,
 } from './bedrock.js';
 import { recallProjectMemory, writeMemoryEntry } from './memory.js';
+import { refreshProjectMemorySummary } from './project-memory.js';
 import {
   appendBuildEvent,
   appendMessage,
@@ -15,11 +16,21 @@ import {
   type PendingToolState,
 } from './session-store.js';
 import { getToolKind, toBedrockTools } from './tools.js';
-import type { AgentEvent, MemoryKind, ToolResultInput } from './types.js';
+import type { AgentEvent, MemoryKind, PlanDecisionInput, ToolResultInput } from './types.js';
 
 export type LoopMode = 'plan' | 'build';
 
 const MAX_INNER_TURNS = 12;
+/** FR-08: approval required when unique file paths exceed this (single-file bypass). */
+const PLAN_FILE_THRESHOLD = Number(process.env.PLAN_FILE_THRESHOLD ?? 3);
+
+function isFileTool(name: string): boolean {
+  return name === 'write_file' || name === 'edit_file';
+}
+
+function fileReason(toolName: string): string {
+  return toolName === 'write_file' ? 'create or replace file' : 'edit existing file';
+}
 
 function systemPrompt(mode: LoopMode, memoryBlock: string): string {
   const base =
@@ -138,6 +149,7 @@ async function executeServerTool(params: {
         tool.input,
         `memory_id=${id}`,
       );
+      await refreshProjectMemorySummary(db, projectId);
       return {
         events,
         result: {
@@ -178,6 +190,7 @@ async function* resolveToolBatch(params: {
   db: DbClient;
   sessionId: string;
   projectId: string;
+  mode: LoopMode;
   toolUses: ParsedToolUse[];
   assistantContent: ContentBlock[];
 }): AsyncGenerator<
@@ -187,7 +200,20 @@ async function* resolveToolBatch(params: {
   const resolved: BedrockToolResult[] = [];
   let pending: PendingToolState | null = null;
 
+  const fileTools = params.toolUses.filter((t) => isFileTool(t.name));
+  const uniquePaths = new Set(
+    fileTools.map((t) => String(t.input.path ?? '')).filter(Boolean),
+  );
+  const needsPlanApproval =
+    params.mode === 'build' &&
+    uniquePaths.size > PLAN_FILE_THRESHOLD &&
+    uniquePaths.size > 1;
+
   for (const tool of params.toolUses) {
+    if (needsPlanApproval && isFileTool(tool.name)) {
+      continue;
+    }
+
     const kind = getToolKind(tool.name);
 
     if (kind === 'server') {
@@ -252,6 +278,34 @@ async function* resolveToolBatch(params: {
     break;
   }
 
+  if (needsPlanApproval && fileTools.length > 0) {
+    const planId = crypto.randomUUID();
+    const files = fileTools.map((t) => ({
+      path: String(t.input.path ?? ''),
+      reason: fileReason(t.name),
+    }));
+    yield {
+      type: 'plan_preview',
+      planId,
+      files,
+    };
+    yield { type: 'plan_awaiting_approval', planId };
+    pending = {
+      awaiting: {
+        toolCallId: planId,
+        tool: 'plan_approval',
+        args: { planId, files },
+      },
+      deferredToolUses: fileTools.map((t) => ({
+        toolUseId: t.toolUseId,
+        name: t.name,
+        input: t.input,
+      })),
+      resolvedResults: [...resolved],
+      assistantContent: params.assistantContent as unknown[],
+    };
+  }
+
   return { pending, resolved };
 }
 
@@ -292,9 +346,16 @@ async function* runAgentLoop(params: {
       db,
       sessionId,
       projectId,
+      mode,
       toolUses: turnResult.toolUses,
       assistantContent: turnResult.assistantContent,
     });
+
+    if (batch.pending?.awaiting.tool === 'plan_approval') {
+      await setSessionStatus(db, sessionId, 'awaiting_plan_approval', batch.pending);
+      yield { type: 'done', reason: 'awaiting_plan_approval' };
+      return;
+    }
 
     if (batch.pending) {
       await setSessionStatus(db, sessionId, 'awaiting_tool', batch.pending);
@@ -346,6 +407,23 @@ export async function* runPromptTurn(params: {
     yield { type: 'done', reason: 'awaiting_tool' };
     return;
   }
+  if (session.status === 'awaiting_plan_approval') {
+    yield {
+      type: 'error',
+      message:
+        'Session is awaiting plan approval. POST /plan-decision before a new prompt.',
+    };
+    yield { type: 'done', reason: 'awaiting_plan_approval' };
+    return;
+  }
+
+  await params.db.query(
+    `UPDATE sessions
+     SET model_config = jsonb_set(COALESCE(model_config, '{}'::jsonb), '{mode}', $2::jsonb),
+         updated_at = now()
+     WHERE id = $1::uuid`,
+    [params.sessionId, JSON.stringify(mode)],
+  );
 
   const hits = await recallProjectMemory({
     db: params.db,
@@ -473,6 +551,169 @@ export async function* continueAfterTool(params: {
 
   const mode: LoopMode =
     (session.model_config?.mode as LoopMode | undefined) ?? 'build';
+  const system = systemPrompt(mode, memoryBlockFromHits(hits));
+
+  yield* runAgentLoop({
+    db: params.db,
+    sessionId: params.sessionId,
+    projectId: params.projectId,
+    mode,
+    messages,
+    system,
+  });
+}
+
+async function* executeDeferredFileTools(params: {
+  db: DbClient;
+  sessionId: string;
+  deferred: NonNullable<PendingToolState['deferredToolUses']>;
+}): AsyncGenerator<AgentEvent, BedrockToolResult[]> {
+  const results: BedrockToolResult[] = [];
+  for (const tool of params.deferred) {
+    yield {
+      type: 'tool_call',
+      id: tool.toolUseId,
+      tool: tool.name,
+      args: tool.input,
+      awaitResult: false,
+    };
+    await appendBuildEvent(
+      params.db,
+      params.sessionId,
+      tool.name,
+      tool.input,
+      'plan approved',
+    );
+    results.push({
+      toolUseId: tool.toolUseId,
+      status: 'success',
+      content: [
+        {
+          text: `Applied ${tool.name} on ${String(tool.input.path ?? 'file')} after plan approval.`,
+        },
+      ],
+    });
+  }
+  return results;
+}
+
+/**
+ * Resume after user approves, adjusts, or cancels a file-write plan.
+ */
+export async function* continueAfterPlanDecision(params: {
+  db: DbClient;
+  sessionId: string;
+  projectId: string;
+  decision: PlanDecisionInput;
+}): AsyncGenerator<AgentEvent> {
+  const session = await getSession(params.db, params.sessionId);
+  if (!session) {
+    yield { type: 'error', message: `Unknown session ${params.sessionId}` };
+    yield { type: 'done', reason: 'complete' };
+    return;
+  }
+  if (session.project_id !== params.projectId) {
+    yield { type: 'error', message: 'projectId does not match session' };
+    yield { type: 'done', reason: 'complete' };
+    return;
+  }
+
+  const pending = session.pending_tool;
+  if (!pending || session.status !== 'awaiting_plan_approval') {
+    yield {
+      type: 'error',
+      message: 'Session has no plan awaiting approval',
+    };
+    yield { type: 'done', reason: 'complete' };
+    return;
+  }
+  if (pending.awaiting.tool !== 'plan_approval') {
+    yield { type: 'error', message: 'Pending state is not a plan approval' };
+    yield { type: 'done', reason: 'complete' };
+    return;
+  }
+
+  const storedPlanId = String(pending.awaiting.args.planId ?? '');
+  if (storedPlanId !== params.decision.planId) {
+    yield {
+      type: 'error',
+      message: `Expected planId ${storedPlanId}, got ${params.decision.planId}`,
+    };
+    yield { type: 'done', reason: 'awaiting_plan_approval' };
+    return;
+  }
+
+  const mode: LoopMode =
+    (session.model_config?.mode as LoopMode | undefined) ?? 'build';
+
+  if (params.decision.decision === 'cancel') {
+    await setSessionStatus(params.db, params.sessionId, 'active', null);
+    yield {
+      type: 'error',
+      message: 'Plan cancelled — no files were written.',
+    };
+    yield { type: 'done', reason: 'complete' };
+    return;
+  }
+
+  if (params.decision.decision === 'adjust') {
+    const adjustment =
+      params.decision.adjustment?.trim() ||
+      'Please revise the file plan based on my feedback.';
+    await setSessionStatus(params.db, params.sessionId, 'active', null);
+    await appendMessage(params.db, params.sessionId, 'user', [
+      { text: `[Plan adjustment] ${adjustment}` },
+    ]);
+    const history = await listMessages(params.db, params.sessionId);
+    const messages = storedToBedrockMessages(history);
+    const hits = await recallProjectMemory({
+      db: params.db,
+      projectId: params.projectId,
+      query: adjustment,
+      limit: 5,
+    });
+    yield {
+      type: 'memory_recalled',
+      count: hits.length,
+      kinds: [...new Set(hits.map((h) => h.kind))],
+    };
+    const system = systemPrompt(mode, memoryBlockFromHits(hits));
+    yield* runAgentLoop({
+      db: params.db,
+      sessionId: params.sessionId,
+      projectId: params.projectId,
+      mode,
+      messages,
+      system,
+    });
+    return;
+  }
+
+  const deferred = pending.deferredToolUses ?? [];
+  const deferredResults = yield* executeDeferredFileTools({
+    db: params.db,
+    sessionId: params.sessionId,
+    deferred,
+  });
+
+  const allResults = [...pending.resolvedResults, ...deferredResults];
+  const toolMsg = toolResultMessage(allResults);
+  await appendMessage(params.db, params.sessionId, 'user', toolMsg.content);
+  await setSessionStatus(params.db, params.sessionId, 'active', null);
+
+  const history = await listMessages(params.db, params.sessionId);
+  const messages = storedToBedrockMessages(history);
+  const hits = await recallProjectMemory({
+    db: params.db,
+    projectId: params.projectId,
+    query: 'plan approved file writes',
+    limit: 3,
+  });
+  yield {
+    type: 'memory_recalled',
+    count: hits.length,
+    kinds: [...new Set(hits.map((h) => h.kind))],
+  };
   const system = systemPrompt(mode, memoryBlockFromHits(hits));
 
   yield* runAgentLoop({

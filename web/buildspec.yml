@@ -52,6 +52,39 @@ phases:
 
         echo "VITE_API_URL=${API_URL}"
         echo "VITE_API_URL=${API_URL}" > web/.env.production
+
+        read_ssm() {
+          aws ssm get-parameter --name "$1" --query 'Parameter.Value' --output text 2>/dev/null || true
+        }
+
+        COGNITO_POOL=$(read_ssm "/walkcroach/${ENV}/web/cognito_user_pool_id")
+        COGNITO_CLIENT=$(read_ssm "/walkcroach/${ENV}/web/cognito_client_id")
+        COGNITO_DOMAIN=$(read_ssm "/walkcroach/${ENV}/web/cognito_hosted_domain")
+
+        if [ -n "$COGNITO_CLIENT" ] && [ "$COGNITO_CLIENT" != "None" ]; then
+          echo "VITE_COGNITO_CLIENT_ID=${COGNITO_CLIENT}" >> web/.env.production
+        fi
+        if [ -n "$COGNITO_DOMAIN" ] && [ "$COGNITO_DOMAIN" != "None" ]; then
+          echo "VITE_COGNITO_HOSTED_DOMAIN=${COGNITO_DOMAIN}" >> web/.env.production
+        fi
+        if [ "$ENV" = "prod" ]; then
+          echo "VITE_ALLOW_DEV_AUTH=false" >> web/.env.production
+        else
+          echo "VITE_ALLOW_DEV_AUTH=true" >> web/.env.production
+        fi
+        if [ -n "$COGNITO_POOL" ] && [ "$COGNITO_POOL" != "None" ]; then
+          echo "Cognito pool ${COGNITO_POOL} configured for web build"
+        fi
+
+        GITHUB_SLUG=$(read_ssm "/walkcroach/${ENV}/github/app_slug")
+        if [ -n "$GITHUB_SLUG" ] && [ "$GITHUB_SLUG" != "None" ]; then
+          echo "VITE_GITHUB_APP_ENABLED=true" >> web/.env.production
+        fi
+        if [ "$ENV" = "prod" ]; then
+          echo "VITE_ALLOW_GITHUB_PAT=false" >> web/.env.production
+        else
+          echo "VITE_ALLOW_GITHUB_PAT=true" >> web/.env.production
+        fi
   build:
     commands:
       - |

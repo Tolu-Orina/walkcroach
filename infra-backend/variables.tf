@@ -73,3 +73,45 @@ variable "api_stage_name" {
   description = "API Gateway stage name"
   default     = "v1"
 }
+
+variable "hosted_zone_name" {
+  type        = string
+  description = "Route53 zone for deployed app wildcard (prod)"
+  default     = ""
+}
+
+variable "apps_wildcard_domain" {
+  type        = string
+  description = "Base domain for user apps: {slug}.{apps_wildcard_domain}"
+  default     = ""
+}
+
+variable "web_app_url" {
+  type        = string
+  description = "Public builder SPA URL (for Cognito OAuth callbacks)"
+  default     = ""
+}
+
+variable "allow_dev_auth" {
+  type        = bool
+  description = "Allow Bearer dev:* tokens (disable in prod)"
+  default     = true
+}
+
+variable "enable_apigw_cognito_authorizer" {
+  type        = bool
+  description = "Enforce Cognito JWT at API Gateway (prod recommended)"
+  default     = false
+}
+
+variable "allow_github_pat" {
+  type        = bool
+  description = "Allow legacy GitHub PAT connect in Lambda (disable in prod)"
+  default     = true
+}
+
+variable "github_ssm_prefix" {
+  type        = string
+  description = "Override SSM prefix for manually created GitHub App parameters"
+  default     = ""
+}
