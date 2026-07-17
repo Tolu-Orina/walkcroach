@@ -36,7 +36,8 @@ terraform apply -var-file=environments/dev.tfvars
 ```
 
 Then ensure Secrets Manager has `walkcroach/{env}/runtime` (manual) with JSON keys
-`crdb_connection_string`, `crdb_mcp_api_key`, `aws_bearer_token_bedrock`, `walkcroach_api_key`.
+`crdb_connection_string`, `crdb_mcp_api_key`, `walkcroach_api_key`.
+(`aws_bearer_token_bedrock` is optional — local dev only; Lambda uses IAM for Bedrock.)
 
 Deploy order: **infra-backend → SSM api_url → infra-web**.
 

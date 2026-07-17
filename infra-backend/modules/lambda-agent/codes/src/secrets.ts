@@ -54,8 +54,15 @@ export async function ensureRuntimeSecrets(): Promise<void> {
   if (secret.crdb_mcp_api_key) {
     process.env.CRDB_MCP_API_KEY = secret.crdb_mcp_api_key;
   }
-  if (secret.aws_bearer_token_bedrock) {
+  // Lambda uses the execution role for Bedrock (IAM). Bearer tokens expire (~12h)
+  // and override IAM when set — only use them for local dev.
+  if (
+    secret.aws_bearer_token_bedrock &&
+    !process.env.AWS_LAMBDA_FUNCTION_NAME
+  ) {
     process.env.AWS_BEARER_TOKEN_BEDROCK = secret.aws_bearer_token_bedrock;
+  } else {
+    delete process.env.AWS_BEARER_TOKEN_BEDROCK;
   }
   if (secret.walkcroach_api_key) {
     process.env.WALKCROACH_API_KEY = secret.walkcroach_api_key;

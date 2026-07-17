@@ -9,9 +9,9 @@ import type { AgentEvent } from './types.js';
 import type { toBedrockTools } from './tools.js';
 
 function getClient() {
-  // Per AWS docs: AWS_BEARER_TOKEN_BEDROCK → httpBearerAuth automatically.
+  // Lambda: IAM via execution role. Local: optional AWS_BEARER_TOKEN_BEDROCK from .env.
   return new BedrockRuntimeClient({
-    region: process.env.AWS_REGION ?? 'eu-west-2',
+    region: process.env.BEDROCK_REGION ?? process.env.AWS_REGION ?? 'eu-west-2',
   });
 }
 
