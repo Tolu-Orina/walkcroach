@@ -259,14 +259,20 @@ Resources:
                 Action:
                   - apigateway:*
                 Resource: '*'
-              # module.secrets data source
+              # module.secrets data source (AWS provider also reads resource policy)
+              - Sid: SecretsManagerList
+                Effect: Allow
+                Action:
+                  - secretsmanager:ListSecrets
+                Resource: '*'
               - Sid: SecretsManagerRead
                 Effect: Allow
                 Action:
                   - secretsmanager:DescribeSecret
                   - secretsmanager:GetSecretValue
-                  - secretsmanager:ListSecrets
-                Resource: '*'
+                  - secretsmanager:GetResourcePolicy
+                  - secretsmanager:ListSecretVersionIds
+                Resource: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:walkcroach/*'
               # module.ssm
               - Sid: SsmParameters
                 Effect: Allow
