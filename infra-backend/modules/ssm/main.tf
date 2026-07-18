@@ -76,8 +76,9 @@ resource "aws_ssm_parameter" "cognito_client_id" {
   tags        = var.tags
 }
 
+# Always create — values come from Cognito resource attrs that are unknown at
+# plan time; using count = value != "" makes Terraform fail planning.
 resource "aws_ssm_parameter" "cognito_ide_client_id" {
-  count       = var.cognito_ide_client_id != "" ? 1 : 0
   name        = "/${var.name_prefix}/${var.environment}/ide/cognito_client_id"
   description = "Cognito app client ID for WalkCroach IDE PKCE"
   type        = "String"
@@ -87,7 +88,6 @@ resource "aws_ssm_parameter" "cognito_ide_client_id" {
 }
 
 resource "aws_ssm_parameter" "cognito_hosted_ui_url" {
-  count       = var.cognito_hosted_ui_url != "" ? 1 : 0
   name        = "/${var.name_prefix}/${var.environment}/ide/cognito_hosted_ui_url"
   description = "Cognito Hosted UI base URL for WalkCroach IDE PKCE"
   type        = "String"
