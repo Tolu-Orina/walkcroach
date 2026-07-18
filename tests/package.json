@@ -1,0 +1,23 @@
+{
+  "name": "@walkcroach/tests",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Deployed API integration + Playwright E2E across web / chrome / IDE",
+  "scripts": {
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:e2e": "playwright test",
+    "test:e2e:web": "playwright test e2e/web",
+    "test:e2e:chrome": "playwright test e2e/chrome",
+    "install:browsers": "playwright install chromium --with-deps"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.52.0",
+    "@types/node": "^22.15.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

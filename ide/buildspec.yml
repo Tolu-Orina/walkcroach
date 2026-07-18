@@ -1,0 +1,30 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 20
+  pre_build:
+    commands:
+      - echo "WalkCroach IDE + agent-engine unit / typecheck / build"
+  build:
+    commands:
+      - |
+        cd packages/agent-engine
+        npm ci
+        npm run typecheck
+        npm run test
+        npm run build
+      - |
+        cd ide
+        npm ci
+        npm run typecheck
+        npm run build
+        npm run package:vsix
+artifacts:
+  files:
+    - ide/walkcroach-ide.vsix
+    - ide/dist/**/*
+    - ide/media/**/*
+    - packages/agent-engine/dist/**/*
+  name: ide-unit-test

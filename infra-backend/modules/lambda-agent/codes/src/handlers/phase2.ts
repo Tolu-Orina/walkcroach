@@ -22,7 +22,12 @@ type RestResult = {
 const INLINE_EDIT_DAILY_CAP = Number(process.env.INLINE_EDIT_DAILY_CAP ?? 50);
 
 function shortDbName(projectId: string): string {
-  return `wc_app_${projectId.replace(/-/g, '').slice(0, 12)}`;
+  const name = `wc_app_${projectId.replace(/-/g, '').slice(0, 12)}`;
+  // Identifiers cannot be parameterized; enforce a strict allowlist before interpolation.
+  if (!/^wc_app_[a-f0-9]{12}$/i.test(name)) {
+    throw new Error('invalid project database name');
+  }
+  return name;
 }
 
 async function countInlineEditsToday(
@@ -121,6 +126,15 @@ export async function handleProvisionDatabase(
     });
   }
 
+  // Debit before CREATE DATABASE so concurrent provision requests cannot overspend.
+  const debit = await debitCredits(db, auth.ownerId, 'db_provision', projectId, {});
+  if (!debit.ok) {
+    return jsonResponse(402, {
+      error: 'insufficient credits',
+      remaining: debit.remaining,
+    });
+  }
+
   const dbName = shortDbName(projectId);
   const adminUrl = process.env.CRDB_CONNECTION_STRING;
   if (!adminUrl) {
@@ -129,7 +143,8 @@ export async function handleProvisionDatabase(
 
   const admin = createDbClient(adminUrl);
   try {
-    await admin.query(`CREATE DATABASE IF NOT EXISTS ${dbName}`);
+    // dbName is validated in shortDbName(); quote as a SQL identifier.
+    await admin.query(`CREATE DATABASE IF NOT EXISTS "${dbName}"`);
   } catch (err) {
     await admin.close();
     return jsonResponse(500, {
@@ -154,8 +169,6 @@ export async function handleProvisionDatabase(
      VALUES ($1::uuid, $2, $3)`,
     [projectId, dbName, prefix],
   );
-
-  await debitCredits(db, auth.ownerId, 'db_provision', projectId, { database: dbName });
 
   return jsonResponse(201, {
     ok: true,
@@ -185,10 +198,6 @@ export async function handleProxySql(
   const sql = body.sql?.trim();
   if (!sql) return jsonResponse(400, { error: 'sql required' });
 
-  const normalized = sql.toLowerCase();
-  if (body.readOnly && !normalized.startsWith('select')) {
-    return jsonResponse(403, { error: 'readOnly allows SELECT only' });
-  }
   if (
     /\b(drop|truncate|alter|grant|revoke)\b/i.test(sql) &&
     !process.env.ALLOW_DANGEROUS_SQL
@@ -202,14 +211,30 @@ export async function handleProxySql(
   }
 
   const appDb = createDbClient(creds.connectionString);
+  const client = await appDb.pool.connect();
   try {
-    const { rows } = await appDb.query(sql, body.params ?? []);
-    return jsonResponse(200, { rows });
-  } catch (err) {
-    return jsonResponse(400, {
-      error: err instanceof Error ? err.message : String(err),
-    });
+    // Enforce read-only at the session level so CTE/comment bypasses cannot write.
+    if (body.readOnly) {
+      await client.query('BEGIN READ ONLY');
+    }
+    try {
+      const { rows } = await client.query(sql, body.params ?? []);
+      if (body.readOnly) await client.query('COMMIT');
+      return jsonResponse(200, { rows });
+    } catch (err) {
+      if (body.readOnly) {
+        try {
+          await client.query('ROLLBACK');
+        } catch {
+          /* ignore */
+        }
+      }
+      return jsonResponse(400, {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   } finally {
+    client.release();
     await appDb.close();
   }
 }

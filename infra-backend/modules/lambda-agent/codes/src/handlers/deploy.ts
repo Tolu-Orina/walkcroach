@@ -192,6 +192,15 @@ export async function handleTriggerDeploy(
     });
   }
 
+  // Debit before packaging/build so concurrent requests cannot overspend.
+  const usage = await debitCredits(db, auth.ownerId, 'deploy', projectId, {});
+  if (!usage.ok) {
+    return jsonResponse(402, {
+      error: 'insufficient credits',
+      remaining: usage.remaining,
+    });
+  }
+
   const { rows: meta } = await db.query<{ name: string }>(
     `SELECT name FROM projects WHERE id = $1::uuid`,
     [projectId],
@@ -229,11 +238,6 @@ export async function handleTriggerDeploy(
     `UPDATE projects SET status = 'deployed', updated_at = now() WHERE id = $1::uuid`,
     [projectId],
   );
-
-  const usage = await debitCredits(db, auth.ownerId, 'deploy', projectId, {
-    deploymentId,
-    slug,
-  });
 
   return jsonResponse(202, {
     deploymentId,

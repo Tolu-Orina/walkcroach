@@ -1,0 +1,48 @@
+# Example CI workflow — WalkCroach CLI (Phase D / UJ-D9)
+#
+# Copy into .github/workflows/ or reference from docs.
+# Requires AWS credentials for Bedrock (OIDC or secrets).
+# --yes auto-approves safe local tools only — never ccloud / MCP writes / infra (FR-D25).
+
+name: walkcroach-cli-fixture
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'cli/**'
+      - 'packages/agent-engine/**'
+
+jobs:
+  fixture:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: walkcroach
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build engine + CLI
+        run: |
+          cd packages/agent-engine && npm ci && npm run build && npm test
+          cd ../../cli && npm ci && npm run build && npm test
+
+      - name: Doctor (JSON)
+        run: node dist/bin.js --json doctor
+        working-directory: walkcroach/cli
+
+      - name: Non-interactive agent on fixture (JSON)
+        working-directory: walkcroach/cli/fixtures/sample-repo
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION || 'eu-west-2' }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+        run: |
+          node ../../../dist/bin.js --json run --yes --plain \
+            "Add a health() function to src/greet.ts that returns ok, and mention it in WALKCROACH.md"
+        continue-on-error: true

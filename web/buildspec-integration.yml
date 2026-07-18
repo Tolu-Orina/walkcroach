@@ -1,6 +1,58 @@
 version: 0.2
 
+# Deployed API integration across agent + chrome + IDE surfaces.
+# Target: already-deployed Test environment (SSM /walkcroach/test/web/*).
+# Skips CRDB-gated suites when the target rejects / cannot reach DB.
+
+env:
+  variables:
+    WALKCROACH_ENV: test
+    ALLOW_DEV_AUTH: "true"
+    CI: "true"
+
 phases:
+  install:
+    runtime-versions:
+      nodejs: 20
+  pre_build:
+    commands:
+      - |
+        set -eu
+        echo "Resolving Test API URL from SSM"
+        API_URL=$(aws ssm get-parameter \
+          --name "/walkcroach/test/web/api_url" \
+          --query 'Parameter.Value' \
+          --output text 2>/dev/null || true)
+        if [ -z "$API_URL" ] || [ "$API_URL" = "None" ]; then
+          echo "ERROR: /walkcroach/test/web/api_url missing — deploy infra-backend (test) first"
+          exit 1
+        fi
+        export WALKCROACH_API_URL="$API_URL"
+        echo "WALKCROACH_API_URL=${WALKCROACH_API_URL}"
+        echo "WALKCROACH_API_URL=${WALKCROACH_API_URL}" >> "$CODEBUILD_SRC_DIR/tests.env"
   build:
     commands:
-      - echo "Integration/E2E deferred for WalkCroach MVP — skipping"
+      - |
+        set -eu
+        # shellcheck disable=SC1091
+        . "$CODEBUILD_SRC_DIR/tests.env"
+        export WALKCROACH_API_URL
+        export WALKCROACH_ENV=test
+        export ALLOW_DEV_AUTH=true
+
+        echo "== Local Lambda integration (chrome + ide + agent) =="
+        cd "$CODEBUILD_SRC_DIR/infra-backend"
+        npm ci
+        npm run build:packages
+        npm run test -w @walkcroach/backend -- --run src/local-api.integration.test.ts src/local-api.db.integration.test.ts
+        npm run test -w @walkcroach/chrome-api -- --run src/chrome-api.integration.test.ts
+        npm run test -w @walkcroach/ide-api -- --run src/ide-api.integration.test.ts
+
+        echo "== Deployed surface integration (Test API) =="
+        cd "$CODEBUILD_SRC_DIR/tests"
+        npm ci
+        npm run test:integration
+artifacts:
+  files:
+    - tests/**/*
+  name: integration-test

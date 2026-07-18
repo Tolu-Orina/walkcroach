@@ -1,0 +1,43 @@
+{
+  "name": "@walkcroach/cli",
+  "version": "0.1.0",
+  "private": true,
+  "description": "WalkCroach CLI — same agent engine as the IDE (Phase D)",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "walkcroach": "./dist/bin.js"
+  },
+  "main": "./dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "start": "node --import tsx src/bin.ts",
+    "walkcroach": "node --import tsx src/bin.ts"
+  },
+  "dependencies": {
+    "@walkcroach/agent-engine": "file:../packages/agent-engine",
+    "commander": "^13.1.0",
+    "ink": "^5.2.0",
+    "react": "18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "@types/react": "18.3.18",
+    "@vitest/coverage-v8": "^3.2.7",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

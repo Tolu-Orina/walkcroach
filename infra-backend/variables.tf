@@ -50,6 +50,42 @@ variable "lambda_memory_mb" {
   default     = 1024
 }
 
+variable "chrome_lambda_zip_path" {
+  type        = string
+  description = "Path to Chrome Lambda zip. Empty = modules/lambda-chrome/.build/lambda.zip"
+  default     = ""
+}
+
+variable "chrome_lambda_timeout" {
+  type        = number
+  description = "Chrome BFF Lambda timeout seconds"
+  default     = 60
+}
+
+variable "chrome_lambda_memory_mb" {
+  type        = number
+  description = "Chrome BFF Lambda memory (MB)"
+  default     = 512
+}
+
+variable "ide_lambda_zip_path" {
+  type        = string
+  description = "Path to IDE Lambda zip. Empty = modules/lambda-ide/.build/lambda.zip"
+  default     = ""
+}
+
+variable "ide_lambda_timeout" {
+  type        = number
+  description = "IDE BFF Lambda timeout seconds"
+  default     = 60
+}
+
+variable "ide_lambda_memory_mb" {
+  type        = number
+  description = "IDE BFF Lambda memory (MB)"
+  default     = 512
+}
+
 variable "bedrock_region" {
   type        = string
   description = "Region for Bedrock API calls (may match aws_region)"
@@ -94,8 +130,8 @@ variable "web_app_url" {
 
 variable "allow_dev_auth" {
   type        = bool
-  description = "Allow Bearer dev:* tokens (disable in prod)"
-  default     = true
+  description = "Allow Bearer dev:* tokens (disable in prod; prefer false)"
+  default     = false
 }
 
 variable "enable_apigw_cognito_authorizer" {

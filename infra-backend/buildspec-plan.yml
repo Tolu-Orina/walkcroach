@@ -34,11 +34,13 @@ phases:
           -backend-config="encrypt=true" \
           -backend-config="dynamodb_table=walkcroach-tf-lock"
       - npm ci
-      - npm run package:lambda
+      - npm run package:lambda:all
       - terraform plan -input=false -var-file="environments/${TF_VAR_environment}.tfvars" -out=tfplan
 artifacts:
   files:
     - infra-backend/tfplan
     - infra-backend/modules/lambda-agent/.build/lambda.zip
+    - infra-backend/modules/lambda-chrome/.build/lambda.zip
+    - infra-backend/modules/lambda-ide/.build/lambda.zip
     - infra-backend/**/*
   name: terraform-plan-${TF_VAR_environment}

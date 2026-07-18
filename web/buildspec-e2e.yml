@@ -1,6 +1,89 @@
 version: 0.2
 
+# Playwright E2E:
+# - Web smoke against deployed Test SPA (NFR-26 partial)
+# - Chrome unpacked extension load (requires chrome build artifact or rebuild)
+
+env:
+  variables:
+    WALKCROACH_ENV: test
+    CI: "true"
+    WALKCROACH_REQUIRE_PROD_ENV: "false"
+
 phases:
+  install:
+    runtime-versions:
+      nodejs: 20
+  pre_build:
+    commands:
+      - |
+        set -eu
+        ENV=test
+        read_ssm() {
+          aws ssm get-parameter --name "$1" --query 'Parameter.Value' --output text 2>/dev/null || true
+        }
+
+        WEB_URL=$(read_ssm "/walkcroach/${ENV}/web/web_url")
+        API_URL=$(read_ssm "/walkcroach/${ENV}/web/api_url")
+
+        # Fallback: CloudFront URL from last terraform web deploy artifact (if present)
+        if [ -z "$WEB_URL" ] || [ "$WEB_URL" = "None" ]; then
+          for candidate in \
+            "${CODEBUILD_SRC_DIR_TerraformDeployOutputTest:-}" \
+            "${CODEBUILD_SRC_DIR_WebAppBuildOutputTest:-}"; do
+            if [ -n "$candidate" ] && [ -f "${candidate}/terraform-web-outputs.json" ]; then
+              WEB_URL=$(node -e "const j=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'));process.stdout.write(j.cloudfront_url?.value||j.app_domain?.value||'');" \
+                "${candidate}/terraform-web-outputs.json" || true)
+              if [ -n "$WEB_URL" ]; then break; fi
+            fi
+          done
+        fi
+
+        if [ -z "$WEB_URL" ] || [ "$WEB_URL" = "None" ]; then
+          echo "ERROR: WALKCROACH_WEB_URL unresolved."
+          echo "  Publish SSM /walkcroach/test/web/web_url (backend web_app_url) or pass CloudFront output."
+          exit 1
+        fi
+
+        case "$WEB_URL" in
+          http://*|https://*) ;;
+          *) WEB_URL="https://${WEB_URL}" ;;
+        esac
+
+        export WALKCROACH_WEB_URL="$WEB_URL"
+        export WALKCROACH_API_URL="${API_URL:-}"
+        echo "WALKCROACH_WEB_URL=${WALKCROACH_WEB_URL}"
+        {
+          echo "WALKCROACH_WEB_URL=${WALKCROACH_WEB_URL}"
+          echo "WALKCROACH_API_URL=${WALKCROACH_API_URL}"
+        } >> "$CODEBUILD_SRC_DIR/e2e.env"
   build:
     commands:
-      - echo "Integration/E2E deferred for WalkCroach MVP — skipping"
+      - |
+        set -eu
+        # shellcheck disable=SC1091
+        . "$CODEBUILD_SRC_DIR/e2e.env"
+        export WALKCROACH_WEB_URL WALKCROACH_API_URL
+
+        echo "== Build Chrome extension (unpacked) for Playwright =="
+        cd "$CODEBUILD_SRC_DIR/chrome"
+        npm ci
+        if [ -n "${WALKCROACH_API_URL:-}" ] && [ "$WALKCROACH_API_URL" != "None" ]; then
+          export WALKCROACH_API_BASE="$WALKCROACH_API_URL"
+          export WALKCROACH_PRIVACY_URL="${WALKCROACH_WEB_URL}/chrome-privacy.html"
+        fi
+        npm run build
+
+        echo "== Playwright E2E (web smoke + chrome extension) =="
+        cd "$CODEBUILD_SRC_DIR/tests"
+        npm ci
+        npx playwright install chromium --with-deps
+        export WALKCROACH_CHROME_EXTENSION_PATH="$CODEBUILD_SRC_DIR/chrome/.output/chrome-mv3"
+        # Extensions require a display; use Xvfb in CodeBuild
+        xvfb-run -a npm run test:e2e
+artifacts:
+  files:
+    - tests/e2e-junit.xml
+    - tests/test-results/**/*
+  name: e2e-test
+  discard-paths: no

@@ -209,6 +209,12 @@ resource "aws_api_gateway_deployment" "this" {
         aws_api_gateway_integration.tool_result_post.id,
         aws_api_gateway_integration.proxy_any.id,
         aws_api_gateway_integration.proxy_options.id,
+        aws_api_gateway_integration.chrome_proxy_any.id,
+        aws_api_gateway_integration.chrome_proxy_options.id,
+        aws_api_gateway_integration.chrome_options.id,
+        aws_api_gateway_integration.ide_proxy_any.id,
+        aws_api_gateway_integration.ide_proxy_options.id,
+        aws_api_gateway_integration.ide_options.id,
       ],
       [for k, v in aws_api_gateway_integration.options : v.id],
     )))
@@ -227,6 +233,12 @@ resource "aws_api_gateway_deployment" "this" {
     aws_api_gateway_integration.tool_result_post,
     aws_api_gateway_integration.proxy_any,
     aws_api_gateway_integration.proxy_options,
+    aws_api_gateway_integration.chrome_proxy_any,
+    aws_api_gateway_integration.chrome_proxy_options,
+    aws_api_gateway_integration.chrome_options,
+    aws_api_gateway_integration.ide_proxy_any,
+    aws_api_gateway_integration.ide_proxy_options,
+    aws_api_gateway_integration.ide_options,
     aws_api_gateway_integration.options,
   ]
 }

@@ -1,0 +1,121 @@
+{
+  "version": 1,
+  "profiles": [
+    {
+      "id": "linkedin-profile",
+      "sector": "recruiting",
+      "label": "Extract candidate summary",
+      "actionId": "extract_candidate",
+      "captureType": "candidate",
+      "defaultWorkspace": "Hiring",
+      "match": {
+        "hostSuffix": ["linkedin.com"],
+        "pathIncludes": ["/in/"]
+      },
+      "fields": ["name", "role", "skills", "contact", "notes"]
+    },
+    {
+      "id": "indeed-job",
+      "sector": "recruiting",
+      "label": "Extract candidate summary",
+      "actionId": "extract_candidate",
+      "captureType": "candidate",
+      "defaultWorkspace": "Hiring",
+      "match": {
+        "hostSuffix": ["indeed.com", "indeed.co.uk"],
+        "pathIncludes": ["/viewjob", "/rc/clk", "/cmp/"]
+      },
+      "fields": ["name", "role", "skills", "contact", "notes"]
+    },
+    {
+      "id": "linkedin-company",
+      "sector": "sales",
+      "label": "Extract lead/company summary",
+      "actionId": "extract_lead",
+      "captureType": "lead",
+      "defaultWorkspace": "Leads",
+      "match": {
+        "hostSuffix": ["linkedin.com"],
+        "pathIncludes": ["/company/"]
+      },
+      "fields": ["company", "industry", "size", "location", "notes"]
+    },
+    {
+      "id": "generic-company",
+      "sector": "sales",
+      "label": "Extract lead/company summary",
+      "actionId": "extract_lead",
+      "captureType": "lead",
+      "defaultWorkspace": "Leads",
+      "match": {
+        "hostSuffix": ["crunchbase.com", "apollo.io", "zoominfo.com"],
+        "pathIncludes": ["/organization/", "/companies/", "/company/"]
+      },
+      "fields": ["company", "industry", "size", "location", "notes"]
+    },
+    {
+      "id": "product-page",
+      "sector": "retail",
+      "label": "Track this price",
+      "actionId": "track_price",
+      "captureType": "price",
+      "defaultWorkspace": "Pricing",
+      "match": {
+        "hostSuffix": [
+          "amazon.com",
+          "amazon.co.uk",
+          "ebay.com",
+          "ebay.co.uk",
+          "etsy.com",
+          "walmart.com",
+          "shopify.com"
+        ],
+        "pathIncludes": ["/dp/", "/gp/product/", "/itm/", "/listing/", "/ip/"]
+      },
+      "domHints": ["[itemprop=price]", ".price", "[data-asin-price]"],
+      "fields": ["price", "currency", "productName"]
+    },
+    {
+      "id": "real-estate-listing",
+      "sector": "real_estate",
+      "label": "Summarize this listing",
+      "actionId": "summarize_listing",
+      "captureType": "listing",
+      "defaultWorkspace": "Property",
+      "match": {
+        "hostSuffix": [
+          "zillow.com",
+          "realtor.com",
+          "redfin.com",
+          "rightmove.co.uk",
+          "zoopla.co.uk"
+        ],
+        "pathIncludes": ["/homedetails/", "/realestateandhomes-detail/", "/properties/", "/for-sale/"]
+      },
+      "fields": ["price", "size", "beds", "baths", "features", "address"]
+    },
+    {
+      "id": "support-compose",
+      "sector": "support",
+      "label": "Draft support reply",
+      "actionId": "draft_support",
+      "captureType": "draft",
+      "defaultWorkspace": "Support",
+      "match": {
+        "hostSuffix": [
+          "mail.google.com",
+          "outlook.live.com",
+          "outlook.office.com",
+          "outlook.office365.com",
+          "zendesk.com",
+          "freshdesk.com",
+          "intercom.com"
+        ],
+        "pathIncludes": []
+      },
+      "domHints": ["[contenteditable=true]", "textarea", ".compose"],
+      "fields": [],
+      "draftTone": "warm, clear, customer-support"
+    }
+  ]
+}

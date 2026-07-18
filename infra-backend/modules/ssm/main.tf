@@ -21,6 +21,24 @@ variable "cognito_client_id" {
   description = "Cognito app client ID for web SPA"
 }
 
+variable "cognito_ide_client_id" {
+  type        = string
+  description = "Cognito app client ID for IDE PKCE"
+  default     = ""
+}
+
+variable "cognito_hosted_ui_url" {
+  type        = string
+  description = "Cognito Hosted UI base URL"
+  default     = ""
+}
+
+variable "web_app_url" {
+  type        = string
+  description = "Public SPA URL for E2E (published to SSM when set)"
+  default     = ""
+}
+
 variable "cognito_region" {
   type        = string
   description = "AWS region of the Cognito user pool (for in-app auth API)"
@@ -58,11 +76,41 @@ resource "aws_ssm_parameter" "cognito_client_id" {
   tags        = var.tags
 }
 
+resource "aws_ssm_parameter" "cognito_ide_client_id" {
+  count       = var.cognito_ide_client_id != "" ? 1 : 0
+  name        = "/${var.name_prefix}/${var.environment}/ide/cognito_client_id"
+  description = "Cognito app client ID for WalkCroach IDE PKCE"
+  type        = "String"
+  value       = var.cognito_ide_client_id
+  overwrite   = true
+  tags        = var.tags
+}
+
+resource "aws_ssm_parameter" "cognito_hosted_ui_url" {
+  count       = var.cognito_hosted_ui_url != "" ? 1 : 0
+  name        = "/${var.name_prefix}/${var.environment}/ide/cognito_hosted_ui_url"
+  description = "Cognito Hosted UI base URL for WalkCroach IDE PKCE"
+  type        = "String"
+  value       = var.cognito_hosted_ui_url
+  overwrite   = true
+  tags        = var.tags
+}
+
 resource "aws_ssm_parameter" "cognito_region" {
   name        = "/${var.name_prefix}/${var.environment}/web/cognito_region"
   description = "Cognito user pool region for WalkCroach in-app auth"
   type        = "String"
   value       = var.cognito_region
+  overwrite   = true
+  tags        = var.tags
+}
+
+resource "aws_ssm_parameter" "web_url" {
+  count       = var.web_app_url != "" ? 1 : 0
+  name        = "/${var.name_prefix}/${var.environment}/web/web_url"
+  description = "WalkCroach SPA base URL for Playwright E2E"
+  type        = "String"
+  value       = var.web_app_url
   overwrite   = true
   tags        = var.tags
 }

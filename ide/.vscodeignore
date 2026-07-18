@@ -1,0 +1,16 @@
+.vscode/**
+src/**
+node_modules/**
+../**
+**/*.ts
+**/*.tsx
+**/*.map
+**/*.vsix
+esbuild.mjs
+esbuild.webview.mjs
+tsconfig.json
+tsconfig.webview.json
+.gitignore
+buildspec.yml
+.vscode/**
+**/protocol.test.ts

@@ -20,7 +20,8 @@ let accessVerifier: CognitoJwtVerifierSingleUserPool<{
 }> | null = null;
 
 function devAuthAllowed(): boolean {
-  return process.env.ALLOW_DEV_AUTH !== 'false';
+  // Opt-in only — missing/unset must never enable forged Bearer dev:* tokens in prod.
+  return process.env.ALLOW_DEV_AUTH === 'true';
 }
 
 function getAccessVerifier():

@@ -1,0 +1,159 @@
+{
+  "name": "walkcroach-ide",
+  "displayName": "WalkCroach IDE",
+  "description": "WalkCroach agentic coding assistant — Cognito PKCE, project link, and cross-surface memory (Phase C)",
+  "version": "0.0.1",
+  "publisher": "walkcroach",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "vscode": "^1.96.0",
+    "node": ">=20"
+  },
+  "categories": [
+    "AI",
+    "Other"
+  ],
+  "activationEvents": [
+    "onView:walkcroach.sidebar",
+    "onCommand:walkcroach.ping",
+    "onCommand:walkcroach.openPanel",
+    "onCommand:walkcroach.configureCockroach",
+    "onCommand:walkcroach.signIn",
+    "onCommand:walkcroach.pasteToken",
+    "onCommand:walkcroach.signOut",
+    "onCommand:walkcroach.linkProject",
+    "onCommand:walkcroach.unlinkProject",
+    "onCommand:walkcroach.viewMirroredMemory",
+    "onUri"
+  ],
+  "main": "./dist/extension.cjs",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "walkcroach",
+          "title": "WalkCroach",
+          "icon": "media/walkcroach-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "walkcroach": [
+        {
+          "type": "webview",
+          "id": "walkcroach.sidebar",
+          "name": "WalkCroach"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "walkcroach.ping",
+        "title": "WalkCroach: Ping",
+        "category": "WalkCroach"
+      },
+      {
+        "command": "walkcroach.openPanel",
+        "title": "WalkCroach: Open Panel",
+        "category": "WalkCroach"
+      },
+      {
+        "command": "walkcroach.configureCockroach",
+        "title": "WalkCroach: Configure CockroachDB",
+        "category": "WalkCroach"
+      },
+      {
+        "command": "walkcroach.signIn",
+        "title": "WalkCroach: Sign In",
+        "category": "WalkCroach"
+      },
+      {
+        "command": "walkcroach.pasteToken",
+        "title": "WalkCroach: Paste Token",
+        "category": "WalkCroach"
+      },
+      {
+        "command": "walkcroach.signOut",
+        "title": "WalkCroach: Sign Out",
+        "category": "WalkCroach"
+      },
+      {
+        "command": "walkcroach.linkProject",
+        "title": "WalkCroach: Link Project",
+        "category": "WalkCroach"
+      },
+      {
+        "command": "walkcroach.unlinkProject",
+        "title": "WalkCroach: Unlink Project",
+        "category": "WalkCroach"
+      },
+      {
+        "command": "walkcroach.viewMirroredMemory",
+        "title": "WalkCroach: View Mirrored Memory",
+        "category": "WalkCroach"
+      }
+    ],
+    "configuration": {
+      "title": "WalkCroach IDE",
+      "properties": {
+        "walkcroach.ide.apiBaseUrl": {
+          "type": "string",
+          "default": "http://localhost:3003",
+          "description": "Base URL for the WalkCroach IDE BFF (/ide/*)."
+        },
+        "walkcroach.ide.cognitoHostedUiUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Cognito Hosted UI base URL (e.g. https://your-domain.auth.eu-west-2.amazoncognito.com)."
+        },
+        "walkcroach.ide.cognitoClientId": {
+          "type": "string",
+          "default": "",
+          "description": "Cognito app client ID (public, PKCE)."
+        },
+        "walkcroach.ide.cognitoRegion": {
+          "type": "string",
+          "default": "eu-west-2",
+          "description": "AWS region for the Cognito user pool."
+        },
+        "walkcroach.ide.cognitoUserPoolId": {
+          "type": "string",
+          "default": "",
+          "description": "Cognito user pool ID."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build:engine": "npm run build --prefix ../packages/agent-engine",
+    "build:ext": "node esbuild.mjs",
+    "build:webview": "node esbuild.webview.mjs",
+    "build": "npm run build:engine && npm run build:ext && npm run build:webview",
+    "watch": "node esbuild.mjs --watch",
+    "watch:webview": "node esbuild.webview.mjs --watch",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.webview.json --noEmit",
+    "test:engine": "npm run test --prefix ../packages/agent-engine",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "check:bundle": "node scripts/check-bundle-size.mjs",
+    "package:vsix": "npm run build && npm run check:bundle && npx --yes @vscode/vsce package --no-dependencies --allow-missing-repository -o walkcroach-ide.vsix",
+    "vscode:prepublish": "npm run build"
+  },
+  "dependencies": {
+    "@walkcroach/agent-engine": "file:../packages/agent-engine"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@types/vscode": "^1.96.0",
+    "@vitest/coverage-v8": "^3.2.7",
+    "esbuild": "^0.25.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.7"
+  }
+}

@@ -5,19 +5,26 @@
   "description": "WalkCroach backend packages + Lambda codes",
   "workspaces": [
     "packages/*",
-    "modules/lambda-agent/codes"
+    "modules/lambda-agent/codes",
+    "modules/lambda-chrome/codes",
+    "modules/lambda-ide/codes"
   ],
   "scripts": {
-    "build": "npm run build -w @walkcroach/db && npm run build -w @walkcroach/agent-harness && npm run build -w @walkcroach/backend",
+    "build": "npm run build -w @walkcroach/db && npm run build -w @walkcroach/agent-harness && npm run build -w @walkcroach/backend && npm run build -w @walkcroach/chrome-api && npm run build -w @walkcroach/ide-api",
     "build:packages": "npm run build -w @walkcroach/db && npm run build -w @walkcroach/agent-harness",
     "dev": "npm run dev -w @walkcroach/backend",
+    "dev:chrome": "npm run dev -w @walkcroach/chrome-api",
+    "dev:ide": "npm run dev -w @walkcroach/ide-api",
     "typecheck": "npm run build:packages && npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "smoke:memory": "npm run smoke:memory -w @walkcroach/agent-harness",
     "smoke:loop": "npm run smoke:loop -w @walkcroach/agent-harness",
     "local:demo": "npm run local:demo -w @walkcroach/agent-harness",
     "migrate": "npm run migrate -w @walkcroach/db",
-    "package:lambda": "npm run build:packages && node scripts/package-lambda.mjs"
+    "package:lambda": "npm run build:packages && node scripts/package-lambda.mjs",
+    "package:lambda:chrome": "npm run build -w @walkcroach/db && npm run build -w @walkcroach/agent-harness && node scripts/package-lambda-chrome.mjs",
+    "package:lambda:ide": "npm run build -w @walkcroach/db && npm run build -w @walkcroach/agent-harness && node scripts/package-lambda-ide.mjs",
+    "package:lambda:all": "npm run package:lambda && npm run package:lambda:chrome && npm run package:lambda:ide"
   },
   "devDependencies": {
     "archiver": "^7.0.1",

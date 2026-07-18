@@ -40,13 +40,23 @@ phases:
           exit 1
         fi
         mkdir -p "${CODEBUILD_SRC_DIR}/infra-backend/modules/lambda-agent/.build"
+        mkdir -p "${CODEBUILD_SRC_DIR}/infra-backend/modules/lambda-chrome/.build"
         cp "${PLAN_DIR}/infra-backend/tfplan" "${CODEBUILD_SRC_DIR}/infra-backend/tfplan"
-        # Lambda zip is produced during plan and referenced by TF; keep it next to the plan
+        # Lambda zips are produced during plan and referenced by TF; keep them next to the plan
         if [ -f "${PLAN_DIR}/infra-backend/modules/lambda-agent/.build/lambda.zip" ]; then
           cp "${PLAN_DIR}/infra-backend/modules/lambda-agent/.build/lambda.zip" \
             "${CODEBUILD_SRC_DIR}/infra-backend/modules/lambda-agent/.build/lambda.zip"
         fi
-        echo "Copied tfplan (and lambda.zip if present) from ${PLAN_DIR}"
+        if [ -f "${PLAN_DIR}/infra-backend/modules/lambda-chrome/.build/lambda.zip" ]; then
+          cp "${PLAN_DIR}/infra-backend/modules/lambda-chrome/.build/lambda.zip" \
+            "${CODEBUILD_SRC_DIR}/infra-backend/modules/lambda-chrome/.build/lambda.zip"
+        fi
+        if [ -f "${PLAN_DIR}/infra-backend/modules/lambda-ide/.build/lambda.zip" ]; then
+          mkdir -p "${CODEBUILD_SRC_DIR}/infra-backend/modules/lambda-ide/.build"
+          cp "${PLAN_DIR}/infra-backend/modules/lambda-ide/.build/lambda.zip" \
+            "${CODEBUILD_SRC_DIR}/infra-backend/modules/lambda-ide/.build/lambda.zip"
+        fi
+        echo "Copied tfplan (and lambda zips if present) from ${PLAN_DIR}"
   build:
     commands:
       - cd infra-backend

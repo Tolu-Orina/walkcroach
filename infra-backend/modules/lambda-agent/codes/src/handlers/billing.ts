@@ -38,7 +38,7 @@ async function ensureBalanceRow(db: DbClient, ownerId: string): Promise<BalanceR
     await db.query(
       `UPDATE credit_balances
        SET used_this_month = 0, period_start = date_trunc('month', now()), updated_at = now()
-       WHERE owner_id = $1`,
+       WHERE owner_id = $1 AND period_start < date_trunc('month', now())`,
       [ownerId],
     );
     row.used_this_month = 0;
@@ -80,23 +80,51 @@ export async function assertCredits(
   return { ok: true };
 }
 
+/**
+ * Atomically debit credits. Safe under concurrent requests (no TOCTOU with assertCredits).
+ * Returns ok:false when the balance cannot cover the cost.
+ */
 export async function debitCredits(
   db: DbClient,
   ownerId: string,
   actionType: string,
   projectId?: string,
   metadata: Record<string, unknown> = {},
-): Promise<{ remaining: number }> {
+): Promise<{ ok: true; remaining: number } | { ok: false; remaining: number }> {
   const cost = CREDIT_COSTS[actionType] ?? 0;
   await ensureBalanceRow(db, ownerId);
 
   if (cost > 0) {
-    await db.query(
+    const { rows } = await db.query<{
+      monthly_credits: number;
+      used_this_month: number;
+    }>(
       `UPDATE credit_balances
-       SET used_this_month = used_this_month + $2, updated_at = now()
-       WHERE owner_id = $1`,
+       SET
+         used_this_month = CASE
+           WHEN period_start < date_trunc('month', now()) THEN $2
+           ELSE used_this_month + $2
+         END,
+         period_start = CASE
+           WHEN period_start < date_trunc('month', now()) THEN date_trunc('month', now())
+           ELSE period_start
+         END,
+         updated_at = now()
+       WHERE owner_id = $1
+         AND (
+           CASE
+             WHEN period_start < date_trunc('month', now()) THEN monthly_credits
+             ELSE monthly_credits - used_this_month
+           END
+         ) >= $2
+       RETURNING monthly_credits, used_this_month`,
       [ownerId, cost],
     );
+
+    if (!rows[0]) {
+      const summary = await getUsageSummary(db, ownerId);
+      return { ok: false, remaining: summary.remaining };
+    }
   }
 
   await db.query(
@@ -112,5 +140,5 @@ export async function debitCredits(
   );
 
   const summary = await getUsageSummary(db, ownerId);
-  return { remaining: summary.remaining };
+  return { ok: true, remaining: summary.remaining };
 }

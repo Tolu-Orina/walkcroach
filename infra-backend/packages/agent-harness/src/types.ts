@@ -37,11 +37,18 @@ export type ToolResultInput = {
   output?: string;
 };
 
-export type MemoryKind = 'decision' | 'preference' | 'capture' | 'qa';
+export type MemoryKind =
+  | 'decision'
+  | 'preference'
+  | 'capture'
+  | 'qa'
+  | 'convention'
+  | 'summary';
 
 export type MemoryHit = {
   id: string;
   kind: MemoryKind;
   text: string;
   distance?: number;
+  sourceSurface?: string;
 };

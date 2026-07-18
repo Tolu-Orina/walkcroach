@@ -55,9 +55,12 @@ aws secretsmanager create-secret \
     "crdb_connection_string":"...",
     "crdb_mcp_api_key":"...",
     "aws_bearer_token_bedrock":"...",
-    "walkcroach_api_key":""
+    "walkcroach_api_key":"",
+    "chrome_device_signing_key":"<long-random-string>"
   }'
 ```
+
+Optional key `chrome_device_signing_key` signs Chrome anon device tokens. **Required in prod** when `ALLOW_DEV_AUTH=false` (recommended). If omitted while `ALLOW_DEV_AUTH=true`, the Chrome Lambda falls back to a local-only dev signing key (never use that in production).
 
 Terraform **looks up** `walkcroach/{env}/runtime` — it does not create the secret.
 
@@ -87,7 +90,18 @@ aws cloudformation deploy \
 
 | Pipeline | Paths |
 |----------|-------|
-| Backend | `infra-backend/**` |
-| Web | `infra-web/**`, `web/**` |
+| Backend | `infra-backend/**`, `ci-cd/infra-backend-pipeline.yaml` |
+| Web | `infra-web/**`, `web/**`, `chrome/**`, `ide/**`, `packages/agent-engine/**`, `ci-cd/infra-web-pipeline.yaml` |
+| Chrome extension | Built/tested in the web pipeline unit-test stage via `chrome/buildspec.yml` patterns (`cd chrome && npm ci && npm test && npm run build`). Store zip via `npm run zip` locally or future dedicated release job. |
+| IDE extension | Built/tested in the web pipeline unit-test stage (`packages/agent-engine` + `ide`). VSIX via `cd ide && npm run package:vsix` or `ide/buildspec.yml`. |
 
-MVP notes: no ECR; Lambda zip via `npm run package:lambda`. Integration/E2E web stages are stubs.
+MVP notes: no ECR; Lambda zip via `npm run package:lambda:all` (agent + chrome + ide).
+
+### Integration / E2E (web pipeline after Test deploy)
+
+| Stage | Buildspec | What runs |
+|-------|-----------|-----------|
+| IntegrationTest | `web/buildspec-integration.yml` | Local agent/chrome/ide integration + deployed Test API suites under `tests/integration/` |
+| E2ETest | `web/buildspec-e2e.yml` | Playwright web smoke + unpacked Chrome extension (Xvfb) |
+
+Required SSM (Test): `/walkcroach/test/web/api_url`, `/walkcroach/test/web/web_url` (publish `web_app_url` from backend tfvars). See `tests/README.md`.

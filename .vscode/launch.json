@@ -1,0 +1,13 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run WalkCroach IDE Extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": ["--extensionDevelopmentPath=${workspaceFolder}/ide"],
+      "outFiles": ["${workspaceFolder}/ide/dist/**/*.{js,cjs}"],
+      "preLaunchTask": "ide: build"
+    }
+  ]
+}

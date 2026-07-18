@@ -1,0 +1,33 @@
+# Post-submit monitoring (PD.7)
+
+Trust proxy: watch permission grant/revoke and error rates after listing.
+
+## CloudWatch (backend)
+
+Log group: `walkcroach/chrome/{env}` (or the Lambda log group for `walkcroach-{env}-chrome`).
+
+| Metric / log event | Meaning |
+|--------------------|---------|
+| `chrome.permission.grant` | Origin granted (telemetry) |
+| `chrome.permission.revoke` | Origin revoked (telemetry) |
+| `chrome.summarize.ttfb_ms` | Summarize time-to-first-byte |
+| `chrome.ask.ttfb_ms` | Ask TTFB |
+| `chrome.recall.latency_ms` | Recall latency |
+| `chrome.capture.save` | Explicit save |
+| `chrome.stream.error` / route errors | Failures without page body |
+
+**Never** alert on or log `extractedText` / draft bodies.
+
+## Extension crashes
+
+Chrome Web Store / Chrome Enterprise may surface crash rates. Locally: check `chrome://crashes` during QA. Investigate any spike after a version bump.
+
+## Trust proxy (product)
+
+From PRD: distinct granted origins ≥ 2 in first 7 days after install is a healthy signal. Combine telemetry grants with capture saves.
+
+## Suggested alarms (staging → prod)
+
+- Error rate on chrome Lambda > baseline for 15m
+- Summarize p50 TTFB > 2.5s sustained (smoke threshold from plan §10)
+- Sudden drop in `chrome.permission.grant` after update (possible permission UX regression)

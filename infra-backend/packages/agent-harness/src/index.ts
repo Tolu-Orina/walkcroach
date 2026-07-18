@@ -9,6 +9,8 @@ export {
   recallProjectMemory,
   writeMemoryEntry,
   formatVector,
+  listProjectMemoryEntries,
+  updateMemoryEntryText,
 } from './memory.js';
 export { refreshProjectMemorySummary } from './project-memory.js';
 export {

@@ -41,6 +41,12 @@ describe('resolveAuth', () => {
     expect(await resolveAuth({ authorization: 'Bearer dev:user:abc' })).toBeNull();
   });
 
+  it('rejects dev tokens when ALLOW_DEV_AUTH is unset', async () => {
+    delete process.env.ALLOW_DEV_AUTH;
+    const { resolveAuth } = await import('./auth.js');
+    expect(await resolveAuth({ authorization: 'Bearer dev:user:abc' })).toBeNull();
+  });
+
   it('verifies Cognito access tokens when pool is configured', async () => {
     vi.doMock('aws-jwt-verify', () => ({
       CognitoJwtVerifier: {

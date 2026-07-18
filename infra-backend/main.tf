@@ -7,6 +7,10 @@ locals {
 
   # Built by CI / local package step from modules/lambda-agent/codes
   lambda_zip = var.lambda_zip_path != "" ? var.lambda_zip_path : "${path.module}/modules/lambda-agent/.build/lambda.zip"
+  # Built by npm run package:lambda:chrome
+  chrome_lambda_zip = var.chrome_lambda_zip_path != "" ? var.chrome_lambda_zip_path : "${path.module}/modules/lambda-chrome/.build/lambda.zip"
+  # Built by npm run package:lambda:ide
+  ide_lambda_zip = var.ide_lambda_zip_path != "" ? var.ide_lambda_zip_path : "${path.module}/modules/lambda-ide/.build/lambda.zip"
 }
 
 module "secrets" {
@@ -68,33 +72,84 @@ module "lambda_agent" {
   cognito_user_pool_id  = module.cognito.user_pool_id
   cognito_client_id     = module.cognito.client_id
   allow_dev_auth        = var.allow_dev_auth
+  cors_allow_origin     = var.web_app_url != "" ? var.web_app_url : "*"
   allow_github_pat      = var.allow_github_pat
   github_ssm_prefix     = var.github_ssm_prefix
+  tags                  = local.tags
+}
+
+module "lambda_chrome" {
+  source = "./modules/lambda-chrome"
+
+  name_prefix          = local.name_prefix
+  environment          = var.environment
+  zip_path             = local.chrome_lambda_zip
+  handler              = var.lambda_handler
+  runtime              = var.lambda_runtime
+  timeout              = var.chrome_lambda_timeout
+  memory_mb            = var.chrome_lambda_memory_mb
+  bedrock_region       = var.bedrock_region
+  nova_model_id        = var.nova_model_id
+  titan_embed_model_id = var.titan_embed_model_id
+  runtime_secret_arn   = module.secrets.runtime_secret_arn
+  cognito_user_pool_id = module.cognito.user_pool_id
+  cognito_client_id    = module.cognito.client_id
+  allow_dev_auth       = var.allow_dev_auth
+  cors_allow_origin    = var.web_app_url != "" ? var.web_app_url : "*"
+  tags                 = local.tags
+}
+
+module "lambda_ide" {
+  source = "./modules/lambda-ide"
+
+  name_prefix           = local.name_prefix
+  environment           = var.environment
+  zip_path              = local.ide_lambda_zip
+  handler               = var.lambda_handler
+  runtime               = var.lambda_runtime
+  timeout               = var.ide_lambda_timeout
+  memory_mb             = var.ide_lambda_memory_mb
+  bedrock_region        = var.bedrock_region
+  nova_model_id         = var.nova_model_id
+  titan_embed_model_id  = var.titan_embed_model_id
+  runtime_secret_arn    = module.secrets.runtime_secret_arn
+  cognito_user_pool_id  = module.cognito.user_pool_id
+  cognito_client_id     = module.cognito.client_id
+  cognito_ide_client_id = module.cognito.ide_client_id
+  allow_dev_auth        = var.allow_dev_auth
+  cors_allow_origin     = var.web_app_url != "" ? var.web_app_url : "*"
   tags                  = local.tags
 }
 
 module "apigw" {
   source = "./modules/apigw-rest"
 
-  name_prefix               = local.name_prefix
-  environment               = var.environment
-  stage_name                = var.api_stage_name
-  aws_region                = var.aws_region
-  lambda_function_name      = module.lambda_agent.function_name
-  lambda_function_arn       = module.lambda_agent.function_arn
-  cognito_user_pool_arn     = module.cognito.user_pool_arn
-  enable_cognito_authorizer = var.enable_apigw_cognito_authorizer
-  tags                      = local.tags
+  name_prefix                 = local.name_prefix
+  environment                 = var.environment
+  stage_name                  = var.api_stage_name
+  aws_region                  = var.aws_region
+  lambda_function_name        = module.lambda_agent.function_name
+  lambda_function_arn         = module.lambda_agent.function_arn
+  chrome_lambda_function_name = module.lambda_chrome.function_name
+  chrome_lambda_function_arn  = module.lambda_chrome.function_arn
+  ide_lambda_function_name    = module.lambda_ide.function_name
+  ide_lambda_function_arn     = module.lambda_ide.function_arn
+  cognito_user_pool_arn       = module.cognito.user_pool_arn
+  enable_cognito_authorizer   = var.enable_apigw_cognito_authorizer
+  tags                        = local.tags
 }
 
 module "ssm" {
   source = "./modules/ssm"
 
-  name_prefix          = local.name_prefix
-  environment          = var.environment
-  api_url              = module.apigw.invoke_url
-  cognito_user_pool_id = module.cognito.user_pool_id
-  cognito_client_id    = module.cognito.client_id
-  cognito_region       = module.cognito.region
-  tags                 = local.tags
+  name_prefix           = local.name_prefix
+  environment           = var.environment
+  api_url               = module.apigw.invoke_url
+  cognito_user_pool_id  = module.cognito.user_pool_id
+  cognito_client_id     = module.cognito.client_id
+  cognito_ide_client_id = module.cognito.ide_client_id
+  cognito_hosted_ui_url = module.cognito.hosted_ui_base_url
+  cognito_region        = module.cognito.region
+  web_app_url           = var.web_app_url
+  tags                  = local.tags
 }

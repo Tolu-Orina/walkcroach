@@ -39,7 +39,19 @@ export async function runPromptStream(
         );
         return;
       }
-      await debitCredits(db, ownerId, 'agent_turn', body.projectId);
+      const debit = await debitCredits(db, ownerId, 'agent_turn', body.projectId);
+      if (!debit.ok) {
+        await writeNdjson(
+          write,
+          (async function* () {
+            yield {
+              type: 'error' as const,
+              message: `insufficient credits (${debit.remaining} remaining)`,
+            };
+          })(),
+        );
+        return;
+      }
     }
 
     await writeNdjson(

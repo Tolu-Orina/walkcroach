@@ -6,14 +6,44 @@ phases:
       nodejs: 20
   pre_build:
     commands:
-      - echo "Web unit / typecheck"
+      - echo "Web + Chrome + IDE unit / typecheck"
   build:
     commands:
-      - cd web
-      - npm ci
-      - npm run typecheck
-      - npm run test
-      - npm run scan:secrets
+      - |
+        set -eu
+        cd web
+        npm ci
+        npm run typecheck
+        npm run test:coverage
+        npm run scan:secrets
+      - |
+        set -eu
+        cd chrome
+        npm ci
+        npm run typecheck
+        npm run test:coverage
+        npm run build
+      - |
+        set -eu
+        cd packages/agent-engine
+        npm ci
+        npm run typecheck
+        npm run test:coverage
+        npm run build
+      - |
+        set -eu
+        cd cli
+        npm ci
+        npm run typecheck
+        npm run test:coverage
+      - |
+        set -eu
+        cd ide
+        npm ci
+        npm run typecheck
+        npm run test:coverage
+        npm run build
+        npm run check:bundle
 artifacts:
   files:
     - '**/*'

@@ -83,7 +83,13 @@ variable "cognito_client_id" {
 
 variable "allow_dev_auth" {
   type    = bool
-  default = true
+  default = false
+}
+
+variable "cors_allow_origin" {
+  type        = string
+  description = "Access-Control-Allow-Origin for API responses (SPA origin in prod)"
+  default     = "*"
 }
 
 variable "allow_github_pat" {
@@ -244,6 +250,7 @@ resource "aws_lambda_function" "agent" {
       COGNITO_USER_POOL_ID = var.cognito_user_pool_id
       COGNITO_CLIENT_ID    = var.cognito_client_id
       ALLOW_DEV_AUTH       = var.allow_dev_auth ? "true" : "false"
+      CORS_ALLOW_ORIGIN    = var.cors_allow_origin
       ALLOW_GITHUB_PAT     = var.allow_github_pat ? "true" : "false"
       GITHUB_SSM_PREFIX    = var.github_ssm_prefix != "" ? var.github_ssm_prefix : "/${var.name_prefix}/${var.environment}/github"
       NODE_OPTIONS         = "--enable-source-maps"

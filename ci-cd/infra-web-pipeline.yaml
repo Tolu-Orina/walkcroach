@@ -1393,6 +1393,9 @@ Resources:
                   Includes:
                     - infra-web/**
                     - web/**
+                    - chrome/**
+                    - ide/**
+                    - packages/agent-engine/**
                     - ci-cd/infra-web-pipeline.yaml
       ArtifactStore:
         Type: S3
@@ -1676,6 +1679,9 @@ Resources:
                   Includes:
                     - infra-web/**
                     - web/**
+                    - chrome/**
+                    - ide/**
+                    - packages/agent-engine/**
                     - ci-cd/infra-web-pipeline.yaml
       ArtifactStore:
         Type: S3

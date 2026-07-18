@@ -1,0 +1,18 @@
+{
+  "_comment": "Chrome Enterprise policy stub (NFR-C08). Replace EXTENSION_ID after CWS publish. Import via Google Admin / Windows registry / managed Chrome as appropriate.",
+  "ExtensionInstallAllowlist": ["EXTENSION_ID_REPLACE_ME"],
+  "ExtensionSettings": {
+    "*": {
+      "installation_mode": "blocked"
+    },
+    "EXTENSION_ID_REPLACE_ME": {
+      "installation_mode": "allowed",
+      "toolbar_pin": "force_pinned",
+      "runtime_allowed_hosts": [
+        "https://*.walkcroach.com",
+        "https://*/*"
+      ],
+      "runtime_blocked_hosts": []
+    }
+  }
+}

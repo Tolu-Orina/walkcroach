@@ -13,6 +13,7 @@ build/
 .env.local
 .env.*.local
 !.env.example
+**/.local-secrets/
 
 # IDE / OS
 .DS_Store
@@ -20,6 +21,10 @@ Thumbs.db
 .idea/
 .vscode/*
 !.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json
+!ide/.vscode/
+!ide/.vscode/**
 
 # Logs / coverage
 logs/
@@ -41,8 +46,15 @@ infra-backend/modules/lambda-agent/.build/
 **/*_override.tf
 # Keep .terraform.lock.hcl committed for provider pinning
 
-# Leftover empty dir if OneDrive/Cursor locks a move — safe to delete manually
-/packages/
+# Root packages: track agent-engine; ignore accidental empty stubs
+/packages/agent-harness/
+
+# IDE extension build outputs
+ide/dist/
+ide/media/webview.js
+ide/media/webview.js.map
+ide/*.vsix
+packages/agent-engine/dist/
 
 # WebContainer / Vite
 web/dist/

@@ -59,11 +59,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
 
   const completeSession = useCallback((stored: StoredAuth) => {
-    setState({
-      user: stored.user,
-      token: stored.token,
-      status: authStatusFromUser(stored.user),
-    });
+    applySession(setState, stored);
   }, []);
 
   useEffect(() => {

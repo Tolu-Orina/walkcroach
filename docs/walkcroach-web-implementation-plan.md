@@ -582,8 +582,8 @@ Dedicated review against NFR-13/14:
 - [ ] Architecture diagram (plan1 §1–3 visualized)  
 - [ ] README: CRDB features used (vector, JSONB, `AS OF SYSTEM TIME` example)  
 - [ ] README: AWS services list  
-- [ ] Synthetic smoke test in CI (NFR-26)  
-- [ ] Prod E2E: template → prompt → preview → deploy  
+- [x] Synthetic smoke test in CI (NFR-26 partial — landing + CTA)  
+- [ ] Prod E2E: template → prompt → preview → deploy (opt-in `WALKCROACH_E2E_FULL` + durable WebContainer)  
 
 ---
 
@@ -593,14 +593,22 @@ Dedicated review against NFR-13/14:
 
 | Layer | Approach | When | Status |
 |-------|----------|------|--------|
-| Harness | Existing smoke scripts + unit tests | Phase 1 | ✅ `tools.test.ts`, `memory.test.ts` (7) |
-| API | Supertest against `local-app.ts` | Phase 1 | ✅ 17 integration tests (9 auth-only + 8 CRDB-gated) |
-| Web | Vitest unit tests | Phase 1 | ✅ `scaffold.test.ts`, `secret-bundle-scan.test.mjs` (8) |
-| E2E | Playwright against prod (scheduled) | Phase 3–4 | ⏳ deferred (`buildspec-e2e.yml` stub) |
-| Security | NFR-13 secret leak scan | Phase 2 | ✅ `npm run scan:secrets` in `web/buildspec-test.yml` |
-| Auth | Cognito JWT + GitHub App JWT | Hardening | ✅ `auth.test.ts`, `github-oauth.test.ts` |
+| Harness | Agent unit + smoke scripts | Phase 1 | ✅ tools / memory / loop |
+| API (local) | Supertest `local-app.ts` — auth gates always; CRDB suites skip without `CRDB_CONNECTION_STRING` | Phase 1 | ✅ `local-api*.integration.test.ts` |
+| API (deployed Test) | Vitest `tests/integration/*` against SSM `/walkcroach/test/web/api_url` | Phase 3 | ✅ health + 401 gates + optional `Bearer dev:` when `allow_dev_auth` |
+| Web unit | Vitest (logic layers) + coverage gate | Phase 1 | ✅ `web` `test:coverage` |
+| E2E smoke (NFR-26 partial) | Playwright: landing hero + CTA → `/try`\|`/signup`\|`/welcome` | Phase 3–4 | ✅ `tests/e2e/web/smoke.spec.ts` via `web/buildspec-e2e.yml` |
+| E2E full | Template → builder shell | Opt-in | ✅ gated `WALKCROACH_E2E_FULL=1` (WebContainer durable path still manual) |
+| Security | NFR-13 secret leak scan | Phase 2 | ✅ `npm run scan:secrets` |
 
-**CI commands (local):** `cd infra-backend && npm test` (34 tests) · `cd web && npm test && npm run scan:secrets` (8 + bundle gate)
+**CI contract (web pipeline after Test deploy):**
+
+| Stage | Buildspec | Env |
+|-------|-----------|-----|
+| IntegrationTest | `web/buildspec-integration.yml` | `WALKCROACH_API_URL` ← SSM; `ALLOW_DEV_AUTH=true` |
+| E2ETest | `web/buildspec-e2e.yml` | `WALKCROACH_WEB_URL` ← SSM `/walkcroach/test/web/web_url` (backend `web_app_url` tfvar) |
+
+Details: `tests/README.md`.
 
 ### 10.2 Observability (NFR-24–26)
 
@@ -713,7 +721,7 @@ Lambda reads via `GITHUB_SSM_PREFIX` (default `/walkcroach/{env}/github`). Prod:
 
 1. **Demo video** (3 min): preference → recall → deploy URL  
 2. **Architecture diagram** + README (CRDB features, AWS services list)  
-3. **Prod E2E smoke test** in CI (template → prompt → preview → deploy)  
+3. **Prod E2E smoke test** in CI — landing CTA done (`tests/e2e`); full template→deploy still opt-in / manual  
 4. **Share link** (view-only preview URL) — high demo value, low effort  
 5. **Custom domain** on deployed project (FR-29) — if deploy stable  
 
@@ -724,7 +732,8 @@ Lambda reads via `GITHUB_SSM_PREFIX` (default `/walkcroach/{env}/github`). Prod:
 | Cognito prod verification | High | ⏳ code done |
 | GitHub App prod verification | High | ⏳ SSM done; verify install + push |
 | Stripe billing (P3.15, P3.19) | Medium | ⏳ counter-only works for demo |
-| Prod E2E smoke test (NFR-26) | Medium | ⏳ |
+| Prod E2E smoke test (NFR-26) | Medium | ✅ partial (`tests/e2e/web`); full path ⏳ |
+
 | RTL component tests | Low | ⏳ |
 | Session cookies via proxy domain (P3.14) | Low | ⏳ |
 | Two-way GitHub sync (FR-26) | Low | descope if time slips |
