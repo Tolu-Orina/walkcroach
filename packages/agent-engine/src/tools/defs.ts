@@ -192,7 +192,7 @@ export const PHASE_C_TOOLS: ToolDef[] = [
   {
     name: 'recall_project_memory',
     description:
-      'Vector-search the shared WalkCroach project memory (Web, Chrome, IDE). Use when prior decisions/preferences from any surface would help. Optional sourceSurfaces filter: web | chrome | ide.',
+      'Vector-search the shared WalkCroach project memory (Web, Chrome, IDE, Desktop). Use when prior decisions/preferences from any surface would help. Optional sourceSurfaces filter: web | chrome | ide | desktop.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -217,7 +217,7 @@ export const PHASE_C_TOOLS: ToolDef[] = [
   {
     name: 'mirror_project_memory',
     description:
-      'Write a distilled decision/preference/convention into shared CockroachDB project memory (source_surface=ide). Prefer short bullets, not raw chat.',
+      'Write a distilled decision/preference/convention into shared CockroachDB project memory (source_surface set by the host: ide or desktop). Prefer short bullets, not raw chat.',
     inputSchema: {
       type: 'object',
       properties: {

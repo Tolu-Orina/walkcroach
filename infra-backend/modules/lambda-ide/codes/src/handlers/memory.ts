@@ -35,9 +35,13 @@ async function resolveLinkedProject(
   return { ok: true, projectId, name: owned.name };
 }
 
+/** Surfaces allowed to write via /ide memory mirror (extension + Desktop). */
+const MIRROR_SURFACES = new Set(['ide', 'desktop']);
+
 /**
  * POST /ide/v1/memory/mirror
- * Body: { projectId, text, kind? }
+ * Body: { projectId, text, kind?, sourceSurface?: 'ide' | 'desktop' }
+ * Default sourceSurface remains `ide` for extension clients; Desktop sends `desktop`.
  */
 export async function handleMemoryMirror(
   auth: AuthContext,
@@ -47,6 +51,7 @@ export async function handleMemoryMirror(
     projectId?: string;
     text?: string;
     kind?: string;
+    sourceSurface?: string;
   }>(rawBody);
   if (!parsed.ok) {
     return jsonResponse(400, { error: parsed.error });
@@ -73,21 +78,28 @@ export async function handleMemoryMirror(
     });
   }
 
+  const surfaceRaw = (body.sourceSurface ?? 'ide').toLowerCase();
+  if (!MIRROR_SURFACES.has(surfaceRaw)) {
+    return jsonResponse(400, {
+      error: `sourceSurface must be one of: ${[...MIRROR_SURFACES].join(', ')}`,
+    });
+  }
+
   const db = createDbClient();
   try {
     const id = await writeMemoryEntry({
       db,
       projectId: project.projectId,
-      sourceSurface: 'ide',
+      sourceSurface: surfaceRaw,
       kind: kindRaw,
       text,
     });
-    metricLog('ide.memory.mirror', { ok: true });
+    metricLog('ide.memory.mirror', { ok: true, sourceSurface: surfaceRaw });
     return jsonResponse(200, {
       ok: true,
       id,
       projectId: project.projectId,
-      sourceSurface: 'ide',
+      sourceSurface: surfaceRaw,
       kind: kindRaw,
     });
   } finally {
