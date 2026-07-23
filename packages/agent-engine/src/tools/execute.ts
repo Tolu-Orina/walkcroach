@@ -15,6 +15,8 @@ import type { SkillsRegistry } from '../skills.js';
 import { ensureJsonOutput, runCcloud, plainCcloudError } from '../ccloud.js';
 import type { TelemetrySink } from '../telemetry.js';
 import type { ProjectMemoryBridge } from '../project-memory.js';
+import type { WorkspacePolicy } from '../workspace-policy.js';
+import { isVerifyCommand } from '../workspace-config.js';
 
 export type ToolExecResult = {
   toolUseId: string;
@@ -41,10 +43,23 @@ export type ExecuteToolOptions = {
   ccloudApiKey?: string;
   /** Phase C — shared project memory when linked */
   projectMemory?: ProjectMemoryBridge | null;
+  /** P1 — settings / verify recipes */
+  policy?: WorkspacePolicy | null;
 };
 
 function str(v: unknown): string {
   return typeof v === 'string' ? v : String(v ?? '');
+}
+
+function assertPathAllowed(
+  policy: WorkspacePolicy | null | undefined,
+  path: string,
+): void {
+  if (policy?.isDeniedPath(path)) {
+    throw new Error(
+      `Path denied by .walkcroach/settings.json (or built-in sensitive list): ${path}`,
+    );
+  }
 }
 
 export async function executeTool(
@@ -98,8 +113,95 @@ export async function executeTool(
         ).text;
         break;
       }
+      case 'glob': {
+        host.emit({ type: 'tool_card', id, name, status: 'running' });
+        const pattern = str(input.pattern);
+        if (!pattern) throw new Error('glob requires pattern');
+        if (!host.glob) {
+          throw new Error('glob is not supported on this host');
+        }
+        const files = await host.glob(pattern, { signal });
+        content = truncateText(
+          files.length ? files.join('\n') : '(no matches)',
+        ).text;
+        break;
+      }
+      case 'todo_write': {
+        host.emit({ type: 'tool_card', id, name, status: 'running' });
+        const { normalizeTodos, formatTodosForModel } = await import(
+          '../todos.js'
+        );
+        const todos = normalizeTodos(input.todos);
+        host.emit({ type: 'todos', todos });
+        if (host.persistTodos) {
+          await host.persistTodos(todos);
+        }
+        content = formatTodosForModel(todos);
+        break;
+      }
+      case 'await_terminal': {
+        host.emit({ type: 'tool_card', id, name, status: 'running' });
+        const taskId = str(input.task_id).trim();
+        if (!taskId) throw new Error('await_terminal requires task_id');
+        if (!host.pollBackgroundTerminal) {
+          throw new Error('Background terminals are not supported on this host');
+        }
+        const poll = await host.pollBackgroundTerminal(taskId);
+        content = [
+          `task_id: ${poll.taskId}`,
+          `status: ${poll.status}`,
+          `exit_code: ${poll.exitCode ?? 'n/a'}`,
+          `log: ${poll.logPath}`,
+          '--- log tail ---',
+          poll.logTail || '(empty)',
+        ].join('\n');
+        break;
+      }
+      case 'ask_user': {
+        const question = str(input.question).trim();
+        if (!question) throw new Error('ask_user requires question');
+        const optionsRaw = input.options;
+        if (!Array.isArray(optionsRaw) || optionsRaw.length < 2) {
+          throw new Error('ask_user requires at least 2 options');
+        }
+        if (optionsRaw.length > 6) {
+          throw new Error('ask_user allows at most 6 options');
+        }
+        const options = optionsRaw.map((o) => String(o).trim()).filter(Boolean);
+        if (options.length < 2) {
+          throw new Error('ask_user requires at least 2 non-empty options');
+        }
+        const allowFreeText = Boolean(input.allow_free_text);
+        host.emit({
+          type: 'tool_card',
+          id,
+          name,
+          status: 'pending',
+          detail: question.slice(0, 120),
+        });
+        const answer = await host.askUser({
+          question,
+          options,
+          allowFreeText,
+          stepId: id,
+        });
+        host.emit({
+          type: 'tool_card',
+          id,
+          name,
+          status: 'running',
+          detail: answer.selected,
+        });
+        content = answer.selected === '(skipped)'
+          ? 'User skipped the question without choosing an option.'
+          : answer.freeText?.trim()
+            ? `User selected: ${answer.selected}\nFree text: ${answer.freeText.trim()}`
+            : `User selected: ${answer.selected}`;
+        break;
+      }
       case 'write_file': {
         const path = str(input.path);
+        assertPathAllowed(opts.policy, path);
         const next = str(input.content);
         let before = '';
         try {
@@ -133,6 +235,7 @@ export async function executeTool(
       }
       case 'edit_file': {
         const path = str(input.path);
+        assertPathAllowed(opts.policy, path);
         const old_str = str(input.old_str);
         const new_str = str(input.new_str);
         if (!old_str) {
@@ -175,10 +278,21 @@ export async function executeTool(
       }
       case 'run_terminal': {
         const cmd = str(input.cmd);
-        const decision = await host.confirmCommand(cmd, {
-          toolName: 'run_terminal',
-          stepId: id,
+        const relCwd = str(input.cwd || '.').trim() || '.';
+        host.emit({
+          type: 'tool_card',
+          id,
+          name,
+          status: 'pending',
+          detail: cmd + (relCwd !== '.' ? ` (cwd=${relCwd})` : ''),
         });
+        const decision = await host.confirmCommand(
+          relCwd !== '.' ? `${cmd}  # cwd=${relCwd}` : cmd,
+          {
+            toolName: 'run_terminal',
+            stepId: id,
+          },
+        );
         if (decision !== 'approve') {
           host.emit({
             type: 'tool_card',
@@ -196,9 +310,52 @@ export async function executeTool(
         host.emit({ type: 'tool_card', id, name, status: 'running', detail: cmd });
         const root = host.getWorkspaceRoot();
         if (!root) throw new Error('No workspace root');
+        // Resolve relative cwd under workspace (host still sandboxes via path checks if used).
+        const pathMod = await import('node:path');
+        const cwd = pathMod.resolve(root, relCwd);
+        const rootRes = pathMod.resolve(root);
+        const relCheck = pathMod.relative(rootRes, cwd);
+        if (relCheck.startsWith('..') || pathMod.isAbsolute(relCheck)) {
+          throw new Error(`cwd escapes workspace: ${relCwd}`);
+        }
+        const mode = str(input.mode || 'blocking').toLowerCase();
+        if (mode === 'background') {
+          if (!host.startBackgroundTerminal) {
+            throw new Error(
+              'Background terminals are not supported on this host',
+            );
+          }
+          if (opts.policy && !opts.policy.allowBackground(cmd)) {
+            throw new Error(
+              `Background mode denied by .walkcroach/settings.json allowlist. Allowed substrings: ${opts.policy.settings.terminal.backgroundAllowlist.join(', ') || '(none)'}`,
+            );
+          }
+          const started = await host.startBackgroundTerminal(cmd, { cwd });
+          content = [
+            `Started background task ${started.taskId} (pid ${started.pid}).`,
+            `Log: ${started.logPath}`,
+            'Use await_terminal with this task_id to poll status/logs.',
+            'Stop kills the full process tree for background tasks.',
+          ].join('\n');
+          break;
+        }
+        if (mode !== 'blocking') {
+          throw new Error(`Unknown run_terminal mode: ${mode}`);
+        }
+        const timeoutRaw = input.timeout_ms;
+        const defaultTimeout =
+          opts.policy?.defaultTimeoutMs ?? 120_000;
+        const timeoutMs =
+          typeof timeoutRaw === 'number' && Number.isFinite(timeoutRaw)
+            ? Math.max(1_000, Math.min(600_000, Math.floor(timeoutRaw)))
+            : defaultTimeout;
         let out = '';
         let exitCode: number | null | undefined;
-        for await (const chunk of host.runTerminal(cmd, { cwd: root, signal })) {
+        for await (const chunk of host.runTerminal(cmd, {
+          cwd,
+          signal,
+          timeoutMs,
+        })) {
           out += chunk.text;
           if (chunk.exitCode !== undefined) exitCode = chunk.exitCode;
         }
@@ -217,6 +374,105 @@ export async function executeTool(
             status: 'error',
           };
         }
+        if (
+          opts.policy &&
+          (exitCode === 0 || exitCode === undefined || exitCode === null) &&
+          isVerifyCommand(cmd, opts.policy.verify)
+        ) {
+          opts.policy.markVerified();
+        }
+        break;
+      }
+      case 'verify': {
+        const policy = opts.policy;
+        if (!policy?.hasVerifyRecipes) {
+          throw new Error(
+            'No verify recipes. Create .walkcroach/verify.json with a commands array (e.g. ["npm test"]).',
+          );
+        }
+        const requested = str(input.command).trim();
+        const cmd = requested || policy.verify.commands[0]!;
+        if (!isVerifyCommand(cmd, policy.verify)) {
+          throw new Error(
+            `Command not in .walkcroach/verify.json. Allowed:\n${policy.verify.commands
+              .map((c) => `- ${c}`)
+              .join('\n')}`,
+          );
+        }
+        const relCwd =
+          str(input.cwd || policy.verify.cwd || '.').trim() || '.';
+        host.emit({
+          type: 'tool_card',
+          id,
+          name,
+          status: 'pending',
+          detail: cmd + (relCwd !== '.' ? ` (cwd=${relCwd})` : ''),
+        });
+        const decision = await host.confirmCommand(
+          relCwd !== '.' ? `${cmd}  # cwd=${relCwd}` : cmd,
+          {
+            toolName: 'verify',
+            stepId: id,
+          },
+        );
+        if (decision !== 'approve') {
+          host.emit({
+            type: 'tool_card',
+            id,
+            name,
+            status: 'done',
+            detail: 'rejected by user',
+          });
+          return {
+            toolUseId: id,
+            content: 'User rejected the verify command.',
+            status: 'rejected',
+          };
+        }
+        host.emit({
+          type: 'tool_card',
+          id,
+          name,
+          status: 'running',
+          detail: cmd,
+        });
+        const root = host.getWorkspaceRoot();
+        if (!root) throw new Error('No workspace root');
+        const pathMod = await import('node:path');
+        const cwd = pathMod.resolve(root, relCwd);
+        const rootRes = pathMod.resolve(root);
+        const relCheck = pathMod.relative(rootRes, cwd);
+        if (relCheck.startsWith('..') || pathMod.isAbsolute(relCheck)) {
+          throw new Error(`cwd escapes workspace: ${relCwd}`);
+        }
+        const timeoutMs = policy.defaultTimeoutMs;
+        let out = '';
+        let exitCode: number | null | undefined;
+        for await (const chunk of host.runTerminal(cmd, {
+          cwd,
+          signal,
+          timeoutMs,
+        })) {
+          out += chunk.text;
+          if (chunk.exitCode !== undefined) exitCode = chunk.exitCode;
+        }
+        content = truncateText(out || '(no output)').text;
+        if (exitCode !== undefined && exitCode !== null && exitCode !== 0) {
+          host.emit({
+            type: 'tool_card',
+            id,
+            name,
+            status: 'error',
+            detail: `verify exit ${exitCode}`,
+          });
+          return {
+            toolUseId: id,
+            content: `Verify failed with exit ${exitCode}.\n\n${content}`,
+            status: 'error',
+          };
+        }
+        policy.markVerified();
+        content = `Verified OK: ${cmd}\n\n${content}`;
         break;
       }
       case 'update_walkcroach_md': {
@@ -364,7 +620,7 @@ export async function executeTool(
           status: 'running',
           detail: skillName,
         });
-        content = `# Skill: ${full.name}\n\n${full.description}\n\n${full.body}`;
+        content = skills.formatForModel(full);
         opts.telemetry?.bump('skill_loaded');
         opts.telemetry?.bump('skill_invoked');
         host.emit({
@@ -573,10 +829,23 @@ function summarizeInput(
   name: string,
   input: Record<string, unknown>,
 ): string {
-  if (name === 'run_terminal') return str(input.cmd);
+  if (name === 'run_terminal') {
+    const cmd = str(input.cmd);
+    const cwd = input.cwd ? ` (cwd=${str(input.cwd)})` : '';
+    const mode =
+      str(input.mode || '').toLowerCase() === 'background' ? ' [bg]' : '';
+    return `${cmd}${cwd}${mode}`;
+  }
+  if (name === 'await_terminal') return str(input.task_id);
+  if (name === 'verify') return str(input.command) || 'verify';
   if (name === 'spawn_subagent') return str(input.name);
   if (name === 'cockroach_mcp') return str(input.tool);
   if (name === 'load_skill') return str(input.name);
+  if (name === 'glob') return str(input.pattern);
+  if (name === 'todo_write' && Array.isArray(input.todos)) {
+    return `${input.todos.length} items`;
+  }
+  if (name === 'ask_user') return str(input.question).slice(0, 80);
   if (name === 'ccloud' && Array.isArray(input.args)) {
     return `ccloud ${input.args.map(String).join(' ')}`;
   }

@@ -4,15 +4,29 @@ import { spawn } from 'node:child_process';
 import * as readline from 'node:readline';
 import {
   ApprovalController,
+  BackgroundTerminalRegistry,
   bindApprovals,
   canNonInteractiveApprove,
+  clearPersistedTodos,
+  clearActiveAgentSession,
+  killProcessTree,
+  loadAgentSession,
+  loadPersistedTodos,
+  loadWorkspaceAgentConfig,
+  persistAgentSession,
+  persistTodos,
+  streamShellCommand,
   type AgentEvent,
+  type AgentTodo,
   type ApprovalDecision,
+  type BackgroundTerminalPoll,
+  type BackgroundTerminalStart,
   type HostAdapter,
   type HostSecrets,
   type SearchHit,
   type TerminalChunk,
   type AutonomyLevel,
+  type BedrockMessage,
 } from '@walkcroach/agent-engine';
 import { deleteSecret, getSecret, setSecret } from '../lib/config.js';
 
@@ -42,6 +56,10 @@ export class CliHostAdapter implements HostAdapter {
   private readonly approvals: ReturnType<typeof bindApprovals>;
   private runSignal: AbortSignal | undefined;
   private autonomy: AutonomyLevel;
+  private readonly activePids = new Set<number>();
+  private readonly bgTerminals = new BackgroundTerminalRegistry(() =>
+    this.getWorkspaceRoot(),
+  );
 
   constructor(private readonly opts: CliHostOptions) {
     this.autonomy = opts.autonomy ?? 'strict';
@@ -63,14 +81,26 @@ export class CliHostAdapter implements HostAdapter {
 
   setRunSignal(signal?: AbortSignal): void {
     this.runSignal = signal;
-    if (signal?.aborted) this.gate.cancelAll();
+    if (signal?.aborted) {
+      this.gate.cancelAll();
+      this.killAllTerminals();
+    }
     signal?.addEventListener(
       'abort',
       () => {
         this.gate.cancelAll();
+        this.killAllTerminals();
       },
       { once: true },
     );
+  }
+
+  killAllTerminals(): void {
+    for (const pid of [...this.activePids]) {
+      killProcessTree(pid);
+    }
+    this.activePids.clear();
+    this.bgTerminals.killAll();
   }
 
   showDiffPreview(
@@ -93,8 +123,24 @@ export class CliHostAdapter implements HostAdapter {
     return this.approvals.confirmCommand(cmd, meta);
   }
 
+  askUser(params: {
+    question: string;
+    options: string[];
+    allowFreeText?: boolean;
+    stepId?: string;
+  }) {
+    return this.approvals.askUser(params);
+  }
+
   resolveApproval(stepId: string, decision: ApprovalDecision): void {
     this.approvals.resolveApproval(stepId, decision);
+  }
+
+  resolveQuestion(
+    stepId: string,
+    answer: { selected: string; freeText?: string } | 'reject',
+  ): void {
+    this.approvals.resolveQuestion(stepId, answer);
   }
 
   getAutonomy(): AutonomyLevel {
@@ -152,61 +198,136 @@ export class CliHostAdapter implements HostAdapter {
     return fallbackSearch(root, pattern, opts?.glob, opts?.signal);
   }
 
+  async glob(
+    pattern: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<string[]> {
+    const root = this.opts.cwd;
+    const reSrc = pattern
+      .replace(/\\/g, '/')
+      .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+      .replace(/\*\*/g, '::DS::')
+      .replace(/\*/g, '[^/]*')
+      .replace(/::DS::/g, '.*');
+    const re = new RegExp(`^${reSrc}$`);
+    const out: string[] = [];
+    const walk = async (dir: string, rel: string): Promise<void> => {
+      if (opts?.signal?.aborted) return;
+      if (out.length >= 200) return;
+      let entries;
+      try {
+        entries = await fs.readdir(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const e of entries) {
+        if (
+          e.name === 'node_modules' ||
+          e.name === '.git' ||
+          e.name === 'dist'
+        ) {
+          continue;
+        }
+        const nextRel = rel ? `${rel}/${e.name}` : e.name;
+        const abs = path.join(dir, e.name);
+        if (e.isDirectory()) {
+          await walk(abs, nextRel);
+        } else if (re.test(nextRel.replace(/\\/g, '/'))) {
+          out.push(nextRel.replace(/\\/g, '/'));
+        }
+      }
+    };
+    await walk(root, '');
+    return out.sort();
+  }
+
   async *runTerminal(
     cmd: string,
-    termOpts: { cwd: string; signal?: AbortSignal },
+    termOpts: { cwd: string; signal?: AbortSignal; timeoutMs?: number },
   ): AsyncIterable<TerminalChunk> {
-    const child = spawn(cmd, {
+    yield* streamShellCommand(cmd, {
       cwd: termOpts.cwd,
-      shell: true,
       signal: termOpts.signal,
-      env: process.env,
+      timeoutMs: termOpts.timeoutMs,
+      onSpawn: (pid) => this.activePids.add(pid),
+      onExit: (pid) => this.activePids.delete(pid),
     });
+  }
 
-    const queue: TerminalChunk[] = [];
-    let done = false;
-    let wake: (() => void) | undefined;
-    const push = (c: TerminalChunk) => {
-      queue.push(c);
-      wake?.();
+  async startBackgroundTerminal(
+    cmd: string,
+    opts: { cwd: string },
+  ): Promise<BackgroundTerminalStart> {
+    const info = await this.bgTerminals.start({
+      cmd,
+      cwd: opts.cwd,
+    });
+    return {
+      taskId: info.taskId,
+      pid: info.pid,
+      logPath: info.logPath,
+      cmd: info.cmd,
     };
+  }
 
-    child.stdout?.on('data', (b: Buffer) => {
-      push({ stream: 'stdout', text: b.toString('utf8') });
-    });
-    child.stderr?.on('data', (b: Buffer) => {
-      push({ stream: 'stderr', text: b.toString('utf8') });
-    });
-    const finished = new Promise<number | null>((resolve, reject) => {
-      child.on('error', reject);
-      child.on('close', (code) => {
-        done = true;
-        wake?.();
-        resolve(code);
-      });
-    });
+  async pollBackgroundTerminal(
+    taskId: string,
+  ): Promise<BackgroundTerminalPoll> {
+    const poll = await this.bgTerminals.poll(taskId);
+    return {
+      taskId: poll.taskId,
+      status: poll.status,
+      exitCode: poll.exitCode,
+      logPath: poll.logPath,
+      logTail: poll.logTail,
+    };
+  }
 
-    while (!done || queue.length) {
-      if (!queue.length) {
-        await new Promise<void>((r) => {
-          wake = r;
-        });
-        wake = undefined;
-        continue;
-      }
-      yield queue.shift()!;
+  async killBackgroundTerminal(taskId: string): Promise<boolean> {
+    return this.bgTerminals.kill(taskId);
+  }
+
+  async persistTodos(todos: AgentTodo[]): Promise<void> {
+    const root = this.getWorkspaceRoot();
+    if (!root) return;
+    await persistTodos(root, todos);
+  }
+
+  async loadTodos(): Promise<AgentTodo[] | null> {
+    const root = this.getWorkspaceRoot();
+    if (!root) return null;
+    return loadPersistedTodos(root);
+  }
+
+  async clearTodos(): Promise<void> {
+    const root = this.getWorkspaceRoot();
+    if (!root) return;
+    await clearPersistedTodos(root);
+  }
+
+  async persistAgentSession(snapshot: {
+    sessionId: string;
+    messages: BedrockMessage[];
+    transcript?: string;
+    createdAt?: string;
+  }): Promise<{ sessionId: string }> {
+    const root = this.opts.cwd;
+    const cfg = await loadWorkspaceAgentConfig(root);
+    if (!cfg.settings.session.persist) {
+      return { sessionId: snapshot.sessionId };
     }
+    const saved = await persistAgentSession(root, snapshot, {
+      maxSessions: cfg.settings.session.maxSessions,
+    });
+    return { sessionId: saved.sessionId };
+  }
 
-    const code = await finished;
-    if (code && code !== 0) {
-      yield {
-        stream: 'stderr',
-        text: `\n[exit ${code}]\n`,
-        exitCode: code,
-      };
-    } else {
-      yield { stream: 'stdout', text: '', exitCode: code ?? 0 };
-    }
+  async loadAgentSession() {
+    return loadAgentSession(this.opts.cwd);
+  }
+
+  async clearAgentSession(): Promise<void> {
+    await clearActiveAgentSession(this.opts.cwd);
   }
 
   async gatherMeta(
@@ -230,6 +351,33 @@ export class CliHostAdapter implements HostAdapter {
     req: import('@walkcroach/agent-engine').ApprovalRequest,
   ): Promise<void> {
     const { stepId, toolName } = req;
+
+    if (req.kind === 'question') {
+      if (this.opts.nonInteractive) {
+        const selected = req.options?.[0] ?? 'ok';
+        queueMicrotask(() =>
+          this.resolveQuestion(stepId, { selected }),
+        );
+        return;
+      }
+      if (this.opts.externalApprovals) return;
+      if (this.opts.promptApprovals === false) {
+        queueMicrotask(() => this.resolveQuestion(stepId, 'reject'));
+        return;
+      }
+      const options = req.options ?? [];
+      process.stderr.write(`\n${req.question ?? 'Choose:'}\n`);
+      options.forEach((o, i) => process.stderr.write(`  ${i + 1}) ${o}\n`));
+      const answer = await askLine('Select number: ');
+      const idx = Number(answer) - 1;
+      if (idx >= 0 && idx < options.length) {
+        this.resolveQuestion(stepId, { selected: options[idx]! });
+      } else {
+        this.resolveQuestion(stepId, 'reject');
+      }
+      return;
+    }
+
     if (this.opts.nonInteractive) {
       const ok = canNonInteractiveApprove({
         toolName,
@@ -303,6 +451,19 @@ function askYesNo(prompt: string): Promise<boolean> {
     rl.question(prompt, (answer) => {
       rl.close();
       resolve(/^(y|yes)$/i.test(answer.trim()));
+    });
+  });
+}
+
+function askLine(prompt: string): Promise<string> {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stderr,
+  });
+  return new Promise((resolve) => {
+    rl.question(prompt, (answer) => {
+      rl.close();
+      resolve(answer.trim());
     });
   });
 }

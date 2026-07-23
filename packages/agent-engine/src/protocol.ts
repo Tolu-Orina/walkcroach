@@ -8,10 +8,13 @@ export const WEBVIEW_TO_HOST = [
   'SUBMIT_TASK',
   'APPROVE_STEP',
   'REJECT_STEP',
+  'ANSWER_QUESTION',
   'SET_AUTONOMY',
   'CANCEL',
   'SIGN_IN',
   'SAVE_SETTINGS',
+  'CONTINUE_TASK',
+  'CLEAR_SESSION',
 ] as const;
 
 export const HOST_TO_WEBVIEW = [
@@ -19,6 +22,7 @@ export const HOST_TO_WEBVIEW = [
   'TOOL_CARD',
   'PHASE',
   'SUBAGENT',
+  'TODOS',
   'DONE',
   'ERROR',
   'WARNING',
@@ -38,6 +42,12 @@ export type WebviewToHostMessage =
   | { type: 'SUBMIT_TASK'; text: string; mode?: 'plan' | 'act' }
   | { type: 'APPROVE_STEP'; stepId: string }
   | { type: 'REJECT_STEP'; stepId: string }
+  | {
+      type: 'ANSWER_QUESTION';
+      stepId: string;
+      selected: string;
+      freeText?: string;
+    }
   | { type: 'SET_AUTONOMY'; level: AutonomyLevelMsg }
   | { type: 'CANCEL' }
   | { type: 'SIGN_IN' }
@@ -51,7 +61,9 @@ export type WebviewToHostMessage =
       ccloudApiKey?: string | null;
       mcpSnippet?: string;
       clearMcp?: boolean;
-    };
+    }
+  | { type: 'CONTINUE_TASK' }
+  | { type: 'CLEAR_SESSION' };
 
 export type HostToWebviewMessage =
   | { type: 'TOKEN_DELTA'; text: string }
@@ -70,18 +82,29 @@ export type HostToWebviewMessage =
       status: 'running' | 'done' | 'error';
       summary?: string;
     }
-  | { type: 'DONE'; reason: string }
+  | {
+      type: 'TODOS';
+      todos: Array<{
+        id: string;
+        content: string;
+        status: 'pending' | 'in_progress' | 'completed' | 'cancelled';
+      }>;
+    }
+  | { type: 'DONE'; reason: string; canContinue?: boolean }
   | { type: 'ERROR'; message: string; fatal?: boolean }
   | { type: 'WARNING'; message: string }
   | {
       type: 'APPROVAL_REQUEST';
       stepId: string;
-      kind: 'diff' | 'command';
+      kind: 'diff' | 'command' | 'question';
       toolName: string;
       path?: string;
       before?: string;
       after?: string;
       cmd?: string;
+      question?: string;
+      options?: string[];
+      allowFreeText?: boolean;
     }
   | {
       type: 'CACHE_USAGE';
@@ -102,12 +125,15 @@ export type HostToWebviewMessage =
       autonomy: AutonomyLevelMsg;
       pendingApproval: {
         stepId: string;
-        kind: 'diff' | 'command';
+        kind: 'diff' | 'command' | 'question';
         toolName: string;
         path?: string;
         before?: string;
         after?: string;
         cmd?: string;
+        question?: string;
+        options?: string[];
+        allowFreeText?: boolean;
       } | null;
       mcpConfigured?: boolean;
       bedrockConfigured?: boolean;
@@ -116,6 +142,12 @@ export type HostToWebviewMessage =
       signedIn?: boolean;
       linkedProjectId?: string | null;
       linkedProjectName?: string | null;
+      todos?: Array<{
+        id: string;
+        content: string;
+        status: 'pending' | 'in_progress' | 'completed' | 'cancelled';
+      }>;
+      hasSession?: boolean;
     };
 
 export function isWebviewToHostType(value: unknown): value is WebviewToHostType {
@@ -153,6 +185,16 @@ export function parseWebviewToHostMessage(
     case 'REJECT_STEP':
       if (typeof msg.stepId !== 'string') return null;
       return { type: msg.type, stepId: msg.stepId };
+    case 'ANSWER_QUESTION':
+      if (typeof msg.stepId !== 'string') return null;
+      if (typeof msg.selected !== 'string') return null;
+      return {
+        type: 'ANSWER_QUESTION',
+        stepId: msg.stepId,
+        selected: msg.selected,
+        freeText:
+          typeof msg.freeText === 'string' ? msg.freeText : undefined,
+      };
     case 'SET_AUTONOMY':
       if (msg.level !== 'strict' && msg.level !== 'low_friction') return null;
       return { type: 'SET_AUTONOMY', level: msg.level };
@@ -160,6 +202,10 @@ export function parseWebviewToHostMessage(
       return { type: 'CANCEL' };
     case 'SIGN_IN':
       return { type: 'SIGN_IN' };
+    case 'CONTINUE_TASK':
+      return { type: 'CONTINUE_TASK' };
+    case 'CLEAR_SESSION':
+      return { type: 'CLEAR_SESSION' };
     case 'SAVE_SETTINGS': {
       const out: WebviewToHostMessage = { type: 'SAVE_SETTINGS' };
       if (msg.bedrockApiKey === null) out.bedrockApiKey = null;

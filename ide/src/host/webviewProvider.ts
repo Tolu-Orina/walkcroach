@@ -4,10 +4,15 @@ import * as vscode from 'vscode';
 import {
   runAgentLoop,
   loadMcpConfigFromSecrets,
+  loadWorkspaceAgentConfig,
+  newSessionId,
   SECRET_KEYS,
   parseMcpConfigSnippet,
   DEFAULT_MCP_URL,
   normalizeLocalRepoKey,
+  CONTINUE_PROMPT,
+  type AgentTodo,
+  type BedrockMessage,
 } from '@walkcroach/agent-engine';
 import type { HostToWebviewMessage } from '@walkcroach/agent-engine';
 import {
@@ -53,6 +58,13 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
   private linkedProjectId: string | null = null;
   private linkedProjectName: string | null = null;
   private linkId: string | undefined;
+  private lastLoopMode: 'ping' | 'full' | 'plan' = 'full';
+  /** Bedrock conversation for multi-turn Continue / follow-ups. */
+  private sessionMessages: BedrockMessage[] = [];
+  private sessionTodos: AgentTodo[] = [];
+  /** Disk session id under .walkcroach/sessions/<id>/ */
+  private sessionId: string | undefined;
+  private sessionCreatedAt: string | undefined;
   private readonly auth: AuthService;
   private readonly output: vscode.OutputChannel;
   private readonly host: VsCodeHostAdapter;
@@ -81,7 +93,13 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
           before: r.before,
           after: r.after,
           cmd: r.cmd,
+          question: r.question,
+          options: r.options,
+          allowFreeText: r.allowFreeText,
         };
+      }
+      if (event.type === 'todos') {
+        this.sessionTodos = event.todos;
       }
       if (event.type === 'cache_usage') {
         this.output.appendLine(
@@ -689,6 +707,8 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
       signedIn: this.signedIn,
       linkedProjectId: this.linkedProjectId,
       linkedProjectName: this.linkedProjectName,
+      todos: this.sessionTodos,
+      hasSession: this.sessionMessages.length > 0,
     });
   }
 
@@ -706,16 +726,66 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
       case 'READY':
         await this.refreshCredentialStatus();
         await this.refreshAuthAndLink();
+        if (this.host.loadTodos) {
+          const loaded = await this.host.loadTodos();
+          if (loaded?.length) {
+            this.sessionTodos = loaded;
+          }
+        }
+        if (this.host.loadAgentSession) {
+          try {
+            const snap = await this.host.loadAgentSession();
+            if (snap?.messages.length) {
+              this.sessionId = snap.sessionId;
+              this.sessionCreatedAt = snap.createdAt;
+              this.sessionMessages = snap.messages;
+              if (snap.transcript) {
+                this.transcript = snap.transcript;
+                await this.persistTranscript();
+              }
+            }
+          } catch (err) {
+            this.output.appendLine(
+              `Session restore failed: ${
+                err instanceof Error ? err.message : String(err)
+              }`,
+            );
+          }
+        }
+        // Apply .walkcroach/settings.json autonomy only when user has no stored preference.
+        if (
+          this.context.workspaceState.get(AUTONOMY_KEY) === undefined
+        ) {
+          try {
+            const cfg = await loadWorkspaceAgentConfig(
+              this.host.getWorkspaceRoot(),
+            );
+            if (cfg.settings.autonomy) {
+              this.host.setAutonomy(cfg.settings.autonomy);
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+        this.snapshot();
         return;
       case 'SUBMIT_TASK':
         await this.startTask(msg.text, msg.mode === 'plan' ? 'plan' : 'full');
         return;
       case 'CANCEL':
         this.abort?.abort();
-        this.host.resolveApproval(
-          this.pendingApproval?.stepId ?? '',
-          'reject',
-        );
+        this.host.killAllTerminals?.();
+        if (this.pendingApproval?.kind === 'question') {
+          this.host.resolveQuestion(
+            this.pendingApproval.stepId,
+            'reject',
+          );
+        } else {
+          this.host.resolveApproval(
+            this.pendingApproval?.stepId ?? '',
+            'reject',
+          );
+        }
         this.pendingApproval = null;
         return;
       case 'APPROVE_STEP':
@@ -726,11 +796,41 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
         this.snapshot();
         return;
       case 'REJECT_STEP':
-        this.host.resolveApproval(msg.stepId, 'reject');
+        if (this.pendingApproval?.kind === 'question') {
+          this.host.resolveQuestion(msg.stepId, 'reject');
+        } else {
+          this.host.resolveApproval(msg.stepId, 'reject');
+        }
         if (this.pendingApproval?.stepId === msg.stepId) {
           this.pendingApproval = null;
         }
         this.snapshot();
+        return;
+      case 'ANSWER_QUESTION':
+        this.host.resolveQuestion(msg.stepId, {
+          selected: msg.selected,
+          freeText: msg.freeText,
+        });
+        if (this.pendingApproval?.stepId === msg.stepId) {
+          this.pendingApproval = null;
+        }
+        this.snapshot();
+        return;
+      case 'CLEAR_SESSION':
+        this.sessionMessages = [];
+        this.sessionTodos = [];
+        this.transcript = '';
+        this.sessionId = undefined;
+        this.sessionCreatedAt = undefined;
+        await this.host.clearTodos?.();
+        await this.host.clearAgentSession?.();
+        await this.persistTranscript();
+        this.snapshot();
+        return;
+      case 'CONTINUE_TASK':
+        await this.startTask(CONTINUE_PROMPT, this.lastLoopMode, {
+          followUp: true,
+        });
         return;
       case 'SET_AUTONOMY':
         this.host.setAutonomy(msg.level);
@@ -751,6 +851,7 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
   private async startTask(
     text: string,
     mode: 'ping' | 'full' | 'plan',
+    opts?: { followUp?: boolean },
   ): Promise<void> {
     if (this.streaming) {
       this.bridge?.postError('A run is already in progress. Cancel it first.');
@@ -772,9 +873,17 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
 
     this.streaming = true;
     this.pendingApproval = null;
-    if (text.trim().toLowerCase() !== 'ping') {
+    this.lastLoopMode = mode;
+    const isContinue = text === CONTINUE_PROMPT || opts?.followUp === true;
+    const hasSession = this.sessionMessages.length > 0;
+    if (text.trim().toLowerCase() !== 'ping' && !isContinue) {
+      // New user message: keep session messages for continuity; only reset
+      // host transcript buffer used for debug persistence.
       this.transcript = '';
       this.telemetry = {};
+    }
+    if (isContinue) {
+      this.transcript += this.transcript ? '\n\n' : '';
     }
     this.abort = new AbortController();
     this.host.setRunSignal(this.abort.signal);
@@ -795,8 +904,6 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
       (await this.context.secrets.get(SECRET_KEYS.ccloudApiKey)) ??
       mcpConfig?.apiKey;
 
-    // Inject project memory only when signed in + linked.
-    // Unlinked / local-only mode runs without projectMemory (Phase A/B).
     let projectMemory = undefined;
     const token = await this.auth.getAccessToken();
     if (token && this.linkedProjectId) {
@@ -819,6 +926,32 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
           mcpConfig,
           ccloudApiKey,
           projectMemory,
+          priorMessages: hasSession ? this.sessionMessages : undefined,
+          followUp: isContinue || hasSession,
+          onSessionMessages: (messages) => {
+            this.sessionMessages = messages;
+            if (!this.sessionId) {
+              this.sessionId = newSessionId();
+              this.sessionCreatedAt = new Date().toISOString();
+            }
+            const sessionId = this.sessionId;
+            const createdAt = this.sessionCreatedAt;
+            const transcript = this.transcript;
+            void this.host
+              .persistAgentSession?.({
+                sessionId,
+                messages,
+                transcript,
+                createdAt,
+              })
+              .catch((err) => {
+                this.output.appendLine(
+                  `Session persist failed: ${
+                    err instanceof Error ? err.message : String(err)
+                  }`,
+                );
+              });
+          },
         });
       });
     } catch (err) {

@@ -151,7 +151,9 @@
     "vscode:prepublish": "npm run build"
   },
   "dependencies": {
-    "@walkcroach/agent-engine": "file:../packages/agent-engine"
+    "@walkcroach/agent-engine": "file:../packages/agent-engine",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",

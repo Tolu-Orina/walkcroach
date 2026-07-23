@@ -29,16 +29,25 @@ describe('protocol allowlist', () => {
       'SUBMIT_TASK',
       'APPROVE_STEP',
       'REJECT_STEP',
+      'ANSWER_QUESTION',
       'SET_AUTONOMY',
       'CANCEL',
       'SIGN_IN',
       'SAVE_SETTINGS',
+      'CONTINUE_TASK',
+      'CLEAR_SESSION',
     ]);
   });
 
   it('parses SIGN_IN', () => {
     expect(parseWebviewToHostMessage({ type: 'SIGN_IN' })).toEqual({
       type: 'SIGN_IN',
+    });
+  });
+
+  it('parses CONTINUE_TASK', () => {
+    expect(parseWebviewToHostMessage({ type: 'CONTINUE_TASK' })).toEqual({
+      type: 'CONTINUE_TASK',
     });
   });
 
@@ -205,6 +214,8 @@ describe('truncate + prompt cache order', () => {
     });
     expect(t.startsWith('# Task')).toBe(true);
     expect(t).toContain('add health route');
+    expect(t).toContain('Execution requirement');
+    expect(t).toContain('relative');
   });
 });
 

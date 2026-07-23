@@ -13,6 +13,12 @@ export function getNovaModelId(): string {
   );
 }
 
+/** Explicit output budget (Bedrock defaults to model max and can truncate silently). */
+export const DEFAULT_MAX_OUTPUT_TOKENS = 4096;
+
+/** Auto-continue rounds when stopReason is max_tokens (industry continuation pattern). */
+export const DEFAULT_MAX_OUTPUT_CONTINUATIONS = 2;
+
 export function createBedrockClient(region?: string): BedrockRuntimeClient {
   return new BedrockRuntimeClient({
     region:
@@ -62,6 +68,8 @@ export async function* streamConverseTurn(params: {
   client?: BedrockRuntimeClient;
   modelId?: string;
   signal?: AbortSignal;
+  /** Override default output token budget. */
+  maxTokens?: number;
 }): AsyncGenerator<StreamDelta, ConverseTurnResult> {
   if (params.signal?.aborted) {
     throw new DOMException('Aborted', 'AbortError');
@@ -69,6 +77,7 @@ export async function* streamConverseTurn(params: {
 
   const client = params.client ?? createBedrockClient();
   const modelId = params.modelId ?? getNovaModelId();
+  const maxTokens = params.maxTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
 
   const command = new ConverseStreamCommand({
     modelId,
@@ -77,6 +86,9 @@ export async function* streamConverseTurn(params: {
     toolConfig: params.tools?.length
       ? { tools: params.tools }
       : undefined,
+    inferenceConfig: {
+      maxTokens,
+    },
   });
 
   const response = await client.send(command, {

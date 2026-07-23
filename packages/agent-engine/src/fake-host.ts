@@ -33,7 +33,15 @@ export function createFakeHost(opts: FakeHostOptions = {}): HostAdapter & {
   const gate = new ApprovalController((req) => {
     events.push({ type: 'approval_request', request: req });
     if (opts.autoApprove) {
-      queueMicrotask(() => gate.resolveApproval(req.stepId, 'approve'));
+      queueMicrotask(() => {
+        if (req.kind === 'question') {
+          gate.resolveQuestion(req.stepId, {
+            selected: req.options?.[0] ?? 'ok',
+          });
+        } else {
+          gate.resolveApproval(req.stepId, 'approve');
+        }
+      });
     }
   });
   if (opts.autonomy) gate.setAutonomy(opts.autonomy);
@@ -96,29 +104,72 @@ export function createFakeHost(opts: FakeHostOptions = {}): HostAdapter & {
       }
       return hits.slice(0, 100);
     },
+    glob: async (pattern) => {
+      const keys = [...files.keys()];
+      // Minimal glob: support * and ** via regex
+      const reSrc = pattern
+        .replace(/\\/g, '/')
+        .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+        .replace(/\*\*/g, '::DS::')
+        .replace(/\*/g, '[^/]*')
+        .replace(/::DS::/g, '.*');
+      const re = new RegExp(`^${reSrc}$`);
+      return keys.filter((k) => re.test(k)).sort();
+    },
     runTerminal: async function* (
       cmd: string,
-      termOpts: { cwd: string; signal?: AbortSignal },
+      termOpts: { cwd: string; signal?: AbortSignal; timeoutMs?: number },
     ): AsyncIterable<TerminalChunk> {
-      // Safe stub: echo only; real shells belong in VsCodeHostAdapter.
       if (cmd.startsWith('echo ')) {
-        yield { stream: 'stdout', text: `${cmd.slice(5)}\n` };
+        yield { stream: 'stdout', text: `${cmd.slice(5)}\n`, exitCode: 0 };
         return;
       }
       if (cmd.includes('git status')) {
-        yield { stream: 'stdout', text: '## main\n' };
+        yield { stream: 'stdout', text: '## main\n', exitCode: 0 };
         return;
       }
       yield {
         stream: 'stderr',
         text: `fake-host: command not simulated: ${cmd}\n`,
+        exitCode: 1,
       };
       void termOpts;
+    },
+    startBackgroundTerminal: async (cmd) => ({
+      taskId: 'fake-bg',
+      pid: 1,
+      logPath: '.walkcroach/terminals/fake-bg.log',
+      cmd,
+    }),
+    pollBackgroundTerminal: async (taskId) => ({
+      taskId,
+      status: 'exited' as const,
+      exitCode: 0,
+      logPath: `.walkcroach/terminals/${taskId}.log`,
+      logTail: '(fake)',
+    }),
+    killBackgroundTerminal: async () => true,
+    killAllTerminals: () => undefined,
+    persistTodos: async (todos) => {
+      files.set('.walkcroach/todos.json', JSON.stringify({ todos }));
+    },
+    loadTodos: async () => {
+      const raw = files.get('.walkcroach/todos.json');
+      if (!raw) return null;
+      try {
+        const parsed = JSON.parse(raw) as { todos?: unknown };
+        const { normalizeTodos } = await import('./todos.js');
+        return normalizeTodos(parsed.todos);
+      } catch {
+        return null;
+      }
+    },
+    clearTodos: async () => {
+      files.delete('.walkcroach/todos.json');
     },
     gatherMeta: async () => ({ gitStatus: '## main\nclean' }),
   };
 
-  // Override showDiffPreview stepId to be stable when provided via meta — already in gate.
   return host;
 }
 

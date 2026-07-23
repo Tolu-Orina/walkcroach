@@ -10,11 +10,18 @@ export type AuthSession = {
 
 type PendingConnect = {
   state: string;
+  redirectUri: string;
   resolve: (ok: boolean) => void;
   reject: (err: Error) => void;
 };
 
-const IDE_REDIRECT_URI = 'vscode://walkcroach.walkcroach-ide/auth';
+const IDE_AUTH_PATH = 'walkcroach.walkcroach-ide/auth';
+
+/** Platform-aware deep link: vscode://, cursor://, vscode-insiders://, etc. */
+export function ideRedirectUri(uriScheme = vscode.env.uriScheme): string {
+  const scheme = (uriScheme || 'vscode').trim() || 'vscode';
+  return `${scheme}://${IDE_AUTH_PATH}`;
+}
 
 /**
  * Shared Cognito (same SPA client / user pool as Web + Chrome).
@@ -22,7 +29,7 @@ const IDE_REDIRECT_URI = 'vscode://walkcroach.walkcroach-ide/auth';
  * Industry-standard native handoff:
  * 1. Open Web /connect/ide (reuses normal /signin)
  * 2. Web issues a one-time auth code via BFF
- * 3. vscode:// callback carries only code+state (never tokens)
+ * 3. IDE deep-link callback carries only code+state (never tokens)
  * 4. Extension exchanges code at POST /ide/v1/oauth/token
  */
 export class AuthService {
@@ -112,17 +119,18 @@ export class AuthService {
     }
 
     const state = generateOAuthState();
+    const redirectUri = ideRedirectUri();
     await this.secrets.store(
       SECRET_KEYS.pendingPkce,
-      JSON.stringify({ state }),
+      JSON.stringify({ state, redirectUri }),
     );
 
     const authUrl = new URL('/connect/ide', cfg.webAppUrl.replace(/\/$/, ''));
     authUrl.searchParams.set('state', state);
-    authUrl.searchParams.set('redirect_uri', IDE_REDIRECT_URI);
+    authUrl.searchParams.set('redirect_uri', redirectUri);
 
     const result = await new Promise<boolean>((resolve, reject) => {
-      this.pending = { state, resolve, reject };
+      this.pending = { state, redirectUri, resolve, reject };
       void vscode.env.openExternal(vscode.Uri.parse(authUrl.toString()));
       setTimeout(() => {
         if (this.pending?.state === state) {
@@ -149,9 +157,13 @@ export class AuthService {
       );
       if (raw) {
         try {
-          const stored = JSON.parse(raw) as { state: string };
+          const stored = JSON.parse(raw) as {
+            state: string;
+            redirectUri?: string;
+          };
           pending = {
             state: stored.state,
+            redirectUri: stored.redirectUri || ideRedirectUri(),
             resolve: () => undefined,
             reject: () => undefined,
           };
@@ -193,7 +205,7 @@ export class AuthService {
       const tokens = await exchangeAuthCode({
         code,
         state,
-        redirectUri: IDE_REDIRECT_URI,
+        redirectUri: pending.redirectUri || ideRedirectUri(),
       });
       await this.storeAccessToken(tokens.id_token ?? tokens.access_token, {
         refreshToken: tokens.refresh_token,

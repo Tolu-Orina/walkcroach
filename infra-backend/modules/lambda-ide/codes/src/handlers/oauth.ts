@@ -7,6 +7,7 @@ import { metricLog, parseJsonBody } from '../util.js';
 const ALLOWED_REDIRECTS = new Set([
   'vscode://walkcroach.walkcroach-ide/auth',
   'cursor://walkcroach.walkcroach-ide/auth',
+  'vscode-insiders://walkcroach.walkcroach-ide/auth',
 ]);
 
 const CODE_TTL_MS = 5 * 60_000;

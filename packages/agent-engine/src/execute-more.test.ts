@@ -112,8 +112,60 @@ describe('executeTool — run_terminal exit codes', () => {
       host,
       tool: { toolUseId: 't2', name: 'run_terminal', input: { cmd: 'npm test' } },
     });
-    expect(result.status).toBe('success');
+    expect(result.status).toBe('error');
     expect(result.content).toContain('not simulated');
+  });
+
+  it('starts background mode and returns task id', async () => {
+    const host = createFakeHost({ autoApprove: true });
+    const result = await executeTool({
+      host,
+      tool: {
+        toolUseId: 't3',
+        name: 'run_terminal',
+        input: { cmd: 'npx vite', mode: 'background' },
+      },
+    });
+    expect(result.status).toBe('success');
+    expect(result.content).toContain('fake-bg');
+    expect(result.content).toContain('await_terminal');
+  });
+
+  it('polls with await_terminal', async () => {
+    const host = createFakeHost({ autoApprove: true });
+    const result = await executeTool({
+      host,
+      tool: {
+        toolUseId: 't4',
+        name: 'await_terminal',
+        input: { task_id: 'fake-bg' },
+      },
+    });
+    expect(result.status).toBe('success');
+    expect(result.content).toContain('status: exited');
+  });
+});
+
+describe('executeTool — todo persistence', () => {
+  it('persists todos via host.persistTodos', async () => {
+    const host = createFakeHost({ autoApprove: true });
+    const result = await executeTool({
+      host,
+      tool: {
+        toolUseId: 'td1',
+        name: 'todo_write',
+        input: {
+          todos: [
+            { id: '1', content: 'Scaffold app', status: 'in_progress' },
+            { id: '2', content: 'Start server', status: 'pending' },
+          ],
+        },
+      },
+    });
+    expect(result.status).toBe('success');
+    const loaded = await host.loadTodos?.();
+    expect(loaded?.length).toBe(2);
+    expect(loaded?.[0]?.content).toBe('Scaffold app');
   });
 });
 

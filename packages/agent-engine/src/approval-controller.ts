@@ -3,6 +3,7 @@ import type {
   ApprovalDecision,
   ApprovalRequest,
   HostAdapter,
+  UserQuestionAnswer,
 } from './host.js';
 import type { AutonomyLevel } from './approvals.js';
 import { shouldAutoApprove, isInfraCommand } from './approvals.js';
@@ -16,6 +17,13 @@ export class ApprovalController {
     string,
     {
       resolve: (d: ApprovalDecision) => void;
+      reject: (err: Error) => void;
+    }
+  >();
+  private readonly pendingQuestions = new Map<
+    string,
+    {
+      resolve: (d: UserQuestionAnswer) => void;
       reject: (err: Error) => void;
     }
   >();
@@ -37,9 +45,29 @@ export class ApprovalController {
     entry.resolve(decision);
   }
 
+  resolveQuestion(
+    stepId: string,
+    answer: UserQuestionAnswer | 'reject',
+  ): void {
+    const entry = this.pendingQuestions.get(stepId);
+    if (!entry) return;
+    this.pendingQuestions.delete(stepId);
+    if (answer === 'reject') {
+      // Soft dismiss — return a normal answer so the agent can continue.
+      // Do NOT AbortError: that cancels the entire run.
+      entry.resolve({ selected: '(skipped)' });
+      return;
+    }
+    entry.resolve(answer);
+  }
+
   cancelAll(reason = 'cancelled'): void {
     for (const [id, entry] of this.pending) {
       this.pending.delete(id);
+      entry.reject(new DOMException(reason, 'AbortError'));
+    }
+    for (const [id, entry] of this.pendingQuestions) {
+      this.pendingQuestions.delete(id);
       entry.reject(new DOMException(reason, 'AbortError'));
     }
   }
@@ -94,6 +122,46 @@ export class ApprovalController {
     return this.wait(stepId, request, params.signal);
   }
 
+  async requestQuestion(params: {
+    question: string;
+    options: string[];
+    allowFreeText?: boolean;
+    toolName?: string;
+    signal?: AbortSignal;
+  }): Promise<UserQuestionAnswer> {
+    const stepId = randomUUID();
+    const request: ApprovalRequest = {
+      stepId,
+      kind: 'question',
+      toolName: params.toolName ?? 'ask_user',
+      question: params.question,
+      options: params.options,
+      allowFreeText: params.allowFreeText,
+    };
+    return new Promise<UserQuestionAnswer>((resolve, reject) => {
+      if (params.signal?.aborted) {
+        reject(new DOMException('Aborted', 'AbortError'));
+        return;
+      }
+      const onAbort = () => {
+        this.pendingQuestions.delete(stepId);
+        reject(new DOMException('Aborted', 'AbortError'));
+      };
+      params.signal?.addEventListener('abort', onAbort, { once: true });
+      this.pendingQuestions.set(stepId, {
+        resolve: (d) => {
+          params.signal?.removeEventListener('abort', onAbort);
+          resolve(d);
+        },
+        reject: (err) => {
+          params.signal?.removeEventListener('abort', onAbort);
+          reject(err);
+        },
+      });
+      this.emitApproval(request);
+    });
+  }
+
   private wait(
     stepId: string,
     request: ApprovalRequest,
@@ -133,7 +201,9 @@ export function bindApprovals(
   HostAdapter,
   | 'showDiffPreview'
   | 'confirmCommand'
+  | 'askUser'
   | 'resolveApproval'
+  | 'resolveQuestion'
   | 'getAutonomy'
   | 'setAutonomy'
 > {
@@ -153,7 +223,16 @@ export function bindApprovals(
         toolName: meta?.toolName ?? 'run_terminal',
         signal: signal?.(),
       }),
+    askUser: (params) =>
+      gate.requestQuestion({
+        question: params.question,
+        options: params.options,
+        allowFreeText: params.allowFreeText,
+        toolName: 'ask_user',
+        signal: signal?.(),
+      }),
     resolveApproval: (stepId, decision) => gate.resolveApproval(stepId, decision),
+    resolveQuestion: (stepId, answer) => gate.resolveQuestion(stepId, answer),
     getAutonomy: () => gate.getAutonomy(),
     setAutonomy: (level) => gate.setAutonomy(level),
   };

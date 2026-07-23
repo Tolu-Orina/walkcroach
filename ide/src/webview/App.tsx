@@ -1,6 +1,8 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { getVsCodeApi } from './vscodeApi';
 import { SettingsView } from './SettingsView';
+import { MarkdownBody } from './MarkdownBody';
+import { formatStopReason } from './formatStopReason';
 
 type Phase = 'gather' | 'act' | 'verify' | null;
 type Autonomy = 'strict' | 'low_friction';
@@ -22,12 +24,21 @@ type Subagent = {
 
 type Approval = {
   stepId: string;
-  kind: 'diff' | 'command';
+  kind: 'diff' | 'command' | 'question';
   toolName: string;
   path?: string;
   before?: string;
   after?: string;
   cmd?: string;
+  question?: string;
+  options?: string[];
+  allowFreeText?: boolean;
+};
+
+type AgentTodo = {
+  id: string;
+  content: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'cancelled';
 };
 
 type ChatTurn = {
@@ -35,12 +46,16 @@ type ChatTurn = {
   role: 'user' | 'assistant';
   text: string;
   mode?: ChatMode;
+  tools?: ToolCard[];
+  subagents?: Subagent[];
+  stopReason?: string;
+  canContinue?: boolean;
 };
 
 type HostMessage =
   | { type: 'TOKEN_DELTA'; text: string }
   | { type: 'PHASE'; phase: Phase }
-  | { type: 'DONE'; reason: string }
+  | { type: 'DONE'; reason: string; canContinue?: boolean }
   | { type: 'ERROR'; message: string; fatal?: boolean }
   | { type: 'WARNING'; message: string }
   | {
@@ -57,6 +72,8 @@ type HostMessage =
       signedIn?: boolean;
       linkedProjectId?: string | null;
       linkedProjectName?: string | null;
+      todos?: AgentTodo[];
+      hasSession?: boolean;
     }
   | {
       type: 'TOOL_CARD';
@@ -72,6 +89,7 @@ type HostMessage =
       status: Subagent['status'];
       summary?: string;
     }
+  | { type: 'TODOS'; todos: AgentTodo[] }
   | ({ type: 'APPROVAL_REQUEST' } & Approval)
   | {
       type: 'CACHE_USAGE';
@@ -87,7 +105,13 @@ type HostMessage =
 
 function clip(s: string, n: number): string {
   if (s.length <= n) return s;
-  return `${s.slice(0, n)}\n…`;
+  // Prefer keeping path tails readable (Windows "New folder" looked truncated).
+  if (n >= 48 && /[/\\]/.test(s)) {
+    const head = Math.max(16, Math.floor(n * 0.35));
+    const tail = n - head - 1;
+    return `${s.slice(0, head)}…${s.slice(-tail)}`;
+  }
+  return `${s.slice(0, n)}…`;
 }
 
 function uid(): string {
@@ -113,9 +137,56 @@ export function App() {
   const [linkedProjectId, setLinkedProjectId] = useState<string | null>(null);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [liveText, setLiveText] = useState('');
+  const [todos, setTodos] = useState<AgentTodo[]>([]);
+  const [hasSession, setHasSession] = useState(false);
+  const [freeText, setFreeText] = useState('');
   const [view, setView] = useState<'chat' | 'settings'>('chat');
   const threadRef = useRef<HTMLDivElement>(null);
   const modeMenuRef = useRef<HTMLDivElement>(null);
+  const liveTextRef = useRef('');
+  const toolsRef = useRef<ToolCard[]>([]);
+  const subagentsRef = useRef<Subagent[]>([]);
+
+  useEffect(() => {
+    liveTextRef.current = liveText;
+  }, [liveText]);
+  useEffect(() => {
+    toolsRef.current = tools;
+  }, [tools]);
+  useEffect(() => {
+    subagentsRef.current = subagents;
+  }, [subagents]);
+
+  const commitAssistantTurn = useCallback(
+    (text: string, meta?: { stopReason?: string; canContinue?: boolean }) => {
+      const toolsNow = toolsRef.current;
+      const subsNow = subagentsRef.current;
+      if (!text.trim() && toolsNow.length === 0 && subsNow.length === 0) {
+        liveTextRef.current = '';
+        setLiveText('');
+        setTools([]);
+        setSubagents([]);
+        return;
+      }
+      setTurns((prev) => [
+        ...prev,
+        {
+          id: uid(),
+          role: 'assistant',
+          text,
+          tools: toolsNow.length ? toolsNow : undefined,
+          subagents: subsNow.length ? subsNow : undefined,
+          stopReason: meta?.stopReason,
+          canContinue: meta?.canContinue,
+        },
+      ]);
+      liveTextRef.current = '';
+      setLiveText('');
+      setTools([]);
+      setSubagents([]);
+    },
+    [],
+  );
 
   useEffect(() => {
     const vscode = getVsCodeApi();
@@ -136,12 +207,20 @@ export function App() {
           setCcloudConfigured(Boolean(msg.ccloudConfigured));
           setSignedIn(Boolean(msg.signedIn));
           setLinkedProjectId(msg.linkedProjectId ?? null);
-          if (!msg.streaming && msg.transcript) {
-            setLiveText(msg.transcript);
-          }
+          if (msg.todos) setTodos(msg.todos);
+          setHasSession(Boolean(msg.hasSession));
+          // Do NOT copy host transcript into liveText — that duplicates the
+          // assistant turn already committed on DONE (chat owns history).
           break;
         case 'TOKEN_DELTA':
-          setLiveText((t) => t + msg.text);
+          setLiveText((t) => {
+            const next = t + msg.text;
+            liveTextRef.current = next;
+            return next;
+          });
+          break;
+        case 'TODOS':
+          setTodos(msg.todos);
           break;
         case 'PHASE':
           setPhase(msg.phase);
@@ -185,6 +264,9 @@ export function App() {
             before: msg.before,
             after: msg.after,
             cmd: msg.cmd,
+            question: msg.question,
+            options: msg.options,
+            allowFreeText: msg.allowFreeText,
           });
           break;
         case 'CACHE_USAGE':
@@ -194,14 +276,10 @@ export function App() {
           setStreaming(false);
           setPhase(null);
           setApproval(null);
-          setLiveText((text) => {
-            if (text.trim()) {
-              setTurns((prev) => [
-                ...prev,
-                { id: uid(), role: 'assistant', text },
-              ]);
-            }
-            return '';
+          setError(null);
+          commitAssistantTurn(liveTextRef.current, {
+            stopReason: msg.reason,
+            canContinue: Boolean(msg.canContinue),
           });
           break;
         case 'WARNING':
@@ -212,15 +290,12 @@ export function App() {
             setStreaming(false);
             setPhase(null);
             setApproval(null);
-            setLiveText((text) => {
-              const body = text.trim()
-                ? `${text.trim()}\n\n${msg.message}`
-                : msg.message;
-              setTurns((prev) => [
-                ...prev,
-                { id: uid(), role: 'assistant', text: body },
-              ]);
-              return '';
+            const body = liveTextRef.current.trim()
+              ? `${liveTextRef.current.trim()}\n\n${msg.message}`
+              : msg.message;
+            commitAssistantTurn(body, {
+              stopReason: 'error',
+              canContinue: false,
             });
           }
           setError(msg.message);
@@ -232,7 +307,7 @@ export function App() {
 
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, []);
+  }, [commitAssistantTurn]);
 
   useEffect(() => {
     const el = threadRef.current;
@@ -256,6 +331,7 @@ export function App() {
     if (!text || streaming || !trusted) return;
     setError(null);
     setLiveText('');
+    liveTextRef.current = '';
     setTools([]);
     setSubagents([]);
     setApproval(null);
@@ -292,7 +368,37 @@ export function App() {
       stepId: approval.stepId,
     });
     setApproval(null);
+    setFreeText('');
   }, [approval]);
+
+  const answerQuestion = useCallback(
+    (selected: string) => {
+      if (!approval || approval.kind !== 'question') return;
+      getVsCodeApi().postMessage({
+        type: 'ANSWER_QUESTION',
+        stepId: approval.stepId,
+        selected,
+        freeText: freeText.trim() || undefined,
+      });
+      setApproval(null);
+      setFreeText('');
+    },
+    [approval, freeText],
+  );
+
+  const clearSession = useCallback(() => {
+    if (streaming) return;
+    setTurns([]);
+    setTodos([]);
+    setLiveText('');
+    liveTextRef.current = '';
+    setTools([]);
+    setSubagents([]);
+    setApproval(null);
+    setError(null);
+    setHasSession(false);
+    getVsCodeApi().postMessage({ type: 'CLEAR_SESSION' });
+  }, [streaming]);
 
   const toggleAutonomy = useCallback(() => {
     const next: Autonomy =
@@ -305,8 +411,29 @@ export function App() {
     getVsCodeApi().postMessage({ type: 'SIGN_IN' });
   }, []);
 
+  const continueRun = useCallback(() => {
+    if (streaming || !trusted) return;
+    setError(null);
+    setLiveText('');
+    liveTextRef.current = '';
+    setTools([]);
+    setSubagents([]);
+    setApproval(null);
+    setStreaming(true);
+    setTurns((prev) => [
+      ...prev.map((t) =>
+        t.canContinue ? { ...t, canContinue: false } : t,
+      ),
+      { id: uid(), role: 'user', text: 'Continue', mode },
+    ]);
+    getVsCodeApi().postMessage({ type: 'CONTINUE_TASK' });
+  }, [streaming, trusted, mode]);
+
   const empty = turns.length === 0 && !streaming && !liveText;
   const needsSetup = !bedrockConfigured || !mcpConfigured;
+  const lastTurn = turns[turns.length - 1];
+  const showContinue =
+    !streaming && Boolean(lastTurn?.canContinue) && trusted;
 
   if (view === 'settings') {
     return (
@@ -337,6 +464,16 @@ export function App() {
               Sign in
             </button>
           )}
+          {(hasSession || turns.length > 0) && !streaming ? (
+            <button
+              type="button"
+              className="linkish"
+              onClick={clearSession}
+              title="Clear conversation session"
+            >
+              New chat
+            </button>
+          ) : null}
           <button
             type="button"
             className="gear"
@@ -348,6 +485,17 @@ export function App() {
           </button>
         </div>
       </header>
+
+      {todos.length > 0 ? (
+        <ul className="todo-list" aria-label="Agent checklist">
+          {todos.map((t) => (
+            <li key={t.id} data-status={t.status}>
+              <span className="todo-status">{t.status}</span>
+              <span className="todo-content">{t.content}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
 
       {needsSetup && (
         <button
@@ -409,7 +557,50 @@ export function App() {
                       : 'You · Agent'
                     : 'WalkCroach'}
                 </div>
-                <pre className="bubble-body">{t.text}</pre>
+                {t.role === 'assistant' &&
+                (t.tools?.length || t.subagents?.length) ? (
+                  <ul className="activity" aria-label="Activity">
+                    {(t.tools ?? []).map((tool) => (
+                      <li key={tool.id} data-status={tool.status}>
+                        <span className="activity-name">{tool.name}</span>
+                        <span className="activity-meta">
+                          {tool.status}
+                          {tool.detail ? ` · ${clip(tool.detail, 140)}` : ''}
+                        </span>
+                      </li>
+                    ))}
+                    {(t.subagents ?? []).map((s) => (
+                      <li key={s.id} data-status={s.status}>
+                        <span className="activity-name">{s.name}</span>
+                        <span className="activity-meta">
+                          subagent · {s.status}
+                          {s.summary ? ` · ${clip(s.summary, 80)}` : ''}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+                {t.role === 'assistant' ? (
+                  <MarkdownBody text={t.text} />
+                ) : (
+                  <div className="bubble-body user-text">{t.text}</div>
+                )}
+                {t.role === 'assistant' && t.stopReason ? (
+                  <div
+                    className={`stop-footer${t.canContinue ? ' actionable' : ''}`}
+                  >
+                    <span>{formatStopReason(t.stopReason)}</span>
+                    {t.canContinue && t.id === lastTurn?.id && !streaming ? (
+                      <button
+                        type="button"
+                        className="linkish"
+                        onClick={continueRun}
+                      >
+                        Continue
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
               </article>
             ))}
 
@@ -434,7 +625,7 @@ export function App() {
                         <span className="activity-name">{t.name}</span>
                         <span className="activity-meta">
                           {t.status}
-                          {t.detail ? ` · ${clip(t.detail, 80)}` : ''}
+                          {t.detail ? ` · ${clip(t.detail, 140)}` : ''}
                         </span>
                       </li>
                     ))}
@@ -453,12 +644,52 @@ export function App() {
                   <section
                     className="approval"
                     role="dialog"
-                    aria-label="Approval required"
+                    aria-label={
+                      approval.kind === 'question'
+                        ? 'Question'
+                        : 'Approval required'
+                    }
                   >
                     <div className="approval-head">
-                      Approval · {approval.toolName}
+                      {approval.kind === 'question'
+                        ? 'Question'
+                        : `Approval · ${approval.toolName}`}
                     </div>
-                    {approval.kind === 'command' ? (
+                    {approval.kind === 'question' ? (
+                      <>
+                        <p className="question-text">{approval.question}</p>
+                        <div className="question-options">
+                          {(approval.options ?? []).map((opt) => (
+                            <button
+                              key={opt}
+                              type="button"
+                              className="btn primary"
+                              onClick={() => answerQuestion(opt)}
+                            >
+                              {opt}
+                            </button>
+                          ))}
+                        </div>
+                        {approval.allowFreeText ? (
+                          <textarea
+                            className="question-freetext"
+                            rows={2}
+                            placeholder="Optional details…"
+                            value={freeText}
+                            onChange={(e) => setFreeText(e.target.value)}
+                          />
+                        ) : null}
+                        <div className="row">
+                          <button
+                            type="button"
+                            className="btn ghost"
+                            onClick={reject}
+                          >
+                            Skip
+                          </button>
+                        </div>
+                      </>
+                    ) : approval.kind === 'command' ? (
                       <pre className="diff">{approval.cmd}</pre>
                     ) : (
                       <>
@@ -473,27 +704,31 @@ export function App() {
                         </div>
                       </>
                     )}
-                    <div className="row">
-                      <button
-                        type="button"
-                        className="btn primary"
-                        onClick={approve}
-                      >
-                        Approve
-                      </button>
-                      <button
-                        type="button"
-                        className="btn ghost"
-                        onClick={reject}
-                      >
-                        Reject
-                      </button>
-                    </div>
+                    {approval.kind !== 'question' ? (
+                      <div className="row">
+                        <button
+                          type="button"
+                          className="btn primary"
+                          onClick={approve}
+                        >
+                          Approve
+                        </button>
+                        <button
+                          type="button"
+                          className="btn ghost"
+                          onClick={reject}
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    ) : null}
                   </section>
                 )}
-                <pre className="bubble-body" aria-live="polite">
-                  {liveText || (streaming ? '…' : '')}
-                </pre>
+                {liveText ? (
+                  <MarkdownBody text={liveText} />
+                ) : streaming ? (
+                  <div className="bubble-body md thinking">…</div>
+                ) : null}
               </article>
             )}
           </>
@@ -580,15 +815,26 @@ export function App() {
                 Stop
               </button>
             ) : (
-              <button
-                type="button"
-                className="send"
-                onClick={submit}
-                disabled={!trusted || !draft.trim()}
-                aria-label="Send"
-              >
-                ↑
-              </button>
+              <>
+                {showContinue ? (
+                  <button
+                    type="button"
+                    className="btn primary"
+                    onClick={continueRun}
+                  >
+                    Continue
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="send"
+                  onClick={submit}
+                  disabled={!trusted || !draft.trim()}
+                  aria-label="Send"
+                >
+                  ↑
+                </button>
+              </>
             )}
           </div>
         </div>

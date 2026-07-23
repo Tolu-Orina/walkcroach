@@ -72,6 +72,7 @@ body {
   padding: 10px var(--wc-pad) 8px;
   border-bottom: 1px solid var(--wc-border);
   flex-shrink: 0;
+  min-width: 0;
 }
 
 .brand {
@@ -79,12 +80,16 @@ body {
   font-size: 0.95rem;
   font-weight: 700;
   letter-spacing: -0.02em;
+  flex-shrink: 0;
 }
 
 .chat-top-meta {
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
 }
 
 .pill {
@@ -142,7 +147,9 @@ body {
 .thread {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 14px var(--wc-pad) 10px;
   display: flex;
   flex-direction: column;
@@ -183,6 +190,7 @@ body {
   flex-direction: column;
   gap: 6px;
   max-width: 100%;
+  min-width: 0;
 }
 
 .bubble-label {
@@ -192,17 +200,23 @@ body {
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--wc-muted);
+  background: none;
+  border: none;
+  padding: 0;
 }
 
-.bubble.user .bubble-body {
+.bubble.user .bubble-body,
+.bubble.user .user-text {
   background: color-mix(in srgb, var(--wc-ember) 12%, var(--wc-surface));
   border-color: color-mix(in srgb, var(--wc-ember) 28%, var(--wc-border));
 }
 
-.bubble-body {
+.bubble-body,
+.user-text {
   margin: 0;
   padding: 10px 12px;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   word-break: break-word;
   font-family: var(--wc-font-body);
   font-size: 0.95rem;
@@ -210,11 +224,97 @@ body {
   background: var(--wc-surface);
   border: 1px solid var(--wc-border);
   border-radius: var(--wc-radius);
+  max-width: 100%;
+  min-width: 0;
 }
 
-.bubble.assistant .bubble-body {
+.bubble-body.md {
+  white-space: normal;
+  font-family: var(--wc-font-body);
+  font-size: 0.92rem;
+}
+
+.bubble-body.md.thinking {
+  color: var(--wc-muted);
+}
+
+.bubble-body.md > :first-child {
+  margin-top: 0;
+}
+
+.bubble-body.md > :last-child {
+  margin-bottom: 0;
+}
+
+.bubble-body.md h1,
+.bubble-body.md h2,
+.bubble-body.md h3 {
+  font-family: var(--wc-font-display);
+  font-weight: 650;
+  line-height: 1.25;
+  margin: 0.85em 0 0.35em;
+  letter-spacing: -0.02em;
+}
+
+.bubble-body.md h1 {
+  font-size: 1.15rem;
+}
+
+.bubble-body.md h2 {
+  font-size: 1.05rem;
+}
+
+.bubble-body.md h3 {
+  font-size: 0.98rem;
+}
+
+.bubble-body.md p {
+  margin: 0.45em 0;
+}
+
+.bubble-body.md ul,
+.bubble-body.md ol {
+  margin: 0.4em 0;
+  padding-left: 1.25em;
+}
+
+.bubble-body.md li {
+  margin: 0.2em 0;
+}
+
+.bubble-body.md hr {
+  border: none;
+  border-top: 1px solid var(--wc-border);
+  margin: 0.8em 0;
+}
+
+.bubble-body.md a {
+  color: var(--vscode-textLink-foreground, var(--wc-ember));
+}
+
+.bubble-body.md code {
   font-family: var(--wc-font-mono);
-  font-size: 12px;
+  font-size: 0.84em;
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--wc-fg) 8%, transparent);
+}
+
+.bubble-body.md pre.md-code {
+  margin: 0.55em 0;
+  padding: 10px;
+  overflow-x: auto;
+  max-width: 100%;
+  border-radius: 6px;
+  border: 1px solid var(--wc-border);
+  background: var(--wc-bg);
+}
+
+.bubble-body.md pre.md-code code {
+  padding: 0;
+  background: none;
+  font-size: 0.78rem;
+  white-space: pre;
 }
 
 .activity {
@@ -224,6 +324,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
 }
 
 .activity li {
@@ -234,21 +335,47 @@ body {
   border: 1px solid var(--wc-border);
   border-radius: 6px;
   background: var(--wc-bg);
+  min-width: 0;
 }
 
 .activity-name {
   font-family: var(--wc-font-mono);
   font-size: 0.78rem;
   font-weight: 500;
+  overflow-wrap: anywhere;
 }
 
 .activity-meta {
   font-size: 0.75rem;
   color: var(--wc-muted);
+  overflow-wrap: anywhere;
 }
 
 .activity li[data-status='running'] .activity-name {
   color: var(--vscode-focusBorder, var(--wc-accent));
+}
+
+.stop-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--wc-muted);
+  padding: 0 2px;
+}
+
+.stop-footer.actionable {
+  color: color-mix(in srgb, var(--wc-ember) 75%, var(--wc-fg));
+}
+
+.stop-footer .linkish {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 0.82rem;
+  font-weight: 600;
 }
 
 .approval {
@@ -265,6 +392,66 @@ body {
   font-family: var(--wc-font-display);
   font-weight: 600;
   font-size: 0.85rem;
+}
+
+.todo-list {
+  list-style: none;
+  margin: 0;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--wc-border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 140px;
+  overflow: auto;
+}
+
+.todo-list li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 0.8rem;
+}
+
+.todo-status {
+  font-family: var(--wc-font-mono);
+  font-size: 0.7rem;
+  color: var(--wc-muted);
+  min-width: 5.5rem;
+  text-transform: uppercase;
+}
+
+.todo-list li[data-status='in_progress'] .todo-status {
+  color: var(--wc-accent);
+}
+
+.todo-list li[data-status='completed'] .todo-content {
+  color: var(--wc-muted);
+  text-decoration: line-through;
+}
+
+.question-text {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.question-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.question-freetext {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: var(--wc-font-body);
+  font-size: 0.85rem;
+  padding: 6px 8px;
+  border: 1px solid var(--wc-border);
+  border-radius: 6px;
+  background: var(--wc-surface);
+  color: var(--wc-fg);
+  resize: vertical;
 }
 
 .path {

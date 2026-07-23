@@ -53,6 +53,21 @@ export const PHASE_A_TOOLS: ToolDef[] = [
     },
   },
   {
+    name: 'glob',
+    description:
+      'Find files by glob pattern relative to the workspace root (e.g. "test/**", "**/*.ts"). Prefer this over recursive list_dir.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        pattern: {
+          type: 'string',
+          description: 'Glob pattern relative to workspace root',
+        },
+      },
+      required: ['pattern'],
+    },
+  },
+  {
     name: 'write_file',
     description: 'Create or overwrite a file (requires user approval of the diff)',
     inputSchema: {
@@ -81,14 +96,113 @@ export const PHASE_A_TOOLS: ToolDef[] = [
   {
     name: 'run_terminal',
     description:
-      'Run a shell command in the workspace root (requires approval; never auto-approved)',
+      'Run a shell command (requires approval; never auto-approved). Use mode=blocking (default) for npm install/test/build. Use mode=background for long-lived processes (dev servers, watchers) so the agent can keep working — then poll with await_terminal. Prefer write_file for source files.',
     infra: true,
     inputSchema: {
       type: 'object',
       properties: {
         cmd: { type: 'string', description: 'Shell command to run' },
+        cwd: {
+          type: 'string',
+          description:
+            'Working directory relative to workspace root (default ".")',
+        },
+        timeout_ms: {
+          type: 'number',
+          description:
+            'Blocking mode only: kill after this many ms (default 120000, max 600000)',
+        },
+        mode: {
+          type: 'string',
+          description:
+            'blocking (wait for exit) | background (return task_id immediately)',
+        },
       },
       required: ['cmd'],
+    },
+  },
+  {
+    name: 'await_terminal',
+    description:
+      'Poll a background terminal started with run_terminal mode=background. Returns status, exit code if finished, and a log tail.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task_id: {
+          type: 'string',
+          description: 'Task id returned by run_terminal in background mode',
+        },
+      },
+      required: ['task_id'],
+    },
+  },
+  {
+    name: 'verify',
+    description:
+      'Run a project check from .walkcroach/verify.json (tests/typecheck/build). Prefer this after mutating work. command must be an exact entry from verify.json (or omit to run the first). Exit 0 marks the session verified.',
+    infra: true,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        command: {
+          type: 'string',
+          description:
+            'Exact command from .walkcroach/verify.json (default: first listed command)',
+        },
+        cwd: {
+          type: 'string',
+          description:
+            'Working directory relative to workspace (default: verify.json cwd or ".")',
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'todo_write',
+    description:
+      'Replace the agent task checklist (2–12 items). Keep exactly one item in_progress while working. Update statuses as you finish steps. Call this early on multi-step tasks.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        todos: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              content: { type: 'string' },
+              status: {
+                type: 'string',
+                description: 'pending | in_progress | completed | cancelled',
+              },
+            },
+            required: ['id', 'content', 'status'],
+          },
+        },
+      },
+      required: ['todos'],
+    },
+  },
+  {
+    name: 'ask_user',
+    description:
+      'Ask the user a structured multiple-choice question when a real decision is required before proceeding. Prefer acting when the goal is already clear. Do not use this to dump option menus as a substitute for work.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        question: { type: 'string' },
+        options: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '2–6 short choices',
+        },
+        allow_free_text: {
+          type: 'boolean',
+          description: 'Allow an optional free-text answer in addition to choices',
+        },
+      },
+      required: ['question', 'options'],
     },
   },
   {
@@ -154,14 +268,14 @@ export const PHASE_B_TOOLS: ToolDef[] = [
   {
     name: 'load_skill',
     description:
-      'Load the full body of a CockroachDB Agent Skill by name (progressive disclosure). Use after matching a skill from the catalog for schema/index/ops tasks.',
+      'Load a CockroachDB Agent Skill by name (progressive disclosure). Official skills from cockroachlabs/cockroachdb-skills ship bundled — pick a name from the skills catalog for schema, SQL, observability, security, MOLT, or ops.',
     inputSchema: {
       type: 'object',
       properties: {
         name: {
           type: 'string',
           description:
-            'Skill name, e.g. cockroachdb-schema-design, cockroachdb-indexes-and-queries, cockroachdb-operations',
+            'Skill name, e.g. cockroachdb-sql, designing-application-transactions, triaging-live-sql-activity, cockroachdb-walkcroach-tools',
         },
       },
       required: ['name'],
@@ -272,7 +386,11 @@ export const READ_ONLY_TOOL_NAMES = new Set([
   'read_file',
   'list_dir',
   'search',
+  'glob',
   'load_skill',
   'cockroach_mcp',
   'recall_project_memory',
+  'ask_user',
+  'todo_write',
+  'await_terminal',
 ]);

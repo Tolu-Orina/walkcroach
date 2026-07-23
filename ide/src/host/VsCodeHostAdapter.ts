@@ -3,6 +3,9 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { spawn } from 'node:child_process';
 import type {
+  AgentTodo,
+  BackgroundTerminalPoll,
+  BackgroundTerminalStart,
   HostAdapter,
   HostSecrets,
   SearchHit,
@@ -10,8 +13,19 @@ import type {
 } from '@walkcroach/agent-engine';
 import {
   ApprovalController,
+  BackgroundTerminalRegistry,
   bindApprovals,
+  clearPersistedTodos,
+  clearActiveAgentSession,
+  killProcessTree,
+  loadAgentSession,
+  loadPersistedTodos,
+  loadWorkspaceAgentConfig,
+  persistAgentSession,
+  persistTodos,
+  streamShellCommand,
 } from '@walkcroach/agent-engine';
+import type { BedrockMessage } from '@walkcroach/agent-engine';
 
 /**
  * Phase A host: workspace fs, terminal, search, approvals, trust.
@@ -21,6 +35,10 @@ export class VsCodeHostAdapter implements HostAdapter {
   private readonly approvals: ReturnType<typeof bindApprovals>;
   private runSignal: AbortSignal | undefined;
   private secretStore: vscode.SecretStorage | undefined;
+  private readonly activePids = new Set<number>();
+  private readonly bgTerminals = new BackgroundTerminalRegistry(() =>
+    this.getWorkspaceRoot(),
+  );
 
   constructor(
     private readonly emitFn: HostAdapter['emit'],
@@ -42,14 +60,26 @@ export class VsCodeHostAdapter implements HostAdapter {
 
   setRunSignal(signal?: AbortSignal): void {
     this.runSignal = signal;
-    if (signal?.aborted) this.gate.cancelAll();
+    if (signal?.aborted) {
+      this.gate.cancelAll();
+      this.killAllTerminals();
+    }
     signal?.addEventListener(
       'abort',
       () => {
         this.gate.cancelAll();
+        this.killAllTerminals();
       },
       { once: true },
     );
+  }
+
+  killAllTerminals(): void {
+    for (const pid of [...this.activePids]) {
+      killProcessTree(pid);
+    }
+    this.activePids.clear();
+    this.bgTerminals.killAll();
   }
 
   showDiffPreview(
@@ -72,8 +102,26 @@ export class VsCodeHostAdapter implements HostAdapter {
     return this.approvals.confirmCommand(cmd, meta);
   }
 
+  askUser(params: {
+    question: string;
+    options: string[];
+    allowFreeText?: boolean;
+    stepId?: string;
+  }) {
+    return this.approvals.askUser(params);
+  }
+
   resolveApproval(stepId: string, decision: 'approve' | 'reject') {
     this.approvals.resolveApproval(stepId, decision);
+  }
+
+  resolveQuestion(
+    stepId: string,
+    answer:
+      | { selected: string; freeText?: string }
+      | 'reject',
+  ) {
+    this.approvals.resolveQuestion(stepId, answer);
   }
 
   getAutonomy() {
@@ -136,62 +184,120 @@ export class VsCodeHostAdapter implements HostAdapter {
     return fallbackSearch(root, pattern, opts?.glob, opts?.signal);
   }
 
+  async glob(
+    pattern: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<string[]> {
+    this.assertTrustedTools();
+    const root = this.requireRoot();
+    if (opts?.signal?.aborted) {
+      throw new DOMException('Aborted', 'AbortError');
+    }
+    const folder = vscode.workspace.workspaceFolders?.[0];
+    if (!folder) return [];
+    const uris = await vscode.workspace.findFiles(
+      new vscode.RelativePattern(folder, pattern),
+      '**/{node_modules,.git,dist,coverage}/**',
+      200,
+    );
+    return uris
+      .map((u) => path.relative(root, u.fsPath).replace(/\\/g, '/'))
+      .sort();
+  }
+
   async *runTerminal(
     cmd: string,
-    opts: { cwd: string; signal?: AbortSignal },
+    opts: { cwd: string; signal?: AbortSignal; timeoutMs?: number },
   ): AsyncIterable<TerminalChunk> {
     this.assertTrustedTools();
-    const child = spawn(cmd, {
+    yield* streamShellCommand(cmd, {
       cwd: opts.cwd,
-      shell: true,
       signal: opts.signal,
-      env: process.env,
+      timeoutMs: opts.timeoutMs,
+      onSpawn: (pid) => this.activePids.add(pid),
+      onExit: (pid) => this.activePids.delete(pid),
     });
+  }
 
-    const queue: TerminalChunk[] = [];
-    let done = false;
-    let wake: (() => void) | undefined;
-    const push = (c: TerminalChunk) => {
-      queue.push(c);
-      wake?.();
+  async startBackgroundTerminal(
+    cmd: string,
+    opts: { cwd: string },
+  ): Promise<BackgroundTerminalStart> {
+    this.assertTrustedTools();
+    const info = await this.bgTerminals.start({
+      cmd,
+      cwd: opts.cwd,
+    });
+    return {
+      taskId: info.taskId,
+      pid: info.pid,
+      logPath: info.logPath,
+      cmd: info.cmd,
     };
+  }
 
-    child.stdout?.on('data', (b: Buffer) => {
-      push({ stream: 'stdout', text: b.toString('utf8') });
-    });
-    child.stderr?.on('data', (b: Buffer) => {
-      push({ stream: 'stderr', text: b.toString('utf8') });
-    });
+  async pollBackgroundTerminal(
+    taskId: string,
+  ): Promise<BackgroundTerminalPoll> {
+    const poll = await this.bgTerminals.poll(taskId);
+    return {
+      taskId: poll.taskId,
+      status: poll.status,
+      exitCode: poll.exitCode,
+      logPath: poll.logPath,
+      logTail: poll.logTail,
+    };
+  }
 
-    const finished = new Promise<number | null>((resolve, reject) => {
-      child.on('error', reject);
-      child.on('close', (code) => {
-        done = true;
-        wake?.();
-        resolve(code);
-      });
-    });
+  async killBackgroundTerminal(taskId: string): Promise<boolean> {
+    return this.bgTerminals.kill(taskId);
+  }
 
-    while (!done || queue.length) {
-      if (!queue.length) {
-        await new Promise<void>((r) => {
-          wake = r;
-        });
-        continue;
-      }
-      yield queue.shift()!;
+  async persistTodos(todos: AgentTodo[]): Promise<void> {
+    const root = this.getWorkspaceRoot();
+    if (!root) return;
+    await persistTodos(root, todos);
+  }
+
+  async loadTodos(): Promise<AgentTodo[] | null> {
+    const root = this.getWorkspaceRoot();
+    if (!root) return null;
+    return loadPersistedTodos(root);
+  }
+
+  async clearTodos(): Promise<void> {
+    const root = this.getWorkspaceRoot();
+    if (!root) return;
+    await clearPersistedTodos(root);
+  }
+
+  async persistAgentSession(snapshot: {
+    sessionId: string;
+    messages: BedrockMessage[];
+    transcript?: string;
+    createdAt?: string;
+  }): Promise<{ sessionId: string }> {
+    const root = this.requireRoot();
+    const cfg = await loadWorkspaceAgentConfig(root);
+    if (!cfg.settings.session.persist) {
+      return { sessionId: snapshot.sessionId };
     }
+    const saved = await persistAgentSession(root, snapshot, {
+      maxSessions: cfg.settings.session.maxSessions,
+    });
+    return { sessionId: saved.sessionId };
+  }
 
-    const code = await finished;
-    if (code && code !== 0) {
-      yield {
-        stream: 'stderr',
-        text: `\n[exit ${code}]\n`,
-        exitCode: code,
-      };
-    } else {
-      yield { stream: 'stdout', text: '', exitCode: code ?? 0 };
-    }
+  async loadAgentSession() {
+    const root = this.getWorkspaceRoot();
+    if (!root) return null;
+    return loadAgentSession(root);
+  }
+
+  async clearAgentSession(): Promise<void> {
+    const root = this.getWorkspaceRoot();
+    if (!root) return;
+    await clearActiveAgentSession(root);
   }
 
   async gatherMeta(
@@ -221,9 +327,15 @@ export class VsCodeHostAdapter implements HostAdapter {
 
   private resolvePath(rel: string): string {
     const root = this.requireRoot();
-    const abs = path.resolve(root, rel);
+    const raw = (rel || '.').trim();
+    // Absolute paths under the workspace are accepted; prefer relative in tools.
+    const abs = path.isAbsolute(raw)
+      ? path.normalize(raw)
+      : path.resolve(root, raw);
     if (!isPathInsideWorkspace(root, abs)) {
-      throw new Error(`Path escapes workspace: ${rel}`);
+      throw new Error(
+        `Path escapes workspace (use a path relative to ${root}): ${raw}`,
+      );
     }
     return abs;
   }

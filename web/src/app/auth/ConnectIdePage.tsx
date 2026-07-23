@@ -4,7 +4,14 @@ import { loadStoredAuth } from '../../auth/storage';
 import { useAuth } from '../../auth/useAuth';
 import { AuthCard, AuthError, AuthLink } from '../../components/auth/AuthCard';
 
-const ALLOWED_REDIRECT = 'vscode://walkcroach.walkcroach-ide/auth';
+/** Must stay in sync with IDE BFF ALLOWED_REDIRECTS (lambda-ide oauth handler). */
+const ALLOWED_REDIRECTS = new Set([
+  'vscode://walkcroach.walkcroach-ide/auth',
+  'cursor://walkcroach.walkcroach-ide/auth',
+  'vscode-insiders://walkcroach.walkcroach-ide/auth',
+]);
+
+const DEFAULT_REDIRECT = 'vscode://walkcroach.walkcroach-ide/auth';
 
 function ideApiBase(): string {
   return String(import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
@@ -12,7 +19,8 @@ function ideApiBase(): string {
 
 /**
  * Industry-standard IDE connect: reuse normal Web sign-in, then issue a
- * one-time authorization code (never put tokens in the vscode:// URL).
+ * one-time authorization code (never put tokens in the IDE deep-link URL).
+ * redirect_uri is platform-aware (vscode:// vs cursor://).
  */
 export function ConnectIdePage() {
   const { status } = useAuth();
@@ -21,7 +29,7 @@ export function ConnectIdePage() {
   const [statusText, setStatusText] = useState('Connecting to WalkCroach IDE…');
 
   const state = params.get('state')?.trim() ?? '';
-  const redirectUri = params.get('redirect_uri')?.trim() ?? ALLOWED_REDIRECT;
+  const redirectUri = params.get('redirect_uri')?.trim() ?? DEFAULT_REDIRECT;
 
   const nextPath = useMemo(() => {
     const q = new URLSearchParams();
@@ -42,7 +50,7 @@ export function ConnectIdePage() {
         );
         return;
       }
-      if (redirectUri !== ALLOWED_REDIRECT) {
+      if (!ALLOWED_REDIRECTS.has(redirectUri)) {
         setError('Invalid redirect URI.');
         return;
       }
@@ -76,7 +84,7 @@ export function ConnectIdePage() {
           },
           body: JSON.stringify({
             state,
-            redirectUri: ALLOWED_REDIRECT,
+            redirectUri,
             refreshToken: stored.cognito.refreshToken,
             idToken: stored.cognito.idToken,
             expiresAt: stored.cognito.expiresAt,
@@ -91,7 +99,7 @@ export function ConnectIdePage() {
         }
         if (cancelled) return;
 
-        const target = new URL(ALLOWED_REDIRECT);
+        const target = new URL(redirectUri);
         target.searchParams.set('code', data.code);
         target.searchParams.set('state', state);
         setStatusText('Returning to your IDE…');

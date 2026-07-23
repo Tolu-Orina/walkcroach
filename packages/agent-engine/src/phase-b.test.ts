@@ -131,10 +131,13 @@ Use covering indexes.
     const reg = new SkillsRegistry();
     await reg.init([]);
     const metas = reg.listMeta();
-    expect(metas.length).toBeGreaterThanOrEqual(3);
-    expect(reg.catalogText()).toContain(metas[0]!.name);
-    const full = reg.load(metas[0]!.name);
+    // Official cockroachlabs/cockroachdb-skills (34) + WalkCroach companion.
+    expect(metas.length).toBeGreaterThanOrEqual(30);
+    expect(reg.catalogText()).toContain('cockroachdb-sql');
+    expect(reg.catalogText()).toContain('cockroachdb-walkcroach-tools');
+    const full = reg.load('cockroachdb-sql');
     expect(full?.body.length).toBeGreaterThan(20);
+    expect(reg.formatForModel(full!).length).toBeGreaterThan(full!.body.length);
   });
 });
 

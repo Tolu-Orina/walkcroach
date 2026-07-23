@@ -2,7 +2,7 @@
 
 VS Code / Cursor extension (custom webview sidebar) + shared `@walkcroach/agent-engine`.
 
-**Auth:** Sign In opens WalkCroach Web `/connect/ide` (reuses `/signin`). One-time authorization code → IDE BFF token exchange. Same Cognito SPA client as Web/Chrome — no Hosted UI, no second user pool.
+**Auth:** Sign In opens WalkCroach Web `/connect/ide` (reuses `/signin`). One-time authorization code → IDE BFF token exchange. Same Cognito SPA client as Web/Chrome — no Hosted UI, no second user pool. The OAuth `redirect_uri` uses `vscode.env.uriScheme` (`vscode://`, `cursor://`, or `vscode-insiders://`).
 
 **Ship path:** private VSIX first — see [INSTALL.md](./INSTALL.md).
 

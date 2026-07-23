@@ -1,5 +1,6 @@
 import type {
   AgentEvent,
+  AgentTodo,
   HostToWebviewMessage,
 } from '@walkcroach/agent-engine';
 import {
@@ -61,6 +62,9 @@ export class MessageBridge {
           before: r.before,
           after: r.after,
           cmd: r.cmd,
+          question: r.question,
+          options: r.options,
+          allowFreeText: r.allowFreeText,
         });
         return;
       }
@@ -74,9 +78,17 @@ export class MessageBridge {
           summary: event.summary,
         });
         return;
+      case 'todos':
+        this.coalescer.flushNow();
+        this.post({ type: 'TODOS', todos: event.todos });
+        return;
       case 'done':
         this.coalescer.flushNow();
-        this.post({ type: 'DONE', reason: event.reason });
+        this.post({
+          type: 'DONE',
+          reason: event.reason,
+          canContinue: event.canContinue,
+        });
         return;
       case 'error':
         this.coalescer.flushNow();
@@ -128,8 +140,9 @@ export class MessageBridge {
     signedIn?: boolean;
     linkedProjectId?: string | null;
     linkedProjectName?: string | null;
+    todos?: AgentTodo[];
+    hasSession?: boolean;
   }): void {
-    // Flush pending token deltas before snapshot so transcript is not duplicated.
     this.coalescer.flushNow();
     this.post({
       type: 'STATE_SNAPSHOT',
@@ -145,6 +158,8 @@ export class MessageBridge {
       signedIn: params.signedIn,
       linkedProjectId: params.linkedProjectId,
       linkedProjectName: params.linkedProjectName,
+      todos: params.todos,
+      hasSession: params.hasSession,
     });
   }
 

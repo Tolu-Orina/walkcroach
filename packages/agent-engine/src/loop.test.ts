@@ -9,6 +9,8 @@ vi.mock('./bedrock.js', () => ({
   createBedrockClient: vi.fn(),
   streamConverseTurn: (...args: unknown[]) => mockStreamConverseTurn(...args),
   streamPing: (...args: unknown[]) => mockStreamPing(...args),
+  DEFAULT_MAX_OUTPUT_TOKENS: 4096,
+  DEFAULT_MAX_OUTPUT_CONTINUATIONS: 2,
 }));
 
 import { runAgentLoop, DEFAULT_MAX_ITERATIONS, DEFAULT_MAX_SUBAGENTS } from './loop.js';
@@ -132,7 +134,7 @@ describe('runAgentLoop — end_turn without tools', () => {
 
 describe('constants', () => {
   it('exports sensible defaults', () => {
-    expect(DEFAULT_MAX_ITERATIONS).toBe(16);
+    expect(DEFAULT_MAX_ITERATIONS).toBe(24);
     expect(DEFAULT_MAX_SUBAGENTS).toBe(3);
   });
 });

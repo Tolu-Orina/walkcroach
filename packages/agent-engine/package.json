@@ -17,7 +17,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "smoke:ping": "node --import tsx src/smoke-ping.ts"
+    "smoke:ping": "node --import tsx src/smoke-ping.ts",
+    "sync:cockroachdb-skills": "node scripts/sync-cockroachdb-skills.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.800.0",
