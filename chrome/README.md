@@ -1,80 +1,55 @@
 # WalkCroach Chrome
 
-Manifest V3 extension (WXT + React). Phase 0 scaffold: FAB, side panel, health + anon device session against the Chrome BFF.
+Manifest V3 extension (WXT + React). Trust-first SME page copilot.
 
-## Quick start
+## Quick start (local)
 
 ```bash
 # Terminal 1 — Chrome BFF (port 3002)
 cd infra-backend
 npm install
-npm run migrate          # applies 007_chrome_workspaces.sql
+npm run migrate
 npm run dev:chrome
 
 # Terminal 2 — extension
 cd chrome
 npm install
-npm run dev              # opens Chromium with unpacked extension
+npm run dev
 ```
 
-Set `WALKCROACH_API_BASE` when pointing at a deployed API Gateway stage URL (must end with `/v1` or include `execute-api`):
+## Production Chrome Web Store zip
 
 ```bash
-WALKCROACH_API_BASE=https://xxxx.execute-api.eu-west-2.amazonaws.com/v1 npm run dev
+cd chrome
+npm run zip:prod
+# → .output/*.zip with live API + privacy URLs baked in
+# Defaults: see release.env
 ```
-
-## Scripts
 
 | Script | Purpose |
 |--------|---------|
 | `npm run dev` | WXT dev (hot reload) |
-| `npm run build` | Production build → `.output/chrome-mv3` |
-| `npm run zip` | Store-ready zip |
+| `npm run build` | Build (localhost defaults unless env set) |
+| `npm run zip` | Zip current build |
+| `npm run zip:prod` | **Store upload** — HTTPS bake, typecheck, test, localhost scan |
 | `npm run test` | Unit tests |
 | `npm run typecheck` | `tsc --noEmit` |
 
+Public CWS checklist: `store/SUBMISSION_CHECKLIST.md`.
+
 ## Site profiles (Phase B)
 
-Sector quick actions are driven by a versioned JSON bundle:
-
 - `lib/site-profiles/profiles.v1.json`
-- Matcher: `lib/site-profiles/matcher.ts` (client-side only; no per-navigation API)
+- Matcher: `lib/site-profiles/matcher.ts` (client-side only)
 
-### Bumping profiles (maintenance)
-
-1. Edit `profiles.v1.json` (add host/path rules; keep `version` in sync with filename).
-2. Add/adjust unit cases in `matcher.test.ts`.
-3. Ship a new extension build (`npm run zip`) — profiles are bundled, not remote code (MV3 / store safe).
-4. Do **not** fetch executable JS for profiles. If you later host remote JSON as **data**, bump `version` and validate shape before use.
-
-Default workspaces created on first sector save: Hiring, Leads, Pricing, Property, Support.
+Default workspaces on first sector save: Hiring, Leads, Pricing, Property, Support.
 
 ## Web project linking (Phase C)
 
-After Cognito upgrade (Trust tab):
+After account upgrade (Trust tab): Workspaces → Link to Web project.  
+Public listing for v0.1.2 soft-pedals this path until Cognito browser sign-in ships.
 
-1. Open **Workspaces** → select a workspace → **Link to Web project**.
-2. New saves (and price tracks) also write `memory_entries` with `source_surface='chrome'`.
-3. WalkCroach Web recall for that project includes those entries automatically (no surface filter).
+## Privacy
 
-APIs: `GET /chrome/v1/me/projects`, `POST /chrome/v1/workspaces/:id/link-project`.
-
-## Store submission (Phase D)
-
-Kit under `store/` (listing copy, privacy practices, permission justifications, checklist).
-
-| Artifact | Path |
-|----------|------|
-| Privacy policy (HTTPS via Web host) | `../web/public/chrome-privacy.html` |
-| Enterprise policy stub | `enterprise/policies.json` |
-| Versioning | `VERSIONING.md` / `CHANGELOG.md` |
-
-```bash
-# Production zip (set live API + privacy URLs)
-WALKCROACH_API_BASE=https://api.example.com/v1 \
-WALKCROACH_PRIVACY_URL=https://app.example.com/chrome-privacy.html \
-npm run zip
-```
-
-Follow `store/SUBMISSION_CHECKLIST.md` before uploading to the Chrome Web Store.
-
+Live: https://walkcroach.conquerorfoundation.com/chrome-privacy.html  
+Source: `../web/public/chrome-privacy.html` (redeploy Web after edits).

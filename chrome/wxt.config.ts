@@ -14,6 +14,20 @@ if (requireProdEnv && !process.env.WALKCROACH_PRIVACY_URL) {
     'WALKCROACH_PRIVACY_URL must be set for production Chrome extension builds',
   );
 }
+if (requireProdEnv) {
+  const api = process.env.WALKCROACH_API_BASE ?? '';
+  const privacy = process.env.WALKCROACH_PRIVACY_URL ?? '';
+  if (!api.startsWith('https://') || api.includes('localhost')) {
+    throw new Error(
+      'WALKCROACH_API_BASE must be an https production URL (not localhost)',
+    );
+  }
+  if (!privacy.startsWith('https://') || privacy.includes('localhost')) {
+    throw new Error(
+      'WALKCROACH_PRIVACY_URL must be an https production URL (not localhost)',
+    );
+  }
+}
 
 // https://wxt.dev/api/config.html
 export default defineConfig({

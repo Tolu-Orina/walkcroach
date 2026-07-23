@@ -14,5 +14,6 @@ WalkCroach Chrome uses **semver** in `package.json` → WXT embeds it in the ext
 2. Record changes in `CHANGELOG.md`.
 3. CI zip artifact must match the version you submit.
 4. Production builds must set `WALKCROACH_API_BASE` to the live API stage URL (never localhost).
+5. Use `npm run zip:prod` for store uploads (fail-closed HTTPS bake + localhost scan).
 
-Current store-candidate line: **0.1.0** (Phases 0–D local complete; not yet published).
+**Current store-candidate line: `0.1.2`** (Phase 1 public-CWS prep — not yet published).

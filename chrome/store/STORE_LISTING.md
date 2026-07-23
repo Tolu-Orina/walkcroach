@@ -1,4 +1,4 @@
-# Chrome Web Store listing copy (PD.4)
+# Chrome Web Store listing copy (PD.4) — v0.1.2
 
 ## Store name
 
@@ -18,7 +18,6 @@ WalkCroach helps solo operators and small teams work from the page they are alre
 - Save captures into workspaces you control
 - Recall what you saved later
 - Optional sector quick actions (e.g. candidate summary, price track) on matched sites
-- Optional link to your WalkCroach Web project so saves show up in project memory
 
 **What it does not do**
 - It does not scrape the web in the background
@@ -26,7 +25,11 @@ WalkCroach helps solo operators and small teams work from the page they are alre
 - It does not require host access at install—site permission is requested only when you summarize or save
 
 **Privacy**
-See our privacy policy (linked in the store listing). You can revoke any site from the Trust panel.
+See our privacy policy: https://walkcroach.conquerorfoundation.com/chrome-privacy.html  
+You can revoke any site from the Trust panel.
+
+**Homepage / support**
+https://walkcroach.conquerorfoundation.com
 
 ## Category
 
@@ -36,19 +39,9 @@ Productivity
 
 English
 
-## Screenshots (capture before submit)
+## Screenshots
 
-Chrome Web Store expects high-quality screenshots (typically 1280×800 or 640×400). Capture from a build pointed at staging/prod API:
-
-| # | Shot | Shows |
-|---|------|--------|
-| 1 | Side panel on a content page | Summarize streaming + FAB |
-| 2 | Trust panel | Granted origins + revoke |
-| 3 | Sector quick action | Editable proposal before save |
-| 4 | Workspaces | Captures list + Web project link (if signed in) |
-| 5 | Recall | Question + recalled answer |
-
-Store assets folder (local): place PNG/JPEG under `chrome/store/screenshots/` (gitignored binaries optional).
+Follow `SCREENSHOTS.md`. Place files in `screenshots/` before dashboard upload.
 
 ## Promotional images
 
@@ -57,3 +50,7 @@ Optional: small tile 440×280, marquee 1400×560 if you use featured placement l
 ## Single-purpose wording for reviewers
 
 “SME page copilot: summarize, ask, draft, save, recall—not a general automation or scraping toolkit.”
+
+## Note for v0.1.2 listing
+
+Do **not** lead with WalkCroach Web account linking in the public description. Cross-surface linking exists for signed-in users but Cognito browser sign-in (PKCE) is not the v1 install path. Keep the listing focused on on-page copilot value.

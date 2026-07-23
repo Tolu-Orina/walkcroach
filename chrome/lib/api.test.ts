@@ -64,7 +64,8 @@ describe('createDeviceSession', () => {
     const result = await createDeviceSession();
     expect(result).toEqual(body);
     const call = spy.mock.calls[0];
-    expect(JSON.parse(call[1]!.body as string)).toEqual({});
+    expect(call).toBeDefined();
+    expect(JSON.parse(call![1]!.body as string)).toEqual({});
   });
 
   it('posts with deviceKey when provided', async () => {
@@ -78,7 +79,8 @@ describe('createDeviceSession', () => {
     const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(jsonResponse(body));
     await createDeviceSession('dk-123');
     const call = spy.mock.calls[0];
-    expect(JSON.parse(call[1]!.body as string)).toEqual({ deviceKey: 'dk-123' });
+    expect(call).toBeDefined();
+    expect(JSON.parse(call![1]!.body as string)).toEqual({ deviceKey: 'dk-123' });
   });
 
   it('throws on failure', async () => {

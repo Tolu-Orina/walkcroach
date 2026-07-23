@@ -1,6 +1,6 @@
 {
   "name": "@walkcroach/chrome",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
   "description": "WalkCroach Chrome — Manifest V3 SME copilot extension",
@@ -8,6 +8,7 @@
     "dev": "wxt",
     "build": "wxt build",
     "zip": "wxt zip",
+    "zip:prod": "node scripts/zip-prod.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",

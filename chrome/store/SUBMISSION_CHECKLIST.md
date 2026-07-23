@@ -1,42 +1,53 @@
-# Chrome Web Store submission checklist (PD.5–PD.6)
+# Chrome Web Store submission checklist — Public CWS (v0.1.2)
 
-## Build artifact
+Production endpoints (do not substitute localhost):
 
-```bash
-cd chrome
-npm ci
-npm run typecheck
-npm run test
-npm run zip
-# → chrome/.output/*.zip (WXT store zip)
-```
+| Item | Value |
+|------|-------|
+| API | `https://awbcf4clij.execute-api.eu-west-2.amazonaws.com/v1` |
+| Privacy | `https://walkcroach.conquerorfoundation.com/chrome-privacy.html` |
+| Product | `https://walkcroach.conquerorfoundation.com` |
+| Extension version | `0.1.2` |
 
-CI (`chrome/buildspec.yml`) already runs typecheck, test, build, and zip.
+## Phase 1 — engineering (this release)
 
-## Versioning (semver)
+- [x] Privacy policy copy finalized (no draft placeholders) in `web/public/chrome-privacy.html`
+- [ ] **Redeploy Web** so live `/chrome-privacy.html` matches repo (operator / pipeline)
+- [x] `npm run zip:prod` script (HTTPS bake + localhost scan)
+- [x] Version `0.1.2` in `package.json` / `CHANGELOG.md` / `VERSIONING.md`
+- [x] Store kit URLs updated (`PRIVACY_PRACTICES.md`, `STORE_LISTING.md`)
+- [x] Run `npm run zip:prod` and keep the emitted `.zip`
+  - Artifact: `chrome/.output/walkcroachchrome-0.1.2-chrome.zip`
+- [ ] Smoke unpacked prod build (below)
+- [ ] Capture screenshots per `SCREENSHOTS.md`
 
-See `../VERSIONING.md`. Bump `chrome/package.json` `version` before every store upload.
+## Smoke (unpacked prod build)
 
-## Pre-submit
+1. Load `chrome/.output/chrome-mv3` as unpacked extension.
+2. Open an https page → toolbar WalkCroach → Summarize → grant site access.
+3. Save to a workspace → open Recall → confirm answer references the save.
+4. Trust tab → privacy link opens live HTTPS policy → revoke origin.
+5. Confirm DevTools Network calls go to `awbcf4clij.execute-api…` (not localhost).
 
-- [ ] Privacy policy live on HTTPS (`/chrome-privacy.html` on Web host)
-- [ ] Dashboard privacy practices filled from `PRIVACY_PRACTICES.md`
-- [ ] Permission justifications pasted from `PERMISSION_JUSTIFICATIONS.md`
-- [ ] Remote code = No
-- [ ] Listing copy from `STORE_LISTING.md`
-- [ ] ≥1 screenshot uploaded
-- [ ] `WALKCROACH_API_BASE` baked into the zip points at production API (not localhost)
-- [ ] Manifest has no required host permissions / no `<all_urls>` at install
-- [ ] Smoke: install unpacked → summarize → save → revoke origin
+## Dashboard (paste before upload)
 
-## Submit (operator action)
+- [ ] Privacy policy URL = live HTTPS above
+- [ ] Privacy practices from `PRIVACY_PRACTICES.md`
+- [ ] Permission justifications from `PERMISSION_JUSTIFICATIONS.md`
+- [ ] Remote code = **No**
+- [ ] Listing from `STORE_LISTING.md` (Chrome-only lead; soft-pedal Web linking)
+- [ ] ≥3 screenshots uploaded
+- [ ] Package = `0.1.2` zip from `zip:prod`
+- [ ] Manifest: no required host permissions / no `<all_urls>` at install
 
-1. Chrome Web Store Developer Dashboard → Upload new package (zip from `npm run zip`)
-2. Distribution: start **Unlisted** or **Trusted testers**, then Public when ready
-3. **Buffer:** first publisher account often **7–14 business days**; otherwise often **2–5** (NFR-C17)
-4. Do not schedule a hard demo on “submit day”
+## Submit (Phase 2 — operator)
+
+1. Chrome Web Store Developer Dashboard → Upload package (`0.1.2` zip).
+2. Prefer brief **Unlisted / Trusted testers** smoke, then set **Public**.
+3. Buffer **2–5** business days (or **7–14** if first publisher account).
+4. Do not schedule a hard launch on submit day.
 
 ## After approval
 
 - Follow `POST_SUBMIT_MONITORING.md`
-- Optional: distribute `../enterprise/policies.json` stub to IT evaluators
+- Put real extension id into `../enterprise/policies.json`

@@ -510,20 +510,21 @@ cd chrome && npm run dev
 
 ---
 
-### Phase D — Store submission + launch (PRD Phase D) ✅ **KIT READY (local)**
+### Phase D — Store submission + launch (PRD Phase D) ✅ **KIT READY** · 🚀 **Public CWS Phase 1 packaging (0.1.2)**
 
 | # | Task | Detail |
 |---|------|--------|
-| PD.1 | Privacy policy page (HTTPS) matching Limited Use + disclosures | ✅ `web/public/chrome-privacy.html` — publish with Web host before submit |
-| PD.2 | Developer Dashboard privacy practices aligned to manifest | ✅ `chrome/store/PRIVACY_PRACTICES.md` |
+| PD.1 | Privacy policy page (HTTPS) matching Limited Use + disclosures | ✅ Source cleaned 2026-07-23; live URL https://walkcroach.conquerorfoundation.com/chrome-privacy.html — **redeploy Web** if CDN still shows draft |
+| PD.2 | Developer Dashboard privacy practices aligned to manifest | ✅ `chrome/store/PRIVACY_PRACTICES.md` (prod URL filled) |
 | PD.3 | Permission justifications for every manifest permission | ✅ `chrome/store/PERMISSION_JUSTIFICATIONS.md` |
-| PD.4 | Screenshots, store description, single-purpose wording | ✅ `chrome/store/STORE_LISTING.md` (screenshots: capture at submit time) |
-| PD.5 | Unpacked → packed zip from CI; version bump policy | ✅ `npm run zip` + `chrome/buildspec.yml`; `VERSIONING.md` |
-| PD.6 | Submit; buffer 7–14 days if first publisher account | ⬜ Operator action — see `SUBMISSION_CHECKLIST.md` |
-| PD.7 | Post-submit: monitor crash / permission revoke rates | ✅ `POST_SUBMIT_MONITORING.md` + `POST /chrome/v1/telemetry` |
+| PD.4 | Screenshots, store description, single-purpose wording | ✅ Listing ready; screenshots = operator capture (`SCREENSHOTS.md`) |
+| PD.5 | Unpacked → packed zip from CI; version bump policy | ✅ `npm run zip:prod` (v0.1.2) |
+| PD.6 | Submit; buffer 7–14 days if first publisher account | ⬜ Operator — `SUBMISSION_CHECKLIST.md` |
+| PD.7 | Post-submit: monitor crash / permission revoke rates | ✅ `POST_SUBMIT_MONITORING.md` + telemetry |
 | PD.8 | Optional: Chrome Enterprise policy JSON stub | ✅ `chrome/enterprise/policies.json` |
 
-**Exit:** Listing kit complete; actual CWS publish is an operator step after HTTPS privacy URL + screenshots + prod API zip.
+**Public CWS Phase 1 (engineering) complete when:** `zip:prod` succeeds, privacy redeployed, screenshots captured. **Phase 2** is dashboard upload.
+
 
 
 ---

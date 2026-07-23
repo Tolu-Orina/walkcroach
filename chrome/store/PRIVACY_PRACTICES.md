@@ -1,7 +1,12 @@
 # Chrome Web Store — privacy practices form (PD.2)
 
-Align every checkbox with the shipping manifest and [privacy policy](../../web/public/chrome-privacy.html)
-(HTTPS URL after web deploy: `https://<your-web-host>/chrome-privacy.html`).
+Align every checkbox with the shipping manifest and the live privacy policy.
+
+**Privacy policy URL (paste exactly):**  
+https://walkcroach.conquerorfoundation.com/chrome-privacy.html
+
+Source file (must be redeployed with Web before submit):  
+`web/public/chrome-privacy.html`
 
 Reference: [CWS Privacy practices](https://developer.chrome.com/docs/webstore/cws-dashboard-privacy).
 
@@ -12,11 +17,6 @@ See `PERMISSION_JUSTIFICATIONS.md`.
 ## Remote code
 
 Select: **No, I am not using remote code.**
-
-## Privacy policy URL
-
-`https://<your-web-host>/chrome-privacy.html`  
-(Ship `web/public/chrome-privacy.html` with the Web app before submission.)
 
 ## Data usage disclosures (typical CWS checkboxes)
 
@@ -43,7 +43,7 @@ Affirm that you:
 - Do not allow humans to read user data except policy exceptions
 - Transfer only as needed for the product (e.g. Bedrock inference, CockroachDB storage)
 
-The privacy policy page includes the required affirmative Limited Use statement.
+The live privacy policy includes the required affirmative Limited Use statement.
 
 ## Manifest alignment checklist
 

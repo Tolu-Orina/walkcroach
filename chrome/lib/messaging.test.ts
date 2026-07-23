@@ -8,7 +8,7 @@ beforeEach(() => {
       session: {} as chrome.storage.SessionStorageArea,
     },
     runtime: { id: 'ext-id' },
-    permissions: {} as chrome.Permissions,
+    permissions: {} as typeof chrome.permissions,
   } as unknown as typeof chrome;
 });
 

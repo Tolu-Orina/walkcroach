@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.2 — 2026-07-23
+
+Public Chrome Web Store Phase 1 packaging:
+
+- Production `npm run zip:prod` (HTTPS API + privacy bake, localhost refused)
+- Privacy policy finalized for live host (no draft placeholders)
+- Store kit updated with production URLs; listing soft-pedals Web account linking for v1
+- Screenshot capture runbook under `store/SCREENSHOTS.md`
+
 ## 0.1.1 — 2026-07-18
 
 Security and reliability review fixes (post Phase D):

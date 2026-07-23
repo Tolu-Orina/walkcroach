@@ -34,7 +34,7 @@ beforeEach(() => {
       request: vi.fn(),
       remove: vi.fn(),
       getAll: vi.fn(),
-    } as unknown as chrome.Permissions,
+    } as unknown as typeof chrome.permissions,
   } as unknown as typeof chrome;
 });
 
