@@ -132,6 +132,8 @@ export function App() {
           setAutonomy(msg.autonomy);
           setApproval(msg.pendingApproval);
           setMcpConfigured(Boolean(msg.mcpConfigured));
+          setBedrockConfigured(Boolean(msg.bedrockConfigured));
+          setCcloudConfigured(Boolean(msg.ccloudConfigured));
           setSignedIn(Boolean(msg.signedIn));
           setLinkedProjectId(msg.linkedProjectId ?? null);
           if (!msg.streaming && msg.transcript) {
@@ -304,12 +306,27 @@ export function App() {
   }, []);
 
   const empty = turns.length === 0 && !streaming && !liveText;
+  const needsSetup = !bedrockConfigured || !mcpConfigured;
+
+  if (view === 'settings') {
+    return (
+      <SettingsView
+        bedrockConfigured={bedrockConfigured}
+        mcpConfigured={mcpConfigured}
+        ccloudConfigured={ccloudConfigured}
+        onBack={() => setView('chat')}
+      />
+    );
+  }
 
   return (
     <div className="chat">
       <header className="chat-top">
         <span className="brand">WalkCroach</span>
         <div className="chat-top-meta">
+          {bedrockConfigured ? (
+            <span className="pill on">Bedrock</span>
+          ) : null}
           {mcpConfigured ? (
             <span className="pill on">Cockroach</span>
           ) : null}
@@ -320,8 +337,32 @@ export function App() {
               Sign in
             </button>
           )}
+          <button
+            type="button"
+            className="gear"
+            aria-label="Open setup"
+            title="Setup"
+            onClick={() => setView('settings')}
+          >
+            ⚙
+          </button>
         </div>
       </header>
+
+      {needsSetup && (
+        <button
+          type="button"
+          className="setup-cta"
+          onClick={() => setView('settings')}
+        >
+          <span className="setup-cta-title">
+            {!bedrockConfigured
+              ? 'Add Bedrock & Cockroach credentials'
+              : 'Add CockroachDB MCP (optional)'}
+          </span>
+          <span className="setup-cta-meta">Open setup →</span>
+        </button>
+      )}
 
       {!trusted && (
         <div className="banner" role="status">
@@ -343,6 +384,15 @@ export function App() {
               Chat with an agent in this workspace. Agent can edit; Ask only
               explores.
             </p>
+            {needsSetup ? (
+              <button
+                type="button"
+                className="btn primary"
+                onClick={() => setView('settings')}
+              >
+                Configure credentials
+              </button>
+            ) : null}
           </div>
         ) : (
           <>

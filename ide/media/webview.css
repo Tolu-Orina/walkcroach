@@ -473,3 +473,147 @@ body {
   opacity: 0.35;
   cursor: not-allowed;
 }
+
+.gear {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--wc-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--wc-fg);
+  cursor: pointer;
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.setup-cta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 8px var(--wc-pad) 0;
+  padding: 10px 12px;
+  text-align: left;
+  border: 1px solid color-mix(in srgb, var(--wc-ember) 35%, var(--wc-border));
+  border-radius: var(--wc-radius);
+  background: color-mix(in srgb, var(--wc-ember) 10%, var(--wc-surface));
+  color: var(--wc-fg);
+  cursor: pointer;
+  font-family: var(--wc-font-body);
+}
+
+.setup-cta-title {
+  font-family: var(--wc-font-display);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.setup-cta-meta {
+  font-size: 0.78rem;
+  color: var(--wc-muted);
+  white-space: nowrap;
+}
+
+.empty .btn {
+  margin-top: 14px;
+}
+
+.settings {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--wc-pad);
+}
+
+.settings-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.settings-lead {
+  margin: 0;
+  color: var(--wc-muted);
+  font-size: 0.88rem;
+  max-width: 42ch;
+}
+
+.settings-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 0 4px;
+  border-top: 1px solid var(--wc-border);
+}
+
+.settings-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.settings-card h2 {
+  margin: 0;
+  font-family: var(--wc-font-display);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.status-dot {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--wc-muted);
+}
+
+.status-dot.on {
+  color: color-mix(in srgb, var(--vscode-testing-iconPassed, #73c991) 90%, var(--wc-fg));
+}
+
+.settings-hint {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--wc-muted);
+}
+
+.settings-or {
+  margin: 6px 0 0;
+  font-size: 0.75rem;
+  color: var(--wc-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.label .optional {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--wc-muted);
+}
+
+.field {
+  width: 100%;
+  font-family: var(--wc-font-mono);
+  font-size: 0.82rem;
+  padding: 8px 10px;
+  color: var(--vscode-input-foreground);
+  background: var(--wc-surface);
+  border: 1px solid var(--wc-border);
+  border-radius: 6px;
+}
+
+.field.area {
+  resize: vertical;
+  font-family: var(--wc-font-mono);
+}
+
+.btn.wide {
+  width: 100%;
+  margin-top: 4px;
+  margin-bottom: 12px;
+}

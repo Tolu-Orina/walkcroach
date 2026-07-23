@@ -12,7 +12,9 @@ For invited users this week. Open VSX / Marketplace comes after publisher enroll
 4. Optional: WalkCroach Web account for Sign In + project memory
 5. Optional: CockroachDB Cloud cluster for MCP / `ccloud`
 
-There is **no Bedrock key field inside the extension UI** today — credentials must be available to the IDE process via the normal AWS SDK chain.
+There is a **Setup** page in the sidebar (gear icon) for Bedrock API key and CockroachDB MCP credentials. Secrets are stored in VS Code **SecretStorage** (OS keychain), not settings.json.
+
+You can also use AWS credentials / `AWS_BEARER_TOKEN_BEDROCK` in the environment that launches the IDE.
 
 ## Install from VSIX
 
