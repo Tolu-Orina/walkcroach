@@ -19,7 +19,8 @@ Production endpoints (do not substitute localhost):
 - [x] Run `npm run zip:prod` and keep the emitted `.zip`
   - Artifact: `chrome/.output/walkcroachchrome-0.1.2-chrome.zip`
 - [ ] Smoke unpacked prod build (below)
-- [ ] Capture screenshots per `SCREENSHOTS.md`
+- [x] Capture screenshots per `SCREENSHOTS.md`
+  - `01`–`05` at `chrome/store/screenshots/*.png` (1280×800)
 
 ## Smoke (unpacked prod build)
 
@@ -36,7 +37,8 @@ Production endpoints (do not substitute localhost):
 - [ ] Permission justifications from `PERMISSION_JUSTIFICATIONS.md`
 - [ ] Remote code = **No**
 - [ ] Listing from `STORE_LISTING.md` (Chrome-only lead; soft-pedal Web linking)
-- [ ] ≥3 screenshots uploaded
+- [ ] ≥3 screenshots uploaded (`store/screenshots/01`–`05`)
+- [ ] Store icon **128×128** uploaded — `store/icon-128.png`
 - [ ] Package = `0.1.2` zip from `zip:prod`
 - [ ] Manifest: no required host permissions / no `<all_urls>` at install
 

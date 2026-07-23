@@ -9,6 +9,7 @@
     "build": "wxt build",
     "zip": "wxt zip",
     "zip:prod": "node scripts/zip-prod.mjs",
+    "screenshots": "node store/screenshots/capture.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",

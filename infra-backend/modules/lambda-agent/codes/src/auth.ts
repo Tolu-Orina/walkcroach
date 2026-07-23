@@ -3,7 +3,7 @@ import type { CognitoJwtVerifierSingleUserPool } from 'aws-jwt-verify/cognito-ve
 
 /**
  * Request auth resolution.
- * - Production: Cognito JWT (access token) verified against JWKS.
+ * - Production: Cognito JWT (ID token) verified against JWKS.
  * - Dev/local: optional Bearer dev:user:* / dev:anon:* when ALLOW_DEV_AUTH=true.
  */
 
@@ -13,9 +13,9 @@ export type AuthContext = {
   source: 'dev' | 'jwt';
 };
 
-let accessVerifier: CognitoJwtVerifierSingleUserPool<{
+let idVerifier: CognitoJwtVerifierSingleUserPool<{
   userPoolId: string;
-  tokenUse: 'access';
+  tokenUse: 'id';
   clientId: string;
 }> | null = null;
 
@@ -24,24 +24,24 @@ function devAuthAllowed(): boolean {
   return process.env.ALLOW_DEV_AUTH === 'true';
 }
 
-function getAccessVerifier():
+function getIdVerifier():
   | CognitoJwtVerifierSingleUserPool<{
       userPoolId: string;
-      tokenUse: 'access';
+      tokenUse: 'id';
       clientId: string;
     }>
   | null {
   const userPoolId = process.env.COGNITO_USER_POOL_ID;
   const clientId = process.env.COGNITO_CLIENT_ID;
   if (!userPoolId || !clientId) return null;
-  if (!accessVerifier) {
-    accessVerifier = CognitoJwtVerifier.create({
+  if (!idVerifier) {
+    idVerifier = CognitoJwtVerifier.create({
       userPoolId,
       clientId,
-      tokenUse: 'access',
+      tokenUse: 'id',
     });
   }
-  return accessVerifier;
+  return idVerifier;
 }
 
 function normalizeHeaders(
@@ -86,7 +86,7 @@ export async function resolveAuth(
   const dev = resolveDevToken(token);
   if (dev) return dev;
 
-  const verifier = getAccessVerifier();
+  const verifier = getIdVerifier();
   if (!verifier) return null;
 
   try {

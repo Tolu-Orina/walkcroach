@@ -39,9 +39,13 @@ Productivity
 
 English
 
-## Screenshots
+## Store icon (required)
 
-Follow `SCREENSHOTS.md`. Place files in `screenshots/` before dashboard upload.
+**File:** `icon-128.png` — exactly **128×128** PNG (RGBA).
+
+Upload this in the Chrome Web Store listing / store icon field.
+
+Extension toolbar icons (16/32/48/128) live in `chrome/public/` and ship with `npm run zip:prod`.
 
 ## Promotional images
 

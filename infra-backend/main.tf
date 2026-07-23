@@ -135,6 +135,7 @@ module "apigw" {
   ide_lambda_function_arn     = module.lambda_ide.function_arn
   cognito_user_pool_arn       = module.cognito.user_pool_arn
   enable_cognito_authorizer   = var.enable_apigw_cognito_authorizer
+  cors_allow_origin           = var.web_app_url != "" ? var.web_app_url : "*"
   tags                        = local.tags
 }
 

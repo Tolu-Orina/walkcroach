@@ -105,10 +105,28 @@ resource "aws_api_gateway_method" "projects_post" {
   authorizer_id = local.protected_authorizer_id
 }
 
+resource "aws_api_gateway_method" "projects_get" {
+  rest_api_id   = aws_api_gateway_rest_api.this.id
+  resource_id   = aws_api_gateway_resource.projects.id
+  http_method   = "GET"
+  authorization = local.protected_authorization
+  authorizer_id = local.protected_authorizer_id
+}
+
 resource "aws_api_gateway_integration" "projects_post" {
   rest_api_id             = aws_api_gateway_rest_api.this.id
   resource_id             = aws_api_gateway_resource.projects.id
   http_method             = aws_api_gateway_method.projects_post.http_method
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = local.streaming_uri
+  response_transfer_mode  = "STREAM"
+}
+
+resource "aws_api_gateway_integration" "projects_get" {
+  rest_api_id             = aws_api_gateway_rest_api.this.id
+  resource_id             = aws_api_gateway_resource.projects.id
+  http_method             = aws_api_gateway_method.projects_get.http_method
   integration_http_method = "POST"
   type                    = "AWS_PROXY"
   uri                     = local.streaming_uri
@@ -203,6 +221,7 @@ resource "aws_api_gateway_deployment" "this" {
       [
         aws_api_gateway_integration.health_get.id,
         aws_api_gateway_integration.projects_post.id,
+        aws_api_gateway_integration.projects_get.id,
         aws_api_gateway_integration.sessions_post.id,
         aws_api_gateway_integration.session_get.id,
         aws_api_gateway_integration.prompt_post.id,
@@ -217,6 +236,12 @@ resource "aws_api_gateway_deployment" "this" {
         aws_api_gateway_integration.ide_options.id,
       ],
       [for k, v in aws_api_gateway_integration.options : v.id],
+      [
+        aws_api_gateway_gateway_response.unauthorized.id,
+        aws_api_gateway_gateway_response.access_denied.id,
+        aws_api_gateway_gateway_response.default_4xx.id,
+        aws_api_gateway_gateway_response.default_5xx.id,
+      ],
     )))
   }
 
@@ -227,6 +252,7 @@ resource "aws_api_gateway_deployment" "this" {
   depends_on = [
     aws_api_gateway_integration.health_get,
     aws_api_gateway_integration.projects_post,
+    aws_api_gateway_integration.projects_get,
     aws_api_gateway_integration.sessions_post,
     aws_api_gateway_integration.session_get,
     aws_api_gateway_integration.prompt_post,
@@ -240,6 +266,10 @@ resource "aws_api_gateway_deployment" "this" {
     aws_api_gateway_integration.ide_proxy_options,
     aws_api_gateway_integration.ide_options,
     aws_api_gateway_integration.options,
+    aws_api_gateway_gateway_response.unauthorized,
+    aws_api_gateway_gateway_response.access_denied,
+    aws_api_gateway_gateway_response.default_4xx,
+    aws_api_gateway_gateway_response.default_5xx,
   ]
 }
 

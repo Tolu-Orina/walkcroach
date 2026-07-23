@@ -47,12 +47,12 @@ describe('resolveAuth', () => {
     expect(await resolveAuth({ authorization: 'Bearer dev:user:abc' })).toBeNull();
   });
 
-  it('verifies Cognito access tokens when pool is configured', async () => {
+  it('verifies Cognito ID tokens when pool is configured', async () => {
     vi.doMock('aws-jwt-verify', () => ({
       CognitoJwtVerifier: {
         create: () => ({
           verify: async (token: string) => {
-            if (token === 'valid-access') return { sub: 'cognito-sub-99' };
+            if (token === 'valid-id') return { sub: 'cognito-sub-99' };
             throw new Error('invalid jwt');
           },
         }),
@@ -64,14 +64,14 @@ describe('resolveAuth', () => {
     process.env.COGNITO_CLIENT_ID = 'test-client-id';
 
     const { resolveAuth, requireAuth } = await import('./auth.js');
-    const auth = await resolveAuth({ authorization: 'Bearer valid-access' });
+    const auth = await resolveAuth({ authorization: 'Bearer valid-id' });
     expect(auth).toEqual({
       ownerId: 'cognito-sub-99',
       isAnonymous: false,
       source: 'jwt',
     });
 
-    const required = await requireAuth({ authorization: 'Bearer valid-access' });
+    const required = await requireAuth({ authorization: 'Bearer valid-id' });
     expect(required).toEqual(auth);
   });
 

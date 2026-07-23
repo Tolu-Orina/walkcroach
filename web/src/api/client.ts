@@ -18,9 +18,13 @@ function authHeaders(): Record<string, string> {
   try {
     const raw = localStorage.getItem('walkcroach.auth.v1');
     if (raw) {
-      const parsed = JSON.parse(raw) as { token?: string };
-      if (parsed.token) {
-        headers.authorization = `Bearer ${parsed.token}`;
+      const parsed = JSON.parse(raw) as {
+        token?: string;
+        cognito?: { idToken?: string };
+      };
+      const bearer = parsed.cognito?.idToken ?? parsed.token;
+      if (bearer) {
+        headers.authorization = `Bearer ${bearer}`;
       }
     }
   } catch {

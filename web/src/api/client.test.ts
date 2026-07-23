@@ -109,6 +109,19 @@ describe('getSession', () => {
 });
 
 describe('authHeaders via localStorage token', () => {
+  it('prefers Cognito idToken over legacy access token field', async () => {
+    fakeStore['walkcroach.auth.v1'] = JSON.stringify({
+      token: 'access-legacy',
+      cognito: { idToken: 'id-preferred' },
+    });
+    mockFetch({ projects: [] });
+    const { listProjects } = await loadClient();
+    await listProjects();
+    const [, init] = vi.mocked(fetch).mock.calls[0]!;
+    const headers = init?.headers as Record<string, string>;
+    expect(headers?.authorization).toBe('Bearer id-preferred');
+  });
+
   it('includes Bearer token when auth is stored', async () => {
     fakeStore['walkcroach.auth.v1'] = JSON.stringify({ token: 'tok42' });
     mockFetch({ projects: [] });

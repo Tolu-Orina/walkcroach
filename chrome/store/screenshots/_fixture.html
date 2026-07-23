@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WalkCroach store screenshot</title>
+    <style>
+      :root {
+        --bg: #f3f6f4;
+        --ink: #14201a;
+        --muted: #5a6b62;
+        --accent: #1a3a2a;
+        --err: #8b1e1e;
+        --card: #ffffff;
+        --line: #d5e0d9;
+        font-family: "Segoe UI", system-ui, sans-serif;
+      }
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0;
+        width: 1280px;
+        height: 800px;
+        overflow: hidden;
+        background: #c5cdc8;
+      }
+      .browser {
+        display: grid;
+        grid-template-columns: 1fr 380px;
+        width: 1280px;
+        height: 800px;
+        background: #fff;
+      }
+      .chrome-bar {
+        grid-column: 1 / -1;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 14px;
+        background: #e8ece9;
+        border-bottom: 1px solid #c9d2cc;
+      }
+      .dots span {
+        display: inline-block;
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        margin-right: 6px;
+        background: #b8c2bc;
+      }
+      .url {
+        flex: 1;
+        background: #fff;
+        border: 1px solid #c9d2cc;
+        border-radius: 16px;
+        padding: 7px 14px;
+        font-size: 13px;
+        color: #334039;
+      }
+      .page {
+        padding: 28px 36px;
+        background:
+          radial-gradient(ellipse 70% 50% at 0% 0%, #dce8df 0%, transparent 55%),
+          #f7faf8;
+        overflow: hidden;
+        border-right: 1px solid #d5e0d9;
+      }
+      .page h1 {
+        margin: 0 0 8px;
+        font-size: 1.7rem;
+        color: var(--ink);
+        letter-spacing: -0.02em;
+      }
+      .page .meta { color: var(--muted); font-size: 0.9rem; margin-bottom: 18px; }
+      .page p {
+        color: #243028;
+        line-height: 1.55;
+        font-size: 0.98rem;
+        max-width: 42rem;
+      }
+      .fab {
+        position: absolute;
+        left: 820px;
+        bottom: 36px;
+        width: 48px;
+        height: 48px;
+        border-radius: 14px;
+        background: #1a3a2a;
+        color: #e8f5ee;
+        display: grid;
+        place-items: center;
+        font: 600 13px/1 "Segoe UI", system-ui, sans-serif;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+      }
+      .page-wrap { position: relative; height: 100%; }
+      .panel-shell {
+        background: linear-gradient(160deg, #e8f0ea 0%, #f3f6f4 45%, #eef2f0 100%);
+        padding: 16px 14px 20px;
+        height: 100%;
+        overflow: hidden;
+        color: var(--ink);
+      }
+      .panel-shell h1 {
+        margin: 0;
+        font-size: 1.35rem;
+        letter-spacing: -0.02em;
+        color: var(--accent);
+      }
+      .tagline {
+        margin: 4px 0 12px;
+        color: var(--muted);
+        font-size: 0.85rem;
+      }
+      .tabs { display: flex; gap: 4px; margin-bottom: 12px; flex-wrap: wrap; }
+      .tabs span {
+        border: 1px solid var(--line);
+        background: #fff;
+        border-radius: 8px;
+        padding: 6px 10px;
+        font-size: 0.8rem;
+        color: var(--ink);
+      }
+      .tabs span.active {
+        background: var(--accent);
+        color: #e8f5ee;
+        border-color: var(--accent);
+      }
+      .panel {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 12px;
+      }
+      .actions, .ask-row {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        margin: 8px 0;
+      }
+      .btn {
+        background: var(--accent);
+        color: #e8f5ee;
+        border: none;
+        border-radius: 8px;
+        padding: 8px 10px;
+        font-size: 0.8rem;
+      }
+      .btn.ghost {
+        background: #fff;
+        color: var(--ink);
+        border: 1px solid var(--line);
+      }
+      .stream {
+        margin-top: 10px;
+        white-space: pre-wrap;
+        font-size: 0.88rem;
+        line-height: 1.45;
+        border-top: 1px solid var(--line);
+        padding-top: 10px;
+      }
+      .muted { color: var(--muted); font-size: 0.85rem; }
+      .small { font-size: 0.75rem; }
+      .save-note { color: var(--accent); font-size: 0.85rem; margin: 8px 0 0; }
+      .list { list-style: none; margin: 10px 0 0; padding: 0; }
+      .list li {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 8px 0;
+        border-bottom: 1px solid var(--line);
+        font-size: 0.85rem;
+      }
+      .list li.selected {
+        background: #eef5f0;
+        margin: 0 -8px;
+        padding-left: 8px;
+        padding-right: 8px;
+        border-radius: 8px;
+      }
+      .danger { color: var(--err); font-size: 0.8rem; }
+      .link { color: var(--accent); font-size: 0.8rem; }
+      .sector-chip {
+        display: inline-block;
+        margin: 0 0 8px;
+        padding: 4px 8px;
+        border-radius: 6px;
+        background: #e8f0ea;
+        color: var(--accent);
+        font-size: 0.75rem;
+        text-transform: capitalize;
+      }
+      .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; font-size: 0.8rem; }
+      .field input, .ask-row input, select {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 8px 10px;
+        font-size: 0.85rem;
+      }
+      .ask-row input { flex: 1; min-width: 100px; }
+      .scene { display: none; }
+      body[data-scene="summarize"] .scene-summarize,
+      body[data-scene="trust"] .scene-trust,
+      body[data-scene="workspaces"] .scene-workspaces,
+      body[data-scene="sector"] .scene-sector,
+      body[data-scene="recall"] .scene-recall { display: block; }
+      body[data-scene="summarize"] .url-summarize,
+      body[data-scene="trust"] .url-trust,
+      body[data-scene="workspaces"] .url-workspaces,
+      body[data-scene="sector"] .url-sector,
+      body[data-scene="recall"] .url-recall { display: block; }
+      .url { display: none; }
+      .page-copy { display: none; }
+      body[data-scene="summarize"] .page-summarize,
+      body[data-scene="trust"] .page-trust,
+      body[data-scene="workspaces"] .page-workspaces,
+      body[data-scene="sector"] .page-sector,
+      body[data-scene="recall"] .page-recall { display: block; }
+    </style>
+  </head>
+  <body data-scene="summarize">
+    <div class="browser">
+      <div class="chrome-bar">
+        <div class="dots"><span></span><span></span><span></span></div>
+        <div class="url url-summarize">https://en.wikipedia.org/wiki/Small_and_medium-sized_enterprises</div>
+        <div class="url url-trust">https://en.wikipedia.org/wiki/Small_and_medium-sized_enterprises</div>
+        <div class="url url-workspaces">https://en.wikipedia.org/wiki/Small_and_medium-sized_enterprises</div>
+        <div class="url url-sector">https://www.amazon.com/dp/B0DEMOEXAMPLE</div>
+        <div class="url url-recall">https://en.wikipedia.org/wiki/Small_and_medium-sized_enterprises</div>
+      </div>
+      <div class="page-wrap page">
+        <div class="page-copy page-summarize">
+          <h1>Small and medium-sized enterprises</h1>
+          <div class="meta">Business · Overview</div>
+          <p>
+            Small and medium-sized enterprises (SMEs) are businesses whose personnel numbers
+            or revenues fall below certain limits. SMEs outnumber large companies by a wide
+            margin and employ the majority of workers in many economies.
+          </p>
+          <p>
+            Access to practical tools—without heavy IT overhead—remains a common barrier for
+            operators who already spend their day in the browser.
+          </p>
+        </div>
+        <div class="page-copy page-trust">
+          <h1>Small and medium-sized enterprises</h1>
+          <div class="meta">Business · Overview</div>
+          <p>Trust controls live in the WalkCroach side panel—site access is requested only when you act.</p>
+        </div>
+        <div class="page-copy page-workspaces">
+          <h1>Small and medium-sized enterprises</h1>
+          <div class="meta">Saved into your workspace</div>
+          <p>Captures stay in workspaces you control. Recall them later without re-reading the page.</p>
+        </div>
+        <div class="page-copy page-sector">
+          <h1>Demo Wireless Headphones</h1>
+          <div class="meta">Retail listing · $129.00</div>
+          <p>Noise-cancelling over-ear headphones with 30-hour battery life. Free returns within 30 days.</p>
+        </div>
+        <div class="page-copy page-recall">
+          <h1>Small and medium-sized enterprises</h1>
+          <div class="meta">Ask what you saved</div>
+          <p>WalkCroach recalls from your captures—not from your full browsing history.</p>
+        </div>
+        <div class="fab">WC</div>
+      </div>
+      <aside class="panel-shell">
+        <header>
+          <h1>WalkCroach</h1>
+          <p class="tagline">Summarize, draft, remember—on the page you’re on.</p>
+        </header>
+
+        <div class="scene scene-summarize">
+          <div class="tabs">
+            <span class="active">Page</span><span>Recall</span><span>Workspaces</span><span>Trust</span>
+          </div>
+          <section class="panel">
+            <div class="actions">
+              <button class="btn" type="button">Summarize</button>
+              <button class="btn ghost" type="button">Draft</button>
+              <button class="btn ghost" type="button">Save → Research</button>
+            </div>
+            <div class="ask-row">
+              <input value="" placeholder="Ask about this page…" readonly />
+              <button class="btn ghost" type="button">Ask</button>
+            </div>
+            <div class="stream">SMEs are businesses below set size or revenue thresholds. They employ most workers in many economies and often lack heavy IT teams—so browser-native tools matter more than complex platforms.
+
+Key points:
+• Majority of firms in most economies
+• Employment concentrated in smaller orgs
+• Adoption barriers include skills and trust</div>
+          </section>
+        </div>
+
+        <div class="scene scene-trust">
+          <div class="tabs">
+            <span>Page</span><span>Recall</span><span>Workspaces</span><span class="active">Trust</span>
+          </div>
+          <section class="panel">
+            <p class="muted">
+              WalkCroach only requests site access when you summarize or save. Nothing is uploaded
+              just by opening this panel.
+            </p>
+            <p class="small"><a class="link" href="#">Privacy policy</a></p>
+            <p class="small">Session: device (try-first)</p>
+            <button class="btn" type="button">Refresh access list</button>
+            <ul class="list">
+              <li>
+                <span>https://en.wikipedia.org/*</span>
+                <span class="danger">Revoke</span>
+              </li>
+            </ul>
+          </section>
+        </div>
+
+        <div class="scene scene-workspaces">
+          <div class="tabs">
+            <span>Page</span><span>Recall</span><span class="active">Workspaces</span><span>Trust</span>
+          </div>
+          <section class="panel">
+            <div class="ask-row">
+              <input value="Research" readonly />
+              <button class="btn" type="button">Create</button>
+            </div>
+            <ul class="list">
+              <li class="selected">
+                <button class="link" type="button">Research</button>
+                <button class="danger" type="button">Delete</button>
+              </li>
+              <li>
+                <button class="link" type="button">Pricing</button>
+                <button class="danger" type="button">Delete</button>
+              </li>
+            </ul>
+            <h2 style="font-size:1rem;margin:14px 0 6px">Saved in Research</h2>
+            <ul class="list">
+              <li>
+                <div>
+                  <strong>Small and medium-sized enterprises</strong>
+                  <div class="muted small">https://en.wikipedia.org/wiki/Small_and_medium-sized_enterprises</div>
+                </div>
+                <button class="danger" type="button">Delete</button>
+              </li>
+            </ul>
+          </section>
+        </div>
+
+        <div class="scene scene-sector">
+          <div class="tabs">
+            <span class="active">Page</span><span>Recall</span><span>Workspaces</span><span>Trust</span>
+          </div>
+          <section class="panel">
+            <div class="sector-chip">retail · Track price</div>
+            <div class="actions">
+              <button class="btn" type="button" style="background:#0f2a1c">Track price</button>
+              <button class="btn ghost" type="button">Summarize</button>
+            </div>
+            <div class="proposal">
+              <h2 style="font-size:1rem;margin:0 0 8px">Review before save</h2>
+              <label class="field">productName<input value="Demo Wireless Headphones" readonly /></label>
+              <label class="field">price<input value="129.00" readonly /></label>
+              <label class="field">currency<input value="USD" readonly /></label>
+              <div class="actions">
+                <button class="btn" type="button">Accept &amp; save</button>
+                <button class="link" type="button">Discard</button>
+              </div>
+              <p class="save-note">Started tracking in “Pricing”.</p>
+            </div>
+          </section>
+        </div>
+
+        <div class="scene scene-recall">
+          <div class="tabs">
+            <span>Page</span><span class="active">Recall</span><span>Workspaces</span><span>Trust</span>
+          </div>
+          <section class="panel">
+            <p class="muted">Ask across captures in “Research”.</p>
+            <div class="ask-row">
+              <input value="What did I save about SMEs?" readonly />
+              <button class="btn" type="button">Recall</button>
+            </div>
+            <div class="stream">You saved a Wikipedia overview of SMEs: businesses below size/revenue limits that employ most workers in many economies, with trust and skills as common adoption barriers.</div>
+          </section>
+        </div>
+      </aside>
+    </div>
+    <script>
+      const params = new URLSearchParams(location.search);
+      const scene = params.get('scene') || 'summarize';
+      document.body.dataset.scene = scene;
+    </script>
+  </body>
+</html>

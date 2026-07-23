@@ -9,7 +9,7 @@ export function sessionFromCognitoTokens(tokens: CognitoTokens): StoredAuth {
       displayName: profile.name ?? profile.email ?? 'Builder',
       isAnonymous: false,
     },
-    token: tokens.accessToken,
+    token: tokens.idToken,
     cognito: {
       idToken: tokens.idToken,
       refreshToken: tokens.refreshToken,

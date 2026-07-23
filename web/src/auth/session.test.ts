@@ -43,7 +43,7 @@ describe('sessionFromCognitoTokens', () => {
     expect(result.user.id).toBe('user-42');
     expect(result.user.displayName).toBe('Alice');
     expect(result.user.isAnonymous).toBe(false);
-    expect(result.token).toBe('acc');
+    expect(result.token).toBe(tokens.idToken);
     expect(result.cognito?.refreshToken).toBe('ref');
   });
 
