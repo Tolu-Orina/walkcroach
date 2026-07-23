@@ -4,6 +4,8 @@ export const SECRET_KEYS = {
   mcpClusterId: 'walkcroach.mcp.clusterId',
   mcpApiKey: 'walkcroach.mcp.apiKey',
   ccloudApiKey: 'walkcroach.ccloud.apiKey',
+  /** Bedrock API key (AWS_BEARER_TOKEN_BEDROCK). Never store in settings.json. */
+  bedrockApiKey: 'walkcroach.bedrock.apiKey',
   /** Cognito access token (PKCE or pasted). */
   cognitoAccessToken: 'walkcroach.auth.accessToken',
   cognitoRefreshToken: 'walkcroach.auth.refreshToken',

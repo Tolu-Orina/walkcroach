@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.3 — 2026-07-23
+
+Chrome Web Store review path B — activeTab-only:
+
+- Removed optional host permissions (`http://*/*`, `https://*/*`) and content scripts / FAB
+- Page extract and draft insert via `scripting.executeScript` after toolbar open
+- Trust tab explains toolbar-only access (no origin revoke list)
+- Store justifications and listing updated for no host permissions
+
 ## 0.1.2 — 2026-07-23
 
 Public Chrome Web Store Phase 1 packaging:

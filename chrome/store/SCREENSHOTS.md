@@ -6,8 +6,8 @@ Chrome Web Store prefers **1280×800** (or 640×400). This repo ships store-read
 
 | File | Scene |
 |------|--------|
-| `01-summarize.png` | Page tab + streamed summary + FAB |
-| `02-trust.png` | Trust tab + granted origin + revoke + privacy link |
+| `01-summarize.png` | Page tab + streamed summary |
+| `02-trust.png` | Trust tab + privacy link + session (activeTab-only copy) |
 | `03-workspaces.png` | Workspaces + capture list |
 | `04-sector.png` | Retail track-price proposal |
 | `05-recall.png` | Recall answer |

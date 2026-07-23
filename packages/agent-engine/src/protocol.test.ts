@@ -31,7 +31,29 @@ describe('protocol allowlist', () => {
       'REJECT_STEP',
       'SET_AUTONOMY',
       'CANCEL',
+      'SIGN_IN',
+      'SAVE_SETTINGS',
     ]);
+  });
+
+  it('parses SIGN_IN', () => {
+    expect(parseWebviewToHostMessage({ type: 'SIGN_IN' })).toEqual({
+      type: 'SIGN_IN',
+    });
+  });
+
+  it('parses SAVE_SETTINGS', () => {
+    expect(
+      parseWebviewToHostMessage({
+        type: 'SAVE_SETTINGS',
+        bedrockApiKey: 'tok',
+        clearMcp: true,
+      }),
+    ).toEqual({
+      type: 'SAVE_SETTINGS',
+      bedrockApiKey: 'tok',
+      clearMcp: true,
+    });
   });
 
   it('includes Phase A host→webview approval + cache types', () => {

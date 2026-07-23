@@ -195,9 +195,9 @@ export class AuthService {
         state,
         redirectUri: IDE_REDIRECT_URI,
       });
-      await this.storeAccessToken(tokens.access_token, {
+      await this.storeAccessToken(tokens.id_token ?? tokens.access_token, {
         refreshToken: tokens.refresh_token,
-        idToken: tokens.id_token,
+        idToken: tokens.id_token ?? tokens.access_token,
         expiresIn: tokens.expires_in ?? 3600,
       });
       pending.resolve(true);
@@ -229,12 +229,12 @@ export class AuthService {
           clientId: cfg.clientId,
           refreshToken,
         });
-        await this.storeAccessToken(tokens.access_token, {
+        await this.storeAccessToken(tokens.id_token ?? tokens.access_token, {
           refreshToken: tokens.refresh_token ?? refreshToken,
           idToken: tokens.id_token,
           expiresIn: tokens.expires_in,
         });
-        return tokens.access_token;
+        return tokens.id_token ?? tokens.access_token;
       } catch {
         return Promise.resolve(
           this.secrets.get(SECRET_KEYS.cognitoAccessToken),

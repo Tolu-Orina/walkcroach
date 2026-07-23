@@ -47,6 +47,8 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
   private pendingApproval: PendingApproval | null = null;
   private telemetry: Record<string, number> = {};
   private mcpConfigured = false;
+  private bedrockConfigured = false;
+  private ccloudConfigured = false;
   private signedIn = false;
   private linkedProjectId: string | null = null;
   private linkedProjectName: string | null = null;
@@ -109,7 +111,7 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
 
     this.host.bindSecrets(context.secrets);
     this.host.setAutonomy(autonomy);
-    void this.refreshMcpConfigured();
+    void this.refreshCredentialStatus();
     void this.refreshAuthAndLink();
   }
 
@@ -145,6 +147,7 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
         await this.context.secrets.delete(k);
       }
       this.mcpConfigured = false;
+      await this.refreshCredentialStatus();
       this.snapshot();
       void vscode.window.showInformationMessage(
         'WalkCroach CockroachDB secrets cleared.',
@@ -186,6 +189,7 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
           );
         }
         this.mcpConfigured = true;
+        await this.refreshCredentialStatus();
         this.snapshot();
         void vscode.window.showInformationMessage(
           'CockroachDB MCP credentials saved to SecretStorage.',
@@ -230,6 +234,7 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
       await this.context.secrets.store(SECRET_KEYS.ccloudApiKey, apiKey);
     }
     this.mcpConfigured = true;
+    await this.refreshCredentialStatus();
     this.snapshot();
     void vscode.window.showInformationMessage(
       'CockroachDB credentials saved to SecretStorage.',
@@ -474,11 +479,125 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
     await this.startTask('ping', 'ping');
   }
 
-  private async refreshMcpConfigured(): Promise<void> {
+  private async refreshCredentialStatus(): Promise<void> {
     const cfg = await loadMcpConfigFromSecrets((k) =>
       Promise.resolve(this.context.secrets.get(k)),
     );
     this.mcpConfigured = Boolean(cfg);
+    const bedrockSecret = await this.context.secrets.get(
+      SECRET_KEYS.bedrockApiKey,
+    );
+    this.bedrockConfigured = Boolean(
+      bedrockSecret?.trim() ||
+        process.env.AWS_BEARER_TOKEN_BEDROCK?.trim() ||
+        process.env.AWS_ACCESS_KEY_ID?.trim(),
+    );
+    const ccloud = await this.context.secrets.get(SECRET_KEYS.ccloudApiKey);
+    this.ccloudConfigured = Boolean(ccloud?.trim() || cfg?.apiKey);
+  }
+
+  /** Prefer SecretStorage Bedrock key for this run; restore env afterward. */
+  private async withBedrockSecretEnv<T>(fn: () => Promise<T>): Promise<T> {
+    const fromSecret = (
+      await this.context.secrets.get(SECRET_KEYS.bedrockApiKey)
+    )?.trim();
+    const prev = process.env.AWS_BEARER_TOKEN_BEDROCK;
+    if (fromSecret) {
+      process.env.AWS_BEARER_TOKEN_BEDROCK = fromSecret;
+    }
+    try {
+      return await fn();
+    } finally {
+      if (fromSecret) {
+        if (prev === undefined) delete process.env.AWS_BEARER_TOKEN_BEDROCK;
+        else process.env.AWS_BEARER_TOKEN_BEDROCK = prev;
+      }
+    }
+  }
+
+  private async applySaveSettings(
+    msg: Extract<
+      NonNullable<ReturnType<MessageBridge['parseIncoming']>>,
+      { type: 'SAVE_SETTINGS' }
+    >,
+  ): Promise<void> {
+    try {
+      if (msg.bedrockApiKey === null) {
+        await this.context.secrets.delete(SECRET_KEYS.bedrockApiKey);
+      } else if (msg.bedrockApiKey?.trim()) {
+        await this.context.secrets.store(
+          SECRET_KEYS.bedrockApiKey,
+          msg.bedrockApiKey.trim(),
+        );
+      }
+
+      if (msg.clearMcp) {
+        for (const k of [
+          SECRET_KEYS.mcpUrl,
+          SECRET_KEYS.mcpClusterId,
+          SECRET_KEYS.mcpApiKey,
+          SECRET_KEYS.ccloudApiKey,
+        ]) {
+          await this.context.secrets.delete(k);
+        }
+      } else if (msg.mcpSnippet?.trim()) {
+        const parsed = parseMcpConfigSnippet(msg.mcpSnippet);
+        if (!parsed.clusterId || !parsed.apiKey) {
+          throw new Error(
+            'Snippet must include mcp-cluster-id and Authorization Bearer key.',
+          );
+        }
+        await this.context.secrets.store(
+          SECRET_KEYS.mcpClusterId,
+          parsed.clusterId,
+        );
+        await this.context.secrets.store(SECRET_KEYS.mcpApiKey, parsed.apiKey);
+        await this.context.secrets.store(
+          SECRET_KEYS.mcpUrl,
+          parsed.url ?? DEFAULT_MCP_URL,
+        );
+        const existingCcloud = await this.context.secrets.get(
+          SECRET_KEYS.ccloudApiKey,
+        );
+        if (!existingCcloud) {
+          await this.context.secrets.store(
+            SECRET_KEYS.ccloudApiKey,
+            parsed.apiKey,
+          );
+        }
+      } else if (msg.mcpClusterId?.trim() && msg.mcpApiKey?.trim()) {
+        await this.context.secrets.store(
+          SECRET_KEYS.mcpClusterId,
+          msg.mcpClusterId.trim(),
+        );
+        await this.context.secrets.store(
+          SECRET_KEYS.mcpApiKey,
+          msg.mcpApiKey.trim(),
+        );
+        await this.context.secrets.store(
+          SECRET_KEYS.mcpUrl,
+          msg.mcpUrl?.trim() || DEFAULT_MCP_URL,
+        );
+      }
+
+      if (msg.ccloudApiKey === null) {
+        await this.context.secrets.delete(SECRET_KEYS.ccloudApiKey);
+      } else if (msg.ccloudApiKey?.trim()) {
+        await this.context.secrets.store(
+          SECRET_KEYS.ccloudApiKey,
+          msg.ccloudApiKey.trim(),
+        );
+      }
+
+      await this.refreshCredentialStatus();
+      this.snapshot();
+      void vscode.window.showInformationMessage(
+        'WalkCroach credentials saved to SecretStorage.',
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.bridge?.postError(message);
+    }
   }
 
   private authRefreshGen = 0;
@@ -564,6 +683,8 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
       autonomy: this.host.getAutonomy(),
       pendingApproval: this.pendingApproval,
       mcpConfigured: this.mcpConfigured,
+      bedrockConfigured: this.bedrockConfigured,
+      ccloudConfigured: this.ccloudConfigured,
       telemetry: this.telemetry,
       signedIn: this.signedIn,
       linkedProjectId: this.linkedProjectId,
@@ -583,7 +704,7 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
   ): Promise<void> {
     switch (msg.type) {
       case 'READY':
-        await this.refreshMcpConfigured();
+        await this.refreshCredentialStatus();
         await this.refreshAuthAndLink();
         return;
       case 'SUBMIT_TASK':
@@ -615,6 +736,12 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
         this.host.setAutonomy(msg.level);
         await this.context.workspaceState.update(AUTONOMY_KEY, msg.level);
         this.snapshot();
+        return;
+      case 'SIGN_IN':
+        await this.signInWithWeb();
+        return;
+      case 'SAVE_SETTINGS':
+        await this.applySaveSettings(msg);
         return;
       default:
         return;
@@ -651,7 +778,7 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
     }
     this.abort = new AbortController();
     this.host.setRunSignal(this.abort.signal);
-    await this.refreshMcpConfigured();
+    await this.refreshCredentialStatus();
     this.snapshot();
 
     const loopMode =
@@ -668,7 +795,7 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
       (await this.context.secrets.get(SECRET_KEYS.ccloudApiKey)) ??
       mcpConfig?.apiKey;
 
-    // Phase C: inject project memory only when signed in + linked.
+    // Inject project memory only when signed in + linked.
     // Unlinked / local-only mode runs without projectMemory (Phase A/B).
     let projectMemory = undefined;
     const token = await this.auth.getAccessToken();
@@ -681,16 +808,18 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
     }
 
     try {
-      await runAgentLoop({
-        host: this.host,
-        prompt: text,
-        signal: this.abort.signal,
-        mode: loopMode,
-        subagentsEnabled: true,
-        includePhaseB: true,
-        mcpConfig,
-        ccloudApiKey,
-        projectMemory,
+      await this.withBedrockSecretEnv(async () => {
+        await runAgentLoop({
+          host: this.host,
+          prompt: text,
+          signal: this.abort!.signal,
+          mode: loopMode,
+          subagentsEnabled: true,
+          includePhaseB: true,
+          mcpConfig,
+          ccloudApiKey,
+          projectMemory,
+        });
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -716,13 +845,22 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
 <head>
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';" />
+    content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline' https://fonts.googleapis.com; font-src ${webview.cspSource} https://fonts.gstatic.com; script-src 'nonce-${nonce}';" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Sora:wght@500;600;700&family=Source+Sans+3:wght@400;500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="${styleUri}" />
   <title>WalkCroach</title>
 </head>
 <body>
   <div id="root"></div>
+  <script nonce="${nonce}">
+    window.addEventListener('error', function (e) {
+      var el = document.getElementById('root');
+      if (el) el.textContent = 'WalkCroach UI failed to load: ' + (e.message || e);
+    });
+  </script>
   <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;

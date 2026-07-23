@@ -1,3 +1,7 @@
+/**
+ * Page extract + draft insert via activeTab + scripting.executeScript.
+ * No broad host permissions / content_scripts (CWS review path B).
+ */
 import {
   isAllowedMessage,
   isTrustedSender,
@@ -18,21 +22,7 @@ export default defineBackground(() => {
         return false;
       }
 
-      // sidePanel.open must stay in the same user-gesture turn as the FAB click.
-      if (
-        typeof message === 'object' &&
-        message &&
-        (message as ExtensionMessage).type === 'FAB_CLICK'
-      ) {
-        const tabId = sender.tab?.id;
-        if (tabId != null) {
-          void chrome.sidePanel.open({ tabId });
-        }
-        sendResponse({ ok: true, tabId: tabId ?? null });
-        return false;
-      }
-
-      void handleMessage(message as ExtensionMessage, sender).then(sendResponse);
+      void handleMessage(message as ExtensionMessage).then(sendResponse);
       return true;
     },
   );
@@ -40,7 +30,6 @@ export default defineBackground(() => {
 
 async function handleMessage(
   message: ExtensionMessage,
-  _sender: chrome.runtime.MessageSender,
 ): Promise<Record<string, unknown>> {
   switch (message.type) {
     case 'PING':
@@ -55,7 +44,11 @@ async function handleMessage(
         currentWindow: true,
       });
       if (!tab?.id || !tab.url) {
-        return { ok: false, error: 'no active tab' };
+        return {
+          ok: false,
+          error:
+            'no active tab — click the WalkCroach toolbar icon on the page first',
+        };
       }
       return {
         ok: true,
@@ -69,36 +62,59 @@ async function handleMessage(
         active: true,
         currentWindow: true,
       });
-      if (!tab?.id) return { ok: false, error: 'no active tab' };
+      if (!tab?.id) {
+        return {
+          ok: false,
+          error:
+            'no active tab — click the WalkCroach toolbar icon on the page first',
+        };
+      }
       const extract = await requestExtract(tab.id);
+      if (!extract) {
+        return {
+          ok: false,
+          error:
+            'could not read this page — open WalkCroach from the toolbar on an http(s) page, then try again',
+        };
+      }
       return { ok: true, extract };
     }
-    case 'GET_GRANTED_ORIGINS': {
-      const perms = await chrome.permissions.getAll();
-      return { ok: true, origins: perms.origins ?? [] };
+    case 'INSERT_DRAFT': {
+      const text = (message.payload as { text?: string } | undefined)?.text;
+      if (!text) return { ok: false, error: 'text required' };
+      const [tab] = await chrome.tabs.query({
+        active: true,
+        currentWindow: true,
+      });
+      if (!tab?.id) return { ok: false, error: 'no active tab' };
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: insertDraftText,
+          args: [text],
+        });
+        return { ok: true };
+      } catch (err) {
+        return {
+          ok: false,
+          error:
+            err instanceof Error
+              ? err.message
+              : 'insert failed — click the toolbar icon on the page first',
+        };
+      }
     }
-    case 'REVOKE_ORIGIN': {
-      const origin = (message.payload as { origin?: string } | undefined)
-        ?.origin;
-      if (!origin) return { ok: false, error: 'origin required' };
-      const removed = await chrome.permissions.remove({ origins: [origin] });
-      return { ok: true, removed };
-    }
+    case 'GET_GRANTED_ORIGINS':
+      // No host permissions in activeTab-only build.
+      return { ok: true, origins: [] };
+    case 'REVOKE_ORIGIN':
+      return { ok: true, removed: false };
     default:
       return { ok: false, error: 'unhandled' };
   }
 }
 
 async function requestExtract(tabId: number): Promise<PageExtract | null> {
-  try {
-    const res = (await chrome.tabs.sendMessage(tabId, {
-      type: 'EXTRACT_PAGE',
-    })) as { ok?: boolean; payload?: PageExtract };
-    if (res?.ok && res.payload) return res.payload;
-  } catch {
-    // content script may not be injected yet
-  }
-
   try {
     const injected = await chrome.scripting.executeScript({
       target: { tabId },
@@ -112,7 +128,20 @@ async function requestExtract(tabId: number): Promise<PageExtract | null> {
   }
 }
 
-/** Injected into the page — no extension imports available here. */
+function insertDraftText(text: string): void {
+  const el = document.activeElement as HTMLElement | null;
+  if (el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement) {
+    const start = el.selectionStart ?? el.value.length;
+    const end = el.selectionEnd ?? el.value.length;
+    el.value = `${el.value.slice(0, start)}${text}${el.value.slice(end)}`;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    return;
+  }
+  if (el?.isContentEditable) {
+    document.execCommand('insertText', false, text);
+  }
+}
+
 function extractInPage(maxChars: number): {
   url: string;
   title: string;
@@ -120,7 +149,7 @@ function extractInPage(maxChars: number): {
   contentHash: string;
 } {
   const normalize = (t: string) => t.replace(/\s+/g, ' ').trim();
-  let title = document.title || '';
+  const title = document.title || '';
   let extractedText = '';
   const main =
     document.querySelector('main, article, [role="main"]')?.textContent ??
@@ -131,11 +160,7 @@ function extractInPage(maxChars: number): {
     extractedText = `${extractedText.slice(0, maxChars)}…`;
   }
   const url = location.href;
-  // Always use the same FNV fallback as extract.ts when subtle is unavailable,
-  // and SHA-256 when available — keeps contentHash stable across inject paths.
   const seed = `${url}\n${title}\n${extractedText}`;
-  // Synchronous inject path: FNV only (matches extract.ts fallbackHash).
-  // Subtle digest is async and cannot be awaited here reliably from executeScript.
   let hash = 0;
   for (let i = 0; i < seed.length; i++) {
     hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;

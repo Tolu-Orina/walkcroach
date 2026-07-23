@@ -9,6 +9,7 @@ const ctx = await esbuild.context({
   format: 'iife',
   platform: 'browser',
   target: 'es2022',
+  jsx: 'automatic',
   minify: !watch,
   sourcemap: watch,
   sourcesContent: false,

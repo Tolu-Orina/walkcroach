@@ -99,8 +99,21 @@ function walk(dir, acc = []) {
 }
 
 const files = walk(outputDir);
-const zip = files.find((f) => f.endsWith('.zip'));
+const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+const expectedZipName = `walkcroachchrome-${pkg.version}-chrome.zip`;
+const zip =
+  files.find((f) => f.replace(/\\/g, '/').endsWith(expectedZipName)) ??
+  files
+    .filter((f) => f.endsWith('.zip'))
+    .sort(
+      (a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs,
+    )[0];
 if (!zip) fail('no .zip found under .output');
+if (!zip.replace(/\\/g, '/').endsWith(expectedZipName)) {
+  console.warn(
+    `zip:prod warning: expected ${expectedZipName}, using ${zip}`,
+  );
+}
 
 const textFiles = files.filter((f) =>
   /\.(js|html|json|css|mjs)$/i.test(f),
@@ -127,6 +140,5 @@ if (!sawPrivacy) {
   fail(`baked privacy URL not found in build output: ${privacyUrl}`);
 }
 
-const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 console.log(`zip:prod OK — version ${pkg.version}`);
 console.log(`zip:prod artifact: ${zip}`);

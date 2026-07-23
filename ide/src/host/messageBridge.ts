@@ -122,6 +122,8 @@ export class MessageBridge {
       { type: 'APPROVAL_REQUEST' }
     > | null;
     mcpConfigured?: boolean;
+    bedrockConfigured?: boolean;
+    ccloudConfigured?: boolean;
     telemetry?: Record<string, number>;
     signedIn?: boolean;
     linkedProjectId?: string | null;
@@ -137,6 +139,8 @@ export class MessageBridge {
       autonomy: params.autonomy,
       pendingApproval: params.pendingApproval,
       mcpConfigured: params.mcpConfigured,
+      bedrockConfigured: params.bedrockConfigured,
+      ccloudConfigured: params.ccloudConfigured,
       telemetry: params.telemetry,
       signedIn: params.signedIn,
       linkedProjectId: params.linkedProjectId,

@@ -29,11 +29,6 @@ import {
 } from '../../lib/auth';
 import type { PageExtract } from '../../lib/extract';
 import {
-  ensureOriginPermission,
-  listGrantedOrigins,
-  revokeOrigin,
-} from '../../lib/permissions';
-import {
   matchSiteProfile,
   type SiteProfile,
 } from '../../lib/site-profiles/matcher';
@@ -60,7 +55,6 @@ export function App() {
   const [activeWs, setActiveWs] = useState<string>('');
   const [captures, setCaptures] = useState<Capture[]>([]);
   const [newWsName, setNewWsName] = useState('');
-  const [origins, setOrigins] = useState<string[]>([]);
   const [draftIntent, setDraftIntent] = useState(false);
   const [profile, setProfile] = useState<SiteProfile | null>(null);
   const [proposalFields, setProposalFields] = useState<Record<
@@ -148,25 +142,23 @@ export function App() {
       setProfile(matchSiteProfile(res.extract.url));
       return res.extract;
     }
-    setError('Could not read this page. Try refreshing, then open WalkCroach again.');
+    setError(
+      'Could not read this page. Click the WalkCroach toolbar icon on an http(s) page, then try again.',
+    );
     return null;
   }, []);
 
-  /** Permission before extract (JIT host) — fixes first-run chicken-and-egg. */
+  /** activeTab + scripting: read page after toolbar open (no host grants). */
   const preparePage = useCallback(async (): Promise<PageExtract | null> => {
-    if (extract) {
-      const granted = await ensureOriginPermission(extract.url);
-      if (!granted) {
-        setError('Site access is required for this action.');
-        return null;
-      }
-      return extract;
-    }
+    if (extract) return extract;
     const meta = (await chrome.runtime.sendMessage({
       type: 'GET_ACTIVE_TAB_INFO',
-    })) as { ok?: boolean; url?: string; title?: string };
+    })) as { ok?: boolean; url?: string; error?: string };
     if (!meta?.ok || !meta.url) {
-      setError('Could not read the active tab.');
+      setError(
+        meta?.error ??
+          'Could not read the active tab — click the WalkCroach toolbar icon on the page first.',
+      );
       return null;
     }
     if (
@@ -178,11 +170,6 @@ export function App() {
       return null;
     }
     setProfile(matchSiteProfile(meta.url));
-    const granted = await ensureOriginPermission(meta.url);
-    if (!granted) {
-      setError('Site access is required for this action.');
-      return null;
-    }
     return loadExtract();
   }, [extract, loadExtract]);
 
@@ -563,14 +550,6 @@ export function App() {
     }
   };
 
-  const refreshOrigins = async () => {
-    setOrigins(await listGrantedOrigins());
-  };
-
-  useEffect(() => {
-    if (tab === 'trust') void refreshOrigins();
-  }, [tab]);
-
   const activeWsName = useMemo(
     () => workspaces.find((w) => w.id === activeWs)?.name ?? '',
     [workspaces, activeWs],
@@ -726,14 +705,19 @@ export function App() {
                   type="button"
                   className="link"
                   onClick={() => {
-                    void chrome.tabs.query({ active: true, currentWindow: true }).then(([t]) => {
-                      if (t?.id) {
-                        void chrome.tabs.sendMessage(t.id, {
-                          type: 'INSERT_DRAFT',
-                          payload: { text: streamText },
-                        });
-                      }
-                    });
+                    void chrome.runtime
+                      .sendMessage({
+                        type: 'INSERT_DRAFT',
+                        payload: { text: streamText },
+                      })
+                      .then((res: { ok?: boolean; error?: string }) => {
+                        if (!res?.ok) {
+                          setError(
+                            res?.error ??
+                              'Could not insert — focus a text field on the page, then try again.',
+                          );
+                        }
+                      });
                   }}
                 >
                   Insert into page
@@ -900,8 +884,9 @@ export function App() {
       {!loading && tab === 'trust' && (
         <section className="panel">
           <p className="muted">
-            WalkCroach only requests site access when you summarize or save. Nothing
-            is uploaded just by opening this panel.
+            WalkCroach opens from the toolbar and only reads the page you act on.
+            Nothing is uploaded just by opening this panel. There is no site-wide
+            host access to grant or revoke.
           </p>
           <p className="small">
             <a href={PRIVACY_URL} target="_blank" rel="noreferrer">
@@ -939,28 +924,6 @@ export function App() {
               />
             </div>
           )}
-          <button type="button" onClick={() => void refreshOrigins()}>
-            Refresh access list
-          </button>
-          <ul className="list">
-            {origins.map((o) => (
-              <li key={o}>
-                <span>{o}</span>
-                <button
-                  type="button"
-                  className="danger"
-                  onClick={() =>
-                    void revokeOrigin(o).then(() => refreshOrigins())
-                  }
-                >
-                  Revoke
-                </button>
-              </li>
-            ))}
-            {!origins.length && (
-              <li className="muted">No site access granted yet.</li>
-            )}
-          </ul>
           <button
             type="button"
             className="link"

@@ -1,4 +1,4 @@
-# Chrome Web Store listing copy (PD.4) — v0.1.2
+# Chrome Web Store listing copy (PD.4) — v0.1.3
 
 ## Store name
 
@@ -22,11 +22,11 @@ WalkCroach helps solo operators and small teams work from the page they are alre
 **What it does not do**
 - It does not scrape the web in the background
 - It does not auto-submit forms or run browser automation
-- It does not require host access at install—site permission is requested only when you summarize or save
+- It does not request site-wide host access—open WalkCroach from the toolbar; it only reads the page you act on
 
 **Privacy**
 See our privacy policy: https://walkcroach.conquerorfoundation.com/chrome-privacy.html  
-You can revoke any site from the Trust panel.
+Trust controls and the privacy policy live in the Trust tab.
 
 **Homepage / support**
 https://walkcroach.conquerorfoundation.com

@@ -10,6 +10,8 @@ export const WEBVIEW_TO_HOST = [
   'REJECT_STEP',
   'SET_AUTONOMY',
   'CANCEL',
+  'SIGN_IN',
+  'SAVE_SETTINGS',
 ] as const;
 
 export const HOST_TO_WEBVIEW = [
@@ -37,7 +39,19 @@ export type WebviewToHostMessage =
   | { type: 'APPROVE_STEP'; stepId: string }
   | { type: 'REJECT_STEP'; stepId: string }
   | { type: 'SET_AUTONOMY'; level: AutonomyLevelMsg }
-  | { type: 'CANCEL' };
+  | { type: 'CANCEL' }
+  | { type: 'SIGN_IN' }
+  | {
+      type: 'SAVE_SETTINGS';
+      /** Set to store; empty string ignored; null clears. */
+      bedrockApiKey?: string | null;
+      mcpClusterId?: string;
+      mcpApiKey?: string;
+      mcpUrl?: string;
+      ccloudApiKey?: string | null;
+      mcpSnippet?: string;
+      clearMcp?: boolean;
+    };
 
 export type HostToWebviewMessage =
   | { type: 'TOKEN_DELTA'; text: string }
@@ -96,6 +110,8 @@ export type HostToWebviewMessage =
         cmd?: string;
       } | null;
       mcpConfigured?: boolean;
+      bedrockConfigured?: boolean;
+      ccloudConfigured?: boolean;
       telemetry?: Record<string, number>;
       signedIn?: boolean;
       linkedProjectId?: string | null;
@@ -142,6 +158,27 @@ export function parseWebviewToHostMessage(
       return { type: 'SET_AUTONOMY', level: msg.level };
     case 'CANCEL':
       return { type: 'CANCEL' };
+    case 'SIGN_IN':
+      return { type: 'SIGN_IN' };
+    case 'SAVE_SETTINGS': {
+      const out: WebviewToHostMessage = { type: 'SAVE_SETTINGS' };
+      if (msg.bedrockApiKey === null) out.bedrockApiKey = null;
+      else if (typeof msg.bedrockApiKey === 'string') {
+        out.bedrockApiKey = msg.bedrockApiKey;
+      }
+      if (typeof msg.mcpClusterId === 'string') {
+        out.mcpClusterId = msg.mcpClusterId;
+      }
+      if (typeof msg.mcpApiKey === 'string') out.mcpApiKey = msg.mcpApiKey;
+      if (typeof msg.mcpUrl === 'string') out.mcpUrl = msg.mcpUrl;
+      if (msg.ccloudApiKey === null) out.ccloudApiKey = null;
+      else if (typeof msg.ccloudApiKey === 'string') {
+        out.ccloudApiKey = msg.ccloudApiKey;
+      }
+      if (typeof msg.mcpSnippet === 'string') out.mcpSnippet = msg.mcpSnippet;
+      if (msg.clearMcp === true) out.clearMcp = true;
+      return out;
+    }
     default:
       return null;
   }

@@ -1,8 +1,10 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { getVsCodeApi } from './vscodeApi';
+import { SettingsView } from './SettingsView';
 
 type Phase = 'gather' | 'act' | 'verify' | null;
 type Autonomy = 'strict' | 'low_friction';
+type ChatMode = 'agent' | 'ask';
 
 type ToolCard = {
   id: string;
@@ -28,6 +30,13 @@ type Approval = {
   cmd?: string;
 };
 
+type ChatTurn = {
+  id: string;
+  role: 'user' | 'assistant';
+  text: string;
+  mode?: ChatMode;
+};
+
 type HostMessage =
   | { type: 'TOKEN_DELTA'; text: string }
   | { type: 'PHASE'; phase: Phase }
@@ -42,6 +51,8 @@ type HostMessage =
       autonomy: Autonomy;
       pendingApproval: Approval | null;
       mcpConfigured?: boolean;
+      bedrockConfigured?: boolean;
+      ccloudConfigured?: boolean;
       telemetry?: Record<string, number>;
       signedIn?: boolean;
       linkedProjectId?: string | null;
@@ -79,32 +90,32 @@ function clip(s: string, n: number): string {
   return `${s.slice(0, n)}\n…`;
 }
 
-function formatTelemetry(t: Record<string, number>): string {
-  const parts = Object.entries(t)
-    .filter(([, v]) => v > 0)
-    .map(([k, v]) => `${k}=${v}`);
-  return parts.length ? parts.join(' · ') : '';
+function uid(): string {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 export function App() {
   const [trusted, setTrusted] = useState(true);
   const [streaming, setStreaming] = useState(false);
-  const [transcript, setTranscript] = useState('');
   const [phase, setPhase] = useState<Phase>(null);
   const [error, setError] = useState<string | null>(null);
-  const [task, setTask] = useState('');
+  const [draft, setDraft] = useState('');
+  const [mode, setMode] = useState<ChatMode>('agent');
+  const [modeOpen, setModeOpen] = useState(false);
   const [autonomy, setAutonomy] = useState<Autonomy>('strict');
   const [approval, setApproval] = useState<Approval | null>(null);
   const [tools, setTools] = useState<ToolCard[]>([]);
   const [subagents, setSubagents] = useState<Subagent[]>([]);
-  const [cacheHint, setCacheHint] = useState<string | null>(null);
   const [mcpConfigured, setMcpConfigured] = useState(false);
-  const [telemetry, setTelemetry] = useState<Record<string, number>>({});
+  const [bedrockConfigured, setBedrockConfigured] = useState(false);
+  const [ccloudConfigured, setCcloudConfigured] = useState(false);
   const [signedIn, setSignedIn] = useState(false);
   const [linkedProjectId, setLinkedProjectId] = useState<string | null>(null);
-  const [linkedProjectName, setLinkedProjectName] = useState<string | null>(
-    null,
-  );
+  const [turns, setTurns] = useState<ChatTurn[]>([]);
+  const [liveText, setLiveText] = useState('');
+  const [view, setView] = useState<'chat' | 'settings'>('chat');
+  const threadRef = useRef<HTMLDivElement>(null);
+  const modeMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const vscode = getVsCodeApi();
@@ -118,18 +129,17 @@ export function App() {
         case 'STATE_SNAPSHOT':
           setTrusted(msg.trusted);
           setStreaming(msg.streaming);
-          setTranscript(msg.transcript);
           setAutonomy(msg.autonomy);
           setApproval(msg.pendingApproval);
           setMcpConfigured(Boolean(msg.mcpConfigured));
-          if (msg.telemetry) setTelemetry(msg.telemetry);
           setSignedIn(Boolean(msg.signedIn));
           setLinkedProjectId(msg.linkedProjectId ?? null);
-          setLinkedProjectName(msg.linkedProjectName ?? null);
-          setError(null);
+          if (!msg.streaming && msg.transcript) {
+            setLiveText(msg.transcript);
+          }
           break;
         case 'TOKEN_DELTA':
-          setTranscript((t) => t + msg.text);
+          setLiveText((t) => t + msg.text);
           break;
         case 'PHASE':
           setPhase(msg.phase);
@@ -176,17 +186,21 @@ export function App() {
           });
           break;
         case 'CACHE_USAGE':
-          setCacheHint(
-            `cache read=${msg.cacheReadInputTokens} write=${msg.cacheWriteInputTokens}`,
-          );
-          break;
         case 'TELEMETRY':
-          if (msg.counters) setTelemetry(msg.counters);
           break;
         case 'DONE':
           setStreaming(false);
           setPhase(null);
           setApproval(null);
+          setLiveText((text) => {
+            if (text.trim()) {
+              setTurns((prev) => [
+                ...prev,
+                { id: uid(), role: 'assistant', text },
+              ]);
+            }
+            return '';
+          });
           break;
         case 'WARNING':
           setError(msg.message);
@@ -196,6 +210,16 @@ export function App() {
             setStreaming(false);
             setPhase(null);
             setApproval(null);
+            setLiveText((text) => {
+              const body = text.trim()
+                ? `${text.trim()}\n\n${msg.message}`
+                : msg.message;
+              setTurns((prev) => [
+                ...prev,
+                { id: uid(), role: 'assistant', text: body },
+              ]);
+              return '';
+            });
           }
           setError(msg.message);
           break;
@@ -208,28 +232,43 @@ export function App() {
     return () => window.removeEventListener('message', onMessage);
   }, []);
 
+  useEffect(() => {
+    const el = threadRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [turns, liveText, tools, approval, streaming]);
+
+  useEffect(() => {
+    if (!modeOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      if (!modeMenuRef.current?.contains(e.target as Node)) {
+        setModeOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [modeOpen]);
+
   const submit = useCallback(() => {
-    const text = task.trim();
-    if (!text) return;
+    const text = draft.trim();
+    if (!text || streaming || !trusted) return;
     setError(null);
-    setTranscript('');
+    setLiveText('');
     setTools([]);
     setSubagents([]);
     setApproval(null);
-    setCacheHint(null);
-    setTelemetry({});
     setStreaming(true);
-    getVsCodeApi().postMessage({ type: 'SUBMIT_TASK', text });
-  }, [task]);
-
-  const ping = useCallback(() => {
-    setTask('ping');
-    setError(null);
-    setTools([]);
-    setSubagents([]);
-    setStreaming(true);
-    getVsCodeApi().postMessage({ type: 'SUBMIT_TASK', text: 'ping' });
-  }, []);
+    setTurns((prev) => [
+      ...prev,
+      { id: uid(), role: 'user', text, mode },
+    ]);
+    setDraft('');
+    getVsCodeApi().postMessage({
+      type: 'SUBMIT_TASK',
+      text,
+      mode: mode === 'ask' ? 'plan' : 'act',
+    });
+  }, [draft, mode, streaming, trusted]);
 
   const cancel = useCallback(() => {
     getVsCodeApi().postMessage({ type: 'CANCEL' });
@@ -260,156 +299,250 @@ export function App() {
     getVsCodeApi().postMessage({ type: 'SET_AUTONOMY', level: next });
   }, [autonomy]);
 
-  const telemetryLine = formatTelemetry(telemetry);
+  const signIn = useCallback(() => {
+    getVsCodeApi().postMessage({ type: 'SIGN_IN' });
+  }, []);
+
+  const empty = turns.length === 0 && !streaming && !liveText;
 
   return (
-    <div className="app">
-      <h1 className="brand">WalkCroach</h1>
-      <p className="meta">
-        Phase C — local agent + optional Cognito link for cross-surface memory.
-        Unlinked mode still works offline. Approvals default on.
-      </p>
-
-      <div className="status-row" aria-live="polite">
-        <span className={signedIn ? 'chip ok' : 'chip warn'}>
-          Auth: {signedIn ? 'signed in' : 'signed out'}
-        </span>
-        <span className={linkedProjectId ? 'chip ok' : 'chip muted'}>
-          Link:{' '}
-          {linkedProjectId
-            ? linkedProjectName || linkedProjectId
-            : 'not linked'}
-        </span>
-        <span className={mcpConfigured ? 'chip ok' : 'chip warn'}>
-          MCP: {mcpConfigured ? 'configured' : 'not configured'}
-        </span>
-        {telemetryLine ? (
-          <span className="chip muted">{telemetryLine}</span>
-        ) : null}
-      </div>
+    <div className="chat">
+      <header className="chat-top">
+        <span className="brand">WalkCroach</span>
+        <div className="chat-top-meta">
+          {mcpConfigured ? (
+            <span className="pill on">Cockroach</span>
+          ) : null}
+          {signedIn ? (
+            <span className="pill">{linkedProjectId ? 'Linked' : 'Signed in'}</span>
+          ) : (
+            <button type="button" className="linkish" onClick={signIn}>
+              Sign in
+            </button>
+          )}
+        </div>
+      </header>
 
       {!trusted && (
         <div className="banner" role="status">
-          Workspace is untrusted. Trust this folder to enable agent actions
-          (NFR-D07).
+          Trust this folder to run the agent.
         </div>
       )}
 
-      {error && (
+      {error && !streaming && (
         <div className="banner error" role="alert">
           {error}
         </div>
       )}
 
-      <label className="label" htmlFor="task">
-        Task
-      </label>
-      <textarea
-        id="task"
-        className="task"
-        rows={3}
-        value={task}
-        disabled={streaming || !trusted}
-        placeholder="e.g. Inspect schema via MCP and propose an index"
-        onChange={(e) => setTask(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-            e.preventDefault();
-            submit();
-          }
-        }}
-      />
+      <div className="thread" ref={threadRef} aria-label="Conversation">
+        {empty ? (
+          <div className="empty">
+            <p className="empty-brand">WalkCroach</p>
+            <p className="empty-copy">
+              Chat with an agent in this workspace. Agent can edit; Ask only
+              explores.
+            </p>
+          </div>
+        ) : (
+          <>
+            {turns.map((t) => (
+              <article
+                key={t.id}
+                className={`bubble ${t.role}`}
+                data-mode={t.mode}
+              >
+                <div className="bubble-label">
+                  {t.role === 'user'
+                    ? t.mode === 'ask'
+                      ? 'You · Ask'
+                      : 'You · Agent'
+                    : 'WalkCroach'}
+                </div>
+                <pre className="bubble-body">{t.text}</pre>
+              </article>
+            ))}
 
-      <div className="row">
-        <button
-          type="button"
-          onClick={submit}
-          disabled={streaming || !trusted || !task.trim()}
-        >
-          Run
-        </button>
-        <button
-          type="button"
-          className="secondary"
-          onClick={ping}
-          disabled={streaming || !trusted}
-        >
-          Ping
-        </button>
-        <button
-          type="button"
-          className="secondary"
-          onClick={cancel}
-          disabled={!streaming}
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
-          className="secondary"
-          onClick={toggleAutonomy}
-          disabled={!trusted}
-          title="Low-friction auto-approves narrow edit_file only — never terminal, MCP write, or ccloud"
-        >
-          Autonomy: {autonomy === 'strict' ? 'strict' : 'low-friction'}
-        </button>
+            {(streaming || liveText) && (
+              <article className="bubble assistant live">
+                <div className="bubble-label">
+                  WalkCroach
+                  {phase
+                    ? ` · ${
+                        phase === 'gather'
+                          ? 'gathering'
+                          : phase === 'act'
+                            ? 'working'
+                            : 'verifying'
+                      }`
+                    : ''}
+                </div>
+                {(tools.length > 0 || subagents.length > 0) && (
+                  <ul className="activity" aria-label="Activity">
+                    {tools.map((t) => (
+                      <li key={t.id} data-status={t.status}>
+                        <span className="activity-name">{t.name}</span>
+                        <span className="activity-meta">
+                          {t.status}
+                          {t.detail ? ` · ${clip(t.detail, 80)}` : ''}
+                        </span>
+                      </li>
+                    ))}
+                    {subagents.map((s) => (
+                      <li key={s.id} data-status={s.status}>
+                        <span className="activity-name">{s.name}</span>
+                        <span className="activity-meta">
+                          subagent · {s.status}
+                          {s.summary ? ` · ${clip(s.summary, 80)}` : ''}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {approval && (
+                  <section
+                    className="approval"
+                    role="dialog"
+                    aria-label="Approval required"
+                  >
+                    <div className="approval-head">
+                      Approval · {approval.toolName}
+                    </div>
+                    {approval.kind === 'command' ? (
+                      <pre className="diff">{approval.cmd}</pre>
+                    ) : (
+                      <>
+                        <p className="path">{approval.path}</p>
+                        <div className="diff-grid">
+                          <pre className="diff before">
+                            {clip(approval.before ?? '', 4000)}
+                          </pre>
+                          <pre className="diff after">
+                            {clip(approval.after ?? '', 4000)}
+                          </pre>
+                        </div>
+                      </>
+                    )}
+                    <div className="row">
+                      <button
+                        type="button"
+                        className="btn primary"
+                        onClick={approve}
+                      >
+                        Approve
+                      </button>
+                      <button
+                        type="button"
+                        className="btn ghost"
+                        onClick={reject}
+                      >
+                        Reject
+                      </button>
+                    </div>
+                  </section>
+                )}
+                <pre className="bubble-body" aria-live="polite">
+                  {liveText || (streaming ? '…' : '')}
+                </pre>
+              </article>
+            )}
+          </>
+        )}
       </div>
 
-      {phase && <p className="phase">Phase: {phase}</p>}
-      {cacheHint && <p className="phase">{cacheHint}</p>}
-
-      {approval && (
-        <div className="approval" role="dialog" aria-label="Approval required">
-          <div className="approval-head">
-            Approve {approval.toolName} ({approval.kind})
+      <footer className="composer">
+        <textarea
+          className="composer-input"
+          rows={3}
+          value={draft}
+          disabled={!trusted}
+          placeholder={
+            mode === 'ask'
+              ? 'Ask about this codebase…'
+              : 'Describe a change for the agent…'
+          }
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
+              submit();
+            }
+          }}
+        />
+        <div className="composer-bar">
+          <div className="mode-wrap" ref={modeMenuRef}>
+            <button
+              type="button"
+              className="mode-btn"
+              aria-haspopup="listbox"
+              aria-expanded={modeOpen}
+              onClick={() => setModeOpen((o) => !o)}
+            >
+              {mode === 'agent' ? 'Agent' : 'Ask'}
+              <span className="caret" aria-hidden>
+                ▾
+              </span>
+            </button>
+            {modeOpen && (
+              <ul className="mode-menu" role="listbox">
+                <li role="option" aria-selected={mode === 'agent'}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode('agent');
+                      setModeOpen(false);
+                    }}
+                  >
+                    <span className="mode-title">Agent</span>
+                    <span className="mode-desc">Edit files and run tools</span>
+                  </button>
+                </li>
+                <li role="option" aria-selected={mode === 'ask'}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode('ask');
+                      setModeOpen(false);
+                    }}
+                  >
+                    <span className="mode-title">Ask</span>
+                    <span className="mode-desc">Read-only answers</span>
+                  </button>
+                </li>
+              </ul>
+            )}
           </div>
-          {approval.kind === 'command' ? (
-            <pre className="diff">{approval.cmd}</pre>
-          ) : (
-            <>
-              <p className="phase">{approval.path}</p>
-              <div className="diff-grid">
-                <pre className="diff before">{clip(approval.before ?? '', 4000)}</pre>
-                <pre className="diff after">{clip(approval.after ?? '', 4000)}</pre>
-              </div>
-            </>
-          )}
-          <div className="row">
-            <button type="button" onClick={approve}>
-              Approve
+
+          {mode === 'agent' ? (
+            <button
+              type="button"
+              className="linkish autonomy"
+              onClick={toggleAutonomy}
+              title="Strict asks before edits. Guided auto-approves narrow file edits."
+            >
+              {autonomy === 'strict' ? 'Strict' : 'Guided'}
             </button>
-            <button type="button" className="secondary" onClick={reject}>
-              Reject
-            </button>
+          ) : null}
+
+          <div className="composer-actions">
+            {streaming ? (
+              <button type="button" className="btn danger" onClick={cancel}>
+                Stop
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="send"
+                onClick={submit}
+                disabled={!trusted || !draft.trim()}
+                aria-label="Send"
+              >
+                ↑
+              </button>
+            )}
           </div>
         </div>
-      )}
-
-      {tools.length > 0 && (
-        <ul className="cards">
-          {tools.map((t) => (
-            <li key={t.id}>
-              <strong>{t.name}</strong> · {t.status}
-              {t.detail ? ` — ${clip(t.detail, 120)}` : ''}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {subagents.length > 0 && (
-        <ul className="cards subagents">
-          {subagents.map((s) => (
-            <li key={s.id}>
-              <strong>subagent:{s.name}</strong> · {s.status}
-              {s.summary ? ` — ${clip(s.summary, 200)}` : ''}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <pre className="transcript" aria-live="polite">
-        {transcript || (streaming ? '…' : 'Output will stream here.')}
-      </pre>
+      </footer>
     </div>
   );
 }

@@ -243,7 +243,7 @@
         <div class="page-copy page-trust">
           <h1>Small and medium-sized enterprises</h1>
           <div class="meta">Business · Overview</div>
-          <p>Trust controls live in the WalkCroach side panel—site access is requested only when you act.</p>
+          <p>Open WalkCroach from the toolbar—it only reads the page you act on. No site-wide host access.</p>
         </div>
         <div class="page-copy page-workspaces">
           <h1>Small and medium-sized enterprises</h1>
@@ -260,7 +260,7 @@
           <div class="meta">Ask what you saved</div>
           <p>WalkCroach recalls from your captures—not from your full browsing history.</p>
         </div>
-        <div class="fab">WC</div>
+        <div class="fab" style="display:none" aria-hidden="true">WC</div>
       </div>
       <aside class="panel-shell">
         <header>
@@ -297,18 +297,13 @@ Key points:
           </div>
           <section class="panel">
             <p class="muted">
-              WalkCroach only requests site access when you summarize or save. Nothing is uploaded
-              just by opening this panel.
+              WalkCroach opens from the toolbar and only reads the page you act on.
+              Nothing is uploaded just by opening this panel. There is no site-wide
+              host access to grant or revoke.
             </p>
             <p class="small"><a class="link" href="#">Privacy policy</a></p>
             <p class="small">Session: device (try-first)</p>
-            <button class="btn" type="button">Refresh access list</button>
-            <ul class="list">
-              <li>
-                <span>https://en.wikipedia.org/*</span>
-                <span class="danger">Revoke</span>
-              </li>
-            </ul>
+            <button class="link" type="button">Refresh session</button>
           </section>
         </div>
 

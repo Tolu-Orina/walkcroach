@@ -1,7 +1,6 @@
 import { defineConfig } from 'wxt';
 
 // Fail closed only for release/zip builds (set WALKCROACH_REQUIRE_PROD_ENV=true).
-// Unit-test `wxt build` may still use localhost defaults.
 const requireProdEnv = process.env.WALKCROACH_REQUIRE_PROD_ENV === 'true';
 
 if (requireProdEnv && !process.env.WALKCROACH_API_BASE) {
@@ -30,6 +29,8 @@ if (requireProdEnv) {
 }
 
 // https://wxt.dev/api/config.html
+// v0.1.3: activeTab + scripting only — no broad host permissions / content_scripts
+// (faster CWS review; open via toolbar / side panel).
 export default defineConfig({
   modules: ['@wxt-dev/module-react'],
   manifest: {
@@ -37,8 +38,6 @@ export default defineConfig({
     description:
       'Summarize, draft, and remember. A trust-first browser copilot for SMEs.',
     permissions: ['storage', 'activeTab', 'scripting', 'sidePanel'],
-    optional_host_permissions: ['https://*/*', 'http://*/*'],
-    host_permissions: [],
     action: {
       default_title: 'WalkCroach',
     },

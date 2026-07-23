@@ -21,13 +21,15 @@ function stateFingerprint(state: string): string {
 
 /**
  * POST /ide/v1/oauth/session-code
- * Authenticated (Web session Bearer). Issues a one-time code for IDE exchange.
+ * Authenticated (Web session Bearer = Cognito ID token). Issues a one-time
+ * code for IDE exchange.
  * Body: { state, redirectUri, refreshToken?, idToken?, expiresAt? }
  */
 export async function handleCreateSessionCode(
   auth: AuthContext,
   rawBody: string | undefined,
-  accessToken: string,
+  /** Cognito ID token from the Web session (Bearer). Stored for IDE reuse. */
+  sessionBearer: string,
 ): Promise<ReturnType<typeof jsonResponse>> {
   const parsed = parseJsonBody<{
     state?: string;
@@ -48,7 +50,7 @@ export async function handleCreateSessionCode(
   if (!redirectUri || !ALLOWED_REDIRECTS.has(redirectUri)) {
     return jsonResponse(400, { error: 'redirectUri is not allowed' });
   }
-  if (accessToken.startsWith('dev:')) {
+  if (sessionBearer.startsWith('dev:')) {
     return jsonResponse(400, {
       error: 'Dev tokens cannot be used for IDE connect',
     });
@@ -81,9 +83,9 @@ export async function handleCreateSessionCode(
         stateFingerprint(state),
         redirectUri,
         auth.ownerId,
-        accessToken,
+        sessionBearer,
         body.refreshToken?.trim() || null,
-        body.idToken?.trim() || null,
+        body.idToken?.trim() || sessionBearer,
         tokenExpiresAt.toISOString(),
         codeExpiresAt.toISOString(),
       ],

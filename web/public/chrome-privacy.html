@@ -137,10 +137,11 @@
       <h2>4. Permissions and Limited Use</h2>
       <p>
         At install, WalkCroach requests only <code>storage</code>, <code>activeTab</code>,
-        <code>scripting</code>, and <code>sidePanel</code>. Host access
-        (<code>https://…</code> / <code>http://…</code>) is <strong>optional</strong> and
-        requested just-in-time the first time you summarize or save on that site. You can revoke
-        any origin from the Trust panel.
+        <code>scripting</code>, and <code>sidePanel</code>. It does
+        <strong>not</strong> request site-wide host permissions
+        (<code>https://*/*</code>, <code>http://*/*</code>, or <code>&lt;all_urls&gt;</code>).
+        After you open WalkCroach from the toolbar, it may read the active page only when you
+        summarize, ask, draft, save, or insert—using Chrome’s active-tab access for that gesture.
       </p>
       <p>
         <strong>Limited Use:</strong> The use of information received from Chrome APIs and from

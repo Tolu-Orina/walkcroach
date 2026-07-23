@@ -1,6 +1,8 @@
 /**
- * Cognito JWT (and optional local dev:) auth for IDE BFF.
- * Accepts access tokens from the shared WalkCroach Web SPA Cognito client.
+ * Cognito JWT auth for IDE BFF.
+ *
+ * WalkCroach Web sends the Cognito **ID token** as Bearer (same as agent API).
+ * After Cognito refresh, the IDE may send an **access token**. Accept both.
  */
 import { CognitoJwtVerifier } from 'aws-jwt-verify';
 import type { CognitoJwtVerifierSingleUserPool } from 'aws-jwt-verify/cognito-verifier';
@@ -10,6 +12,12 @@ export type AuthContext = {
   isAnonymous: boolean;
   source: 'jwt' | 'dev';
 };
+
+let idVerifier: CognitoJwtVerifierSingleUserPool<{
+  userPoolId: string;
+  tokenUse: 'id';
+  clientId: string | string[];
+}> | null = null;
 
 let accessVerifier: CognitoJwtVerifierSingleUserPool<{
   userPoolId: string;
@@ -41,6 +49,26 @@ function bearerToken(
 function cognitoClientIds(): string[] {
   const id = process.env.COGNITO_CLIENT_ID?.trim();
   return id ? [id] : [];
+}
+
+function getIdVerifier():
+  | CognitoJwtVerifierSingleUserPool<{
+      userPoolId: string;
+      tokenUse: 'id';
+      clientId: string | string[];
+    }>
+  | null {
+  const userPoolId = process.env.COGNITO_USER_POOL_ID;
+  const clientIds = cognitoClientIds();
+  if (!userPoolId || clientIds.length === 0) return null;
+  if (!idVerifier) {
+    idVerifier = CognitoJwtVerifier.create({
+      userPoolId,
+      clientId: clientIds.length === 1 ? clientIds[0]! : clientIds,
+      tokenUse: 'id',
+    });
+  }
+  return idVerifier;
 }
 
 function getAccessVerifier():
@@ -76,6 +104,34 @@ function resolveDevToken(token: string): AuthContext | null {
   };
 }
 
+async function verifyJwt(token: string): Promise<AuthContext | null> {
+  const id = getIdVerifier();
+  if (id) {
+    try {
+      const payload = await id.verify(token);
+      if (payload.sub) {
+        return { ownerId: payload.sub, isAnonymous: false, source: 'jwt' };
+      }
+    } catch {
+      // try access token next
+    }
+  }
+
+  const access = getAccessVerifier();
+  if (access) {
+    try {
+      const payload = await access.verify(token);
+      if (payload.sub) {
+        return { ownerId: payload.sub, isAnonymous: false, source: 'jwt' };
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
 export async function resolveAuth(
   headers: Record<string, string | undefined> | undefined,
 ): Promise<AuthContext | null> {
@@ -85,15 +141,7 @@ export async function resolveAuth(
   const dev = resolveDevToken(token);
   if (dev) return dev;
 
-  const verifier = getAccessVerifier();
-  if (!verifier) return null;
-  try {
-    const payload = await verifier.verify(token);
-    if (!payload.sub) return null;
-    return { ownerId: payload.sub, isAnonymous: false, source: 'jwt' };
-  } catch {
-    return null;
-  }
+  return verifyJwt(token);
 }
 
 export async function requireAuth(

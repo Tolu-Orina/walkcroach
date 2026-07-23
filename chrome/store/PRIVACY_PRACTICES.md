@@ -50,5 +50,6 @@ The live privacy policy includes the required affirmative Limited Use statement.
 Before upload, verify dashboard permissions list matches:
 
 - `storage`, `activeTab`, `scripting`, `sidePanel`
-- Optional hosts only: `http://*/*`, `https://*/*`
-- No required `<all_urls>` / host permissions at install
+- **No** host permissions (required or optional)
+- **No** `<all_urls>` / `http://*/*` / `https://*/*`
+- **No** `content_scripts` in the package manifest

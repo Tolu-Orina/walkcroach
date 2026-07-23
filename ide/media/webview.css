@@ -1,151 +1,254 @@
 :root {
   color-scheme: light dark;
-  font-family: var(--vscode-font-family, system-ui, sans-serif);
-  font-size: var(--vscode-font-size, 13px);
-  color: var(--vscode-foreground);
-  background: var(--vscode-sideBar-background);
+  --wc-font-display: 'Sora', var(--vscode-font-family), sans-serif;
+  --wc-font-body: 'Source Sans 3', var(--vscode-font-family), sans-serif;
+  --wc-font-mono: 'IBM Plex Mono', var(--vscode-editor-font-family), monospace;
+  --wc-fg: var(--vscode-foreground);
+  --wc-muted: color-mix(in srgb, var(--vscode-foreground) 58%, transparent);
+  --wc-bg: var(--vscode-sideBar-background);
+  --wc-surface: color-mix(
+    in srgb,
+    var(--vscode-editor-background) 92%,
+    var(--vscode-sideBar-background)
+  );
+  --wc-border: var(--vscode-panel-border, color-mix(in srgb, var(--vscode-foreground) 14%, transparent));
+  --wc-accent: var(--vscode-button-background);
+  --wc-accent-fg: var(--vscode-button-foreground);
+  --wc-ember: #c45c26;
+  --wc-radius: 10px;
+  --wc-pad: 12px;
 }
 
 * {
   box-sizing: border-box;
 }
 
+html,
+body,
+#root {
+  height: 100%;
+}
+
 body {
   margin: 0;
   padding: 0;
+  font-family: var(--wc-font-body);
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--wc-fg);
+  background: var(--wc-bg);
 }
 
-#root {
-  min-height: 100vh;
-}
-
-.app {
+.chat {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 12px;
-  min-height: 100vh;
+  height: 100%;
+  min-height: 0;
+  animation: wc-enter 240ms ease-out;
+}
+
+@keyframes wc-enter {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat {
+    animation: none;
+  }
+}
+
+.chat-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px var(--wc-pad) 8px;
+  border-bottom: 1px solid var(--wc-border);
+  flex-shrink: 0;
 }
 
 .brand {
-  font-size: 1.15rem;
-  font-weight: 650;
-  letter-spacing: 0.02em;
-  margin: 0;
+  font-family: var(--wc-font-display);
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
 }
 
-.meta {
-  margin: 0;
-  opacity: 0.8;
-  line-height: 1.4;
-}
-
-.status-row {
+.chat-top-meta {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  align-items: center;
+  gap: 8px;
 }
 
-.chip {
-  font-size: 0.85em;
+.pill {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--wc-muted);
+  border: 1px solid var(--wc-border);
+  border-radius: 999px;
   padding: 2px 8px;
-  border-radius: 2px;
-  border: 1px solid var(--vscode-widget-border, transparent);
-  opacity: 0.95;
 }
 
-.chip.ok {
-  border-color: color-mix(
-    in srgb,
-    var(--vscode-testing-iconPassed, #73c991) 60%,
-    transparent
-  );
+.pill.on {
+  color: color-mix(in srgb, var(--vscode-testing-iconPassed, #73c991) 90%, var(--wc-fg));
+  border-color: currentColor;
 }
 
-.chip.warn {
-  border-color: color-mix(
-    in srgb,
-    var(--vscode-inputValidation-warningBorder, #cca700) 70%,
-    transparent
-  );
+.linkish {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--vscode-textLink-foreground, var(--wc-ember));
+  font-family: var(--wc-font-body);
+  font-size: 0.82rem;
+  cursor: pointer;
 }
 
-.chip.muted {
-  opacity: 0.75;
+.linkish.autonomy {
+  color: var(--wc-muted);
 }
 
 .banner {
+  margin: 8px var(--wc-pad) 0;
   padding: 8px 10px;
   border-left: 3px solid var(--vscode-inputValidation-warningBorder, #cca700);
-  background: color-mix(in srgb, var(--vscode-inputValidation-warningBackground, #7b6a00) 35%, transparent);
+  background: color-mix(
+    in srgb,
+    var(--vscode-inputValidation-warningBackground, #7b6a00) 28%,
+    transparent
+  );
+  font-size: 0.88rem;
+  flex-shrink: 0;
 }
 
 .banner.error {
   border-left-color: var(--vscode-inputValidation-errorBorder, #f14c4c);
-  background: color-mix(in srgb, var(--vscode-inputValidation-errorBackground, #5a1d1d) 35%, transparent);
+  background: color-mix(
+    in srgb,
+    var(--vscode-inputValidation-errorBackground, #5a1d1d) 28%,
+    transparent
+  );
 }
 
-.row {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-button {
-  font: inherit;
-  cursor: pointer;
-  padding: 6px 12px;
-  border-radius: 2px;
-  border: 1px solid var(--vscode-button-border, transparent);
-  background: var(--vscode-button-background);
-  color: var(--vscode-button-foreground);
-}
-
-button.secondary {
-  background: var(--vscode-button-secondaryBackground);
-  color: var(--vscode-button-secondaryForeground);
-}
-
-button:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.phase {
-  font-size: 0.85rem;
-  opacity: 0.75;
-  margin: 0;
-}
-
-.transcript {
+.thread {
   flex: 1;
-  margin: 0;
-  padding: 10px;
-  min-height: 160px;
-  max-height: 40vh;
+  min-height: 0;
   overflow: auto;
+  padding: 14px var(--wc-pad) 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.empty {
+  margin: auto 0;
+  padding: 24px 8px 40px;
+  text-align: left;
+}
+
+.empty-brand {
+  margin: 0 0 8px;
+  font-family: var(--wc-font-display);
+  font-size: 1.55rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  background: linear-gradient(
+    120deg,
+    var(--wc-fg) 20%,
+    color-mix(in srgb, var(--wc-ember) 70%, var(--wc-fg))
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.empty-copy {
+  margin: 0;
+  max-width: 32ch;
+  color: var(--wc-muted);
+  font-size: 0.95rem;
+}
+
+.bubble {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.bubble-label {
+  font-family: var(--wc-font-display);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--wc-muted);
+}
+
+.bubble.user .bubble-body {
+  background: color-mix(in srgb, var(--wc-ember) 12%, var(--wc-surface));
+  border-color: color-mix(in srgb, var(--wc-ember) 28%, var(--wc-border));
+}
+
+.bubble-body {
+  margin: 0;
+  padding: 10px 12px;
   white-space: pre-wrap;
   word-break: break-word;
-  background: var(--vscode-editor-background);
-  border: 1px solid var(--vscode-panel-border, transparent);
-  font-family: var(--vscode-editor-font-family, ui-monospace, monospace);
+  font-family: var(--wc-font-body);
+  font-size: 0.95rem;
+  line-height: 1.5;
+  background: var(--wc-surface);
+  border: 1px solid var(--wc-border);
+  border-radius: var(--wc-radius);
+}
+
+.bubble.assistant .bubble-body {
+  font-family: var(--wc-font-mono);
   font-size: 12px;
-  line-height: 1.45;
 }
 
-.label {
-  font-size: 0.85rem;
-  opacity: 0.85;
+.activity {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
-.task {
-  width: 100%;
-  resize: vertical;
-  font: inherit;
-  padding: 8px;
-  color: var(--vscode-input-foreground);
-  background: var(--vscode-input-background);
-  border: 1px solid var(--vscode-input-border, transparent);
+.activity li {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 8px;
+  border: 1px solid var(--wc-border);
+  border-radius: 6px;
+  background: var(--wc-bg);
+}
+
+.activity-name {
+  font-family: var(--wc-font-mono);
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+
+.activity-meta {
+  font-size: 0.75rem;
+  color: var(--wc-muted);
+}
+
+.activity li[data-status='running'] .activity-name {
+  color: var(--vscode-focusBorder, var(--wc-accent));
 }
 
 .approval {
@@ -153,12 +256,22 @@ button:disabled {
   flex-direction: column;
   gap: 8px;
   padding: 10px;
-  border: 1px solid var(--vscode-focusBorder, #007fd4);
-  background: var(--vscode-editor-background);
+  border: 1px solid var(--vscode-focusBorder, var(--wc-accent));
+  border-radius: var(--wc-radius);
+  background: var(--wc-bg);
 }
 
 .approval-head {
+  font-family: var(--wc-font-display);
   font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.path {
+  margin: 0;
+  font-family: var(--wc-font-mono);
+  font-size: 0.75rem;
+  color: var(--wc-muted);
 }
 
 .diff-grid {
@@ -170,37 +283,193 @@ button:disabled {
 .diff {
   margin: 0;
   padding: 8px;
-  max-height: 180px;
+  max-height: 140px;
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
-  font-family: var(--vscode-editor-font-family, ui-monospace, monospace);
+  font-family: var(--wc-font-mono);
   font-size: 11px;
-  background: var(--vscode-sideBar-background);
-  border: 1px solid var(--vscode-panel-border, transparent);
+  background: var(--wc-surface);
+  border: 1px solid var(--wc-border);
+  border-radius: 6px;
 }
 
-.diff.before {
-  opacity: 0.85;
+.row {
+  display: flex;
+  gap: 8px;
 }
 
-.cards {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+.composer {
+  flex-shrink: 0;
+  padding: 8px var(--wc-pad) 12px;
+  border-top: 1px solid var(--wc-border);
+  background: color-mix(in srgb, var(--wc-bg) 85%, transparent);
   display: flex;
   flex-direction: column;
+  gap: 8px;
+}
+
+.composer-input {
+  width: 100%;
+  resize: none;
+  min-height: 72px;
+  font-family: var(--wc-font-body);
+  font-size: 0.98rem;
+  line-height: 1.4;
+  padding: 12px 12px 4px;
+  color: var(--vscode-input-foreground);
+  background: var(--wc-surface);
+  border: 1px solid var(--wc-border);
+  border-radius: var(--wc-radius) var(--wc-radius) 0 0;
+  border-bottom: none;
+}
+
+.composer-input:focus {
+  outline: none;
+}
+
+.composer-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: -8px;
+  padding: 6px 8px 8px;
+  background: var(--wc-surface);
+  border: 1px solid var(--wc-border);
+  border-top: none;
+  border-radius: 0 0 var(--wc-radius) var(--wc-radius);
+}
+
+.composer-input:focus + .composer-bar,
+.composer:focus-within .composer-input,
+.composer:focus-within .composer-bar {
+  border-color: var(--vscode-focusBorder, var(--wc-accent));
+}
+
+.mode-wrap {
+  position: relative;
+}
+
+.mode-btn {
+  display: inline-flex;
+  align-items: center;
   gap: 4px;
+  font-family: var(--wc-font-display);
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--wc-border);
+  background: transparent;
+  color: var(--wc-fg);
+  cursor: pointer;
+}
+
+.caret {
+  font-size: 0.65rem;
+  opacity: 0.7;
+}
+
+.mode-menu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  z-index: 20;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  min-width: 200px;
+  background: var(--vscode-dropdown-background, var(--wc-surface));
+  border: 1px solid var(--wc-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px color-mix(in srgb, #000 22%, transparent);
+}
+
+.mode-menu li button {
+  width: 100%;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--wc-fg);
+  cursor: pointer;
+  font-family: var(--wc-font-body);
+}
+
+.mode-menu li[aria-selected='true'] button,
+.mode-menu li button:hover {
+  background: color-mix(in srgb, var(--wc-ember) 14%, transparent);
+}
+
+.mode-title {
+  font-family: var(--wc-font-display);
+  font-weight: 600;
   font-size: 0.85rem;
 }
 
-.cards li {
-  padding: 4px 0;
-  border-bottom: 1px solid var(--vscode-panel-border, transparent);
+.mode-desc {
+  font-size: 0.75rem;
+  color: var(--wc-muted);
 }
 
-.subagents {
-  border-left: 2px solid var(--vscode-focusBorder, #007fd4);
-  padding-left: 8px;
+.composer-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
+.btn {
+  font-family: var(--wc-font-display);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn.primary {
+  background: var(--wc-accent);
+  color: var(--wc-accent-fg);
+}
+
+.btn.ghost {
+  background: transparent;
+  color: var(--wc-fg);
+  border-color: var(--wc-border);
+}
+
+.btn.danger {
+  background: color-mix(in srgb, var(--vscode-errorForeground, #f14c4c) 18%, transparent);
+  color: var(--wc-fg);
+  border-color: color-mix(in srgb, var(--vscode-errorForeground, #f14c4c) 45%, transparent);
+}
+
+.send {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  border: none;
+  background: var(--wc-fg);
+  color: var(--wc-bg);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+
+.send:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}

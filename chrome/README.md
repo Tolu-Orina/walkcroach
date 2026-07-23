@@ -47,7 +47,11 @@ Default workspaces on first sector save: Hiring, Leads, Pricing, Property, Suppo
 ## Web project linking (Phase C)
 
 After account upgrade (Trust tab): Workspaces → Link to Web project.  
-Public listing for v0.1.2 soft-pedals this path until Cognito browser sign-in ships.
+Public listing for v0.1.3 soft-pedals this path until Cognito browser sign-in ships.
+
+## UX note (v0.1.3)
+
+Open WalkCroach from the **toolbar** (no floating FAB / content script). Page extract uses `activeTab` + `scripting` only.
 
 ## Privacy
 
