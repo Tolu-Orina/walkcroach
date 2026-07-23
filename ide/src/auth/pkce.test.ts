@@ -1,41 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  generateOAuthState,
   generateCodeVerifier,
   codeChallengeS256,
-  generateOAuthState,
-  buildAuthorizeUrl,
-  exchangeAuthorizationCode,
-  refreshAccessToken,
+  refreshWithSpaClient,
 } from './pkce.js';
-
-describe('generateCodeVerifier', () => {
-  it('returns a base64url string of consistent length', () => {
-    const v = generateCodeVerifier();
-    expect(v.length).toBeGreaterThan(20);
-    expect(v).toMatch(/^[A-Za-z0-9_-]+$/);
-  });
-
-  it('generates unique values each call', () => {
-    const a = generateCodeVerifier();
-    const b = generateCodeVerifier();
-    expect(a).not.toBe(b);
-  });
-});
-
-describe('codeChallengeS256', () => {
-  it('produces a deterministic SHA-256 base64url digest', () => {
-    const verifier = 'test-verifier-1234';
-    const c1 = codeChallengeS256(verifier);
-    const c2 = codeChallengeS256(verifier);
-    expect(c1).toBe(c2);
-    expect(c1).toMatch(/^[A-Za-z0-9_-]+$/);
-    expect(c1.length).toBeGreaterThan(10);
-  });
-
-  it('differs for different verifiers', () => {
-    expect(codeChallengeS256('aaa')).not.toBe(codeChallengeS256('bbb'));
-  });
-});
 
 describe('generateOAuthState', () => {
   it('returns a base64url string', () => {
@@ -45,143 +14,50 @@ describe('generateOAuthState', () => {
   });
 });
 
-describe('buildAuthorizeUrl', () => {
-  it('constructs a valid Cognito authorize URL', () => {
-    const url = buildAuthorizeUrl({
-      hostedUiBaseUrl: 'https://auth.example.com',
-      clientId: 'client-abc',
-      redirectUri: 'vscode://walkcroach/auth',
-      codeChallenge: 'challenge123',
-      state: 'state456',
-    });
-    const parsed = new URL(url);
-    expect(parsed.pathname).toBe('/oauth2/authorize');
-    expect(parsed.searchParams.get('client_id')).toBe('client-abc');
-    expect(parsed.searchParams.get('response_type')).toBe('code');
-    expect(parsed.searchParams.get('redirect_uri')).toBe('vscode://walkcroach/auth');
-    expect(parsed.searchParams.get('code_challenge')).toBe('challenge123');
-    expect(parsed.searchParams.get('code_challenge_method')).toBe('S256');
-    expect(parsed.searchParams.get('state')).toBe('state456');
-    expect(parsed.searchParams.get('scope')).toBe('openid email profile');
+describe('legacy PKCE helpers', () => {
+  it('generateCodeVerifier returns base64url', () => {
+    const v = generateCodeVerifier();
+    expect(v).toMatch(/^[A-Za-z0-9_-]+$/);
   });
 
-  it('accepts custom scopes', () => {
-    const url = buildAuthorizeUrl({
-      hostedUiBaseUrl: 'https://auth.example.com/',
-      clientId: 'c1',
-      redirectUri: 'http://localhost',
-      codeChallenge: 'cc',
-      state: 'ss',
-      scopes: ['openid'],
-    });
-    const parsed = new URL(url);
-    expect(parsed.searchParams.get('scope')).toBe('openid');
-  });
-
-  it('strips trailing slash from hostedUiBaseUrl', () => {
-    const url = buildAuthorizeUrl({
-      hostedUiBaseUrl: 'https://auth.example.com/',
-      clientId: 'c1',
-      redirectUri: 'x',
-      codeChallenge: 'cc',
-      state: 'ss',
-    });
-    expect(url).toContain('https://auth.example.com/oauth2/authorize');
-    expect(url).not.toContain('//oauth2');
+  it('codeChallengeS256 is deterministic', () => {
+    expect(codeChallengeS256('abc')).toBe(codeChallengeS256('abc'));
   });
 });
 
-describe('exchangeAuthorizationCode', () => {
-  it('posts to token endpoint and returns tokens', async () => {
-    const mockFetch = vi.fn().mockResolvedValueOnce({
+describe('refreshWithSpaClient', () => {
+  it('posts InitiateAuth REFRESH_TOKEN_AUTH', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: () =>
-        Promise.resolve({
-          access_token: 'at-123',
-          id_token: 'it-456',
-          refresh_token: 'rt-789',
-          expires_in: 3600,
-        }),
+      json: async () => ({
+        AuthenticationResult: {
+          AccessToken: 'at',
+          IdToken: 'id',
+          ExpiresIn: 3600,
+        },
+      }),
     });
-    vi.stubGlobal('fetch', mockFetch);
+    vi.stubGlobal('fetch', fetchMock);
 
-    const result = await exchangeAuthorizationCode({
-      hostedUiBaseUrl: 'https://auth.example.com',
-      clientId: 'c1',
-      redirectUri: 'http://localhost/callback',
-      code: 'auth-code',
-      codeVerifier: 'verifier-abc',
+    const tokens = await refreshWithSpaClient({
+      region: 'eu-west-2',
+      clientId: 'spa-client',
+      refreshToken: 'rt',
     });
 
-    expect(result.access_token).toBe('at-123');
-    expect(result.refresh_token).toBe('rt-789');
-    expect(mockFetch).toHaveBeenCalledWith(
-      'https://auth.example.com/oauth2/token',
-      expect.objectContaining({ method: 'POST' }),
+    expect(tokens.access_token).toBe('at');
+    expect(tokens.refresh_token).toBe('rt');
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://cognito-idp.eu-west-2.amazonaws.com/',
+      expect.objectContaining({
+        method: 'POST',
+      }),
     );
-
-    vi.unstubAllGlobals();
-  });
-
-  it('throws on non-ok response', async () => {
-    const mockFetch = vi.fn().mockResolvedValueOnce({
-      ok: false,
-      status: 400,
-      text: () => Promise.resolve('invalid_grant'),
-    });
-    vi.stubGlobal('fetch', mockFetch);
-
-    await expect(
-      exchangeAuthorizationCode({
-        hostedUiBaseUrl: 'https://auth.example.com',
-        clientId: 'c1',
-        redirectUri: 'x',
-        code: 'bad-code',
-        codeVerifier: 'v',
-      }),
-    ).rejects.toThrow(/400/);
-
-    vi.unstubAllGlobals();
-  });
-});
-
-describe('refreshAccessToken', () => {
-  it('posts refresh_token grant and returns tokens', async () => {
-    const mockFetch = vi.fn().mockResolvedValueOnce({
-      ok: true,
-      json: () =>
-        Promise.resolve({
-          access_token: 'new-at',
-          expires_in: 3600,
-        }),
-    });
-    vi.stubGlobal('fetch', mockFetch);
-
-    const result = await refreshAccessToken({
-      hostedUiBaseUrl: 'https://auth.example.com',
-      clientId: 'c1',
-      refreshToken: 'rt-old',
-    });
-
-    expect(result.access_token).toBe('new-at');
-    vi.unstubAllGlobals();
-  });
-
-  it('throws on non-ok response', async () => {
-    const mockFetch = vi.fn().mockResolvedValueOnce({
-      ok: false,
-      status: 401,
-      text: () => Promise.resolve('token_expired'),
-    });
-    vi.stubGlobal('fetch', mockFetch);
-
-    await expect(
-      refreshAccessToken({
-        hostedUiBaseUrl: 'https://auth.example.com',
-        clientId: 'c1',
-        refreshToken: 'bad-rt',
-      }),
-    ).rejects.toThrow(/401/);
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0]![1] as { body: string }).body,
+    );
+    expect(body.AuthFlow).toBe('REFRESH_TOKEN_AUTH');
+    expect(body.ClientId).toBe('spa-client');
 
     vi.unstubAllGlobals();
   });

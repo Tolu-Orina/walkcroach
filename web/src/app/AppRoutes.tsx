@@ -6,6 +6,7 @@ import { useAuth } from '../auth/useAuth';
 import { AppShell } from '../components/AppShell';
 import { ProjectPageSkeleton } from '../components/Skeleton';
 import { peekPendingPrompt, projectNameFromPrompt } from '../lib/pending-prompt';
+import { ConnectIdePage } from './auth/ConnectIdePage';
 import { ForgotPasswordPage } from './auth/ForgotPasswordPage';
 import { ResetPasswordPage } from './auth/ResetPasswordPage';
 import { SignInPage } from './auth/SignInPage';
@@ -134,6 +135,7 @@ export function AppRoutes() {
       <Route path="/" element={<LandingPage />} />
       <Route path="/signin" element={<SignInPage />} />
       <Route path="/signup" element={<SignUpPage />} />
+      <Route path="/connect/ide" element={<ConnectIdePage />} />
       <Route path="/verify" element={<VerifyEmailPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />

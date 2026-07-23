@@ -1,12 +1,21 @@
 {
   "name": "walkcroach-ide",
   "displayName": "WalkCroach IDE",
-  "description": "WalkCroach agentic coding assistant — Cognito PKCE, project link, and cross-surface memory (Phase C)",
-  "version": "0.0.1",
+  "description": "WalkCroach agentic coding assistant — local agent, CockroachDB tools, and optional cross-surface memory via WalkCroach Web.",
+  "version": "0.1.0",
   "publisher": "walkcroach",
-  "private": true,
+  "private": false,
   "license": "MIT",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Tolu-Orina/walkcroach.git"
+  },
+  "homepage": "https://walkcroach.conquerorfoundation.com",
+  "bugs": {
+    "url": "https://github.com/Tolu-Orina/walkcroach/issues"
+  },
+  "icon": "media/icon.png",
   "engines": {
     "vscode": "^1.96.0",
     "node": ">=20"
@@ -100,18 +109,18 @@
       "properties": {
         "walkcroach.ide.apiBaseUrl": {
           "type": "string",
-          "default": "http://localhost:3003",
+          "default": "https://awbcf4clij.execute-api.eu-west-2.amazonaws.com/v1",
           "description": "Base URL for the WalkCroach IDE BFF (/ide/*)."
         },
-        "walkcroach.ide.cognitoHostedUiUrl": {
+        "walkcroach.ide.webAppUrl": {
           "type": "string",
-          "default": "",
-          "description": "Cognito Hosted UI base URL (e.g. https://your-domain.auth.eu-west-2.amazoncognito.com)."
+          "default": "https://walkcroach.conquerorfoundation.com",
+          "description": "WalkCroach Web app URL used for Sign In (shared Cognito account)."
         },
         "walkcroach.ide.cognitoClientId": {
           "type": "string",
-          "default": "",
-          "description": "Cognito app client ID (public, PKCE)."
+          "default": "4bm25j5blkh9dv2pgciqhno083",
+          "description": "Cognito SPA app client ID (same as WalkCroach Web)."
         },
         "walkcroach.ide.cognitoRegion": {
           "type": "string",
@@ -120,7 +129,7 @@
         },
         "walkcroach.ide.cognitoUserPoolId": {
           "type": "string",
-          "default": "",
+          "default": "eu-west-2_iKk1NYkcQ",
           "description": "Cognito user pool ID."
         }
       }
@@ -138,7 +147,7 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "check:bundle": "node scripts/check-bundle-size.mjs",
-    "package:vsix": "npm run build && npm run check:bundle && npx --yes @vscode/vsce package --no-dependencies --allow-missing-repository -o walkcroach-ide.vsix",
+    "package:vsix": "npm run build && npm run check:bundle && npx --yes @vscode/vsce package --no-dependencies -o walkcroach-ide.vsix",
     "vscode:prepublish": "npm run build"
   },
   "dependencies": {

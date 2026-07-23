@@ -6,11 +6,12 @@ node_modules/**
 **/*.tsx
 **/*.map
 **/*.vsix
+coverage/**
 esbuild.mjs
 esbuild.webview.mjs
+scripts/**
 tsconfig.json
 tsconfig.webview.json
 .gitignore
 buildspec.yml
-.vscode/**
 **/protocol.test.ts

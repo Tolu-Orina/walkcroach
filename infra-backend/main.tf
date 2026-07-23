@@ -102,23 +102,22 @@ module "lambda_chrome" {
 module "lambda_ide" {
   source = "./modules/lambda-ide"
 
-  name_prefix           = local.name_prefix
-  environment           = var.environment
-  zip_path              = local.ide_lambda_zip
-  handler               = var.lambda_handler
-  runtime               = var.lambda_runtime
-  timeout               = var.ide_lambda_timeout
-  memory_mb             = var.ide_lambda_memory_mb
-  bedrock_region        = var.bedrock_region
-  nova_model_id         = var.nova_model_id
-  titan_embed_model_id  = var.titan_embed_model_id
-  runtime_secret_arn    = module.secrets.runtime_secret_arn
-  cognito_user_pool_id  = module.cognito.user_pool_id
-  cognito_client_id     = module.cognito.client_id
-  cognito_ide_client_id = module.cognito.ide_client_id
-  allow_dev_auth        = var.allow_dev_auth
-  cors_allow_origin     = var.web_app_url != "" ? var.web_app_url : "*"
-  tags                  = local.tags
+  name_prefix          = local.name_prefix
+  environment          = var.environment
+  zip_path             = local.ide_lambda_zip
+  handler              = var.lambda_handler
+  runtime              = var.lambda_runtime
+  timeout              = var.ide_lambda_timeout
+  memory_mb            = var.ide_lambda_memory_mb
+  bedrock_region       = var.bedrock_region
+  nova_model_id        = var.nova_model_id
+  titan_embed_model_id = var.titan_embed_model_id
+  runtime_secret_arn   = module.secrets.runtime_secret_arn
+  cognito_user_pool_id = module.cognito.user_pool_id
+  cognito_client_id    = module.cognito.client_id
+  allow_dev_auth       = var.allow_dev_auth
+  cors_allow_origin    = var.web_app_url != "" ? var.web_app_url : "*"
+  tags                 = local.tags
 }
 
 module "apigw" {
@@ -142,14 +141,12 @@ module "apigw" {
 module "ssm" {
   source = "./modules/ssm"
 
-  name_prefix           = local.name_prefix
-  environment           = var.environment
-  api_url               = module.apigw.invoke_url
-  cognito_user_pool_id  = module.cognito.user_pool_id
-  cognito_client_id     = module.cognito.client_id
-  cognito_ide_client_id = module.cognito.ide_client_id
-  cognito_hosted_ui_url = module.cognito.hosted_ui_base_url
-  cognito_region        = module.cognito.region
-  web_app_url           = var.web_app_url
-  tags                  = local.tags
+  name_prefix          = local.name_prefix
+  environment          = var.environment
+  api_url              = module.apigw.invoke_url
+  cognito_user_pool_id = module.cognito.user_pool_id
+  cognito_client_id    = module.cognito.client_id
+  cognito_region       = module.cognito.region
+  web_app_url          = var.web_app_url
+  tags                 = local.tags
 }

@@ -236,19 +236,16 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
     );
   }
 
-  async signInPkce(): Promise<void> {
+  async signInWithWeb(): Promise<void> {
     const cfg = getCognitoConfig();
-    if (!cfg.hostedUiBaseUrl || !cfg.clientId) {
+    if (!cfg.webAppUrl) {
       void vscode.window.showInformationMessage(
-        'Cognito Hosted UI is not configured. Use “WalkCroach: Paste Token” or set walkcroach.ide.cognitoHostedUiUrl and walkcroach.ide.cognitoClientId.',
+        'WalkCroach Web URL is not configured. Set walkcroach.ide.webAppUrl, or use “WalkCroach: Paste Token”.',
       );
       return;
     }
     try {
-      await this.auth.signInWithPkce({
-        hostedUiBaseUrl: cfg.hostedUiBaseUrl,
-        clientId: cfg.clientId,
-      });
+      await this.auth.signInWithWeb({ webAppUrl: cfg.webAppUrl });
       await this.refreshAuthAndLink();
       void vscode.window.showInformationMessage('Signed in to WalkCroach.');
     } catch (err) {
@@ -277,6 +274,8 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
   async handleAuthUri(uri: vscode.Uri): Promise<void> {
     try {
       await this.auth.handleAuthCallback(uri);
+      await this.refreshAuthAndLink();
+      void vscode.window.showInformationMessage('Signed in to WalkCroach.');
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       void vscode.window.showErrorMessage(`Auth callback failed: ${message}`);

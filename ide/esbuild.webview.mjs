@@ -9,9 +9,13 @@ const ctx = await esbuild.context({
   format: 'iife',
   platform: 'browser',
   target: 'es2022',
-  sourcemap: true,
+  minify: !watch,
+  sourcemap: watch,
   sourcesContent: false,
   logLevel: 'info',
+  define: {
+    'process.env.NODE_ENV': watch ? '"development"' : '"production"',
+  },
   loader: { '.css': 'css' },
 });
 

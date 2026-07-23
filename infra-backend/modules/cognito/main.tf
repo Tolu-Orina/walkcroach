@@ -44,7 +44,7 @@ resource "aws_cognito_user_pool" "this" {
   tags = var.tags
 }
 
-# Public SPA client — in-app auth via USER_PASSWORD_AUTH (no Hosted UI / OAuth redirect).
+# Public SPA client — shared by WalkCroach Web and IDE (USER_PASSWORD_AUTH).
 resource "aws_cognito_user_pool_client" "spa" {
   name         = "${var.name_prefix}-web-spa"
   user_pool_id = aws_cognito_user_pool.this.id
@@ -72,50 +72,6 @@ resource "aws_cognito_user_pool_client" "spa" {
   }
 }
 
-# Hosted UI domain required for IDE OAuth authorization-code + PKCE (PC.3).
-resource "aws_cognito_user_pool_domain" "this" {
-  domain       = "${var.name_prefix}-${var.environment}-auth"
-  user_pool_id = aws_cognito_user_pool.this.id
-}
-
-# Public IDE client — authorization code + PKCE (no client secret).
-resource "aws_cognito_user_pool_client" "ide" {
-  name         = "${var.name_prefix}-ide"
-  user_pool_id = aws_cognito_user_pool.this.id
-
-  generate_secret = false
-
-  allowed_oauth_flows_user_pool_client = true
-  allowed_oauth_flows                  = ["code"]
-  allowed_oauth_scopes                 = ["openid", "email", "profile"]
-  supported_identity_providers         = ["COGNITO"]
-
-  callback_urls = [
-    "http://127.0.0.1:8765/callback",
-    "vscode://walkcroach.walkcroach-ide/auth",
-  ]
-  logout_urls = [
-    "http://127.0.0.1:8765/logout",
-  ]
-
-  explicit_auth_flows = [
-    "ALLOW_REFRESH_TOKEN_AUTH",
-  ]
-
-  prevent_user_existence_errors = "ENABLED"
-  enable_token_revocation       = true
-
-  access_token_validity  = 1
-  id_token_validity      = 1
-  refresh_token_validity = 30
-
-  token_validity_units {
-    access_token  = "hours"
-    id_token      = "hours"
-    refresh_token = "days"
-  }
-}
-
 output "user_pool_id" {
   value = aws_cognito_user_pool.this.id
 }
@@ -126,18 +82,6 @@ output "user_pool_arn" {
 
 output "client_id" {
   value = aws_cognito_user_pool_client.spa.id
-}
-
-output "ide_client_id" {
-  value = aws_cognito_user_pool_client.ide.id
-}
-
-output "domain" {
-  value = aws_cognito_user_pool_domain.this.domain
-}
-
-output "hosted_ui_base_url" {
-  value = "https://${aws_cognito_user_pool_domain.this.domain}.auth.${data.aws_region.current.region}.amazoncognito.com"
 }
 
 output "region" {

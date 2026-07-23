@@ -1,37 +1,32 @@
 import * as vscode from 'vscode';
 import { SECRET_KEYS } from '@walkcroach/agent-engine';
-import {
-  buildAuthorizeUrl,
-  codeChallengeS256,
-  exchangeAuthorizationCode,
-  generateCodeVerifier,
-  generateOAuthState,
-  refreshAccessToken,
-} from './pkce.js';
+import { generateOAuthState, refreshWithSpaClient } from './pkce.js';
+import { getIdeApiBaseUrl } from './session-config.js';
 
 export type AuthSession = {
   accessToken: string;
   signedIn: boolean;
 };
 
-type PendingPkceStored = {
-  verifier: string;
+type PendingConnect = {
   state: string;
-  redirectUri: string;
-};
-
-type PendingPkce = PendingPkceStored & {
   resolve: (ok: boolean) => void;
   reject: (err: Error) => void;
 };
 
+const IDE_REDIRECT_URI = 'vscode://walkcroach.walkcroach-ide/auth';
+
 /**
- * Cognito session in SecretStorage (NFR-D04).
- * Primary: Hosted UI authorization-code + PKCE.
- * Fallback: paste access token (Chrome-compatible) for local/dev.
+ * Shared Cognito (same SPA client / user pool as Web + Chrome).
+ *
+ * Industry-standard native handoff:
+ * 1. Open Web /connect/ide (reuses normal /signin)
+ * 2. Web issues a one-time auth code via BFF
+ * 3. vscode:// callback carries only code+state (never tokens)
+ * 4. Extension exchanges code at POST /ide/v1/oauth/token
  */
 export class AuthService {
-  private pending: PendingPkce | null = null;
+  private pending: PendingConnect | null = null;
   private refreshInFlight: Promise<string | undefined> | null = null;
 
   constructor(private readonly secrets: vscode.SecretStorage) {}
@@ -46,7 +41,6 @@ export class AuthService {
       this.secrets.get(SECRET_KEYS.cognitoExpiresAt),
     );
     const expiresAt = expiresAtRaw ? Number(expiresAtRaw) : NaN;
-    // Refresh ~60s before expiry when we have a refresh token.
     if (Number.isFinite(expiresAt) && Date.now() > expiresAt - 60_000) {
       return this.refreshIfPossible();
     }
@@ -96,11 +90,11 @@ export class AuthService {
     }
   }
 
-  /** Paste Cognito access token (local/dev when Hosted UI not configured). */
   async pasteAccessToken(): Promise<boolean> {
     const token = await vscode.window.showInputBox({
       title: 'WalkCroach: Paste Cognito access token',
-      prompt: 'Paste a Cognito access token from the Web app or AWS CLI',
+      prompt:
+        'Advanced fallback: paste an access token from a signed-in WalkCroach Web session',
       password: true,
       ignoreFocusOut: true,
     });
@@ -109,47 +103,27 @@ export class AuthService {
     return true;
   }
 
-  /**
-   * Start PKCE sign-in via Cognito Hosted UI.
-   * Pending verifier/state is persisted to SecretStorage so a callback after
-   * extension host restart can still complete the exchange.
-   */
-  async signInWithPkce(cfg: {
-    hostedUiBaseUrl: string;
-    clientId: string;
-  }): Promise<boolean> {
-    if (!cfg.hostedUiBaseUrl || !cfg.clientId) {
+  /** Open WalkCroach Web connect flow (shared account). */
+  async signInWithWeb(cfg: { webAppUrl: string }): Promise<boolean> {
+    if (!cfg.webAppUrl) {
       throw new Error(
-        'Cognito Hosted UI is not configured. Set walkcroach.ide.cognitoHostedUiUrl and walkcroach.ide.cognitoClientId, or use Paste token.',
+        'WalkCroach Web URL is not configured. Set walkcroach.ide.webAppUrl.',
       );
     }
 
-    const verifier = generateCodeVerifier();
-    const challenge = codeChallengeS256(verifier);
     const state = generateOAuthState();
-    const redirectUri = 'vscode://walkcroach.walkcroach-ide/auth';
-
-    const stored: PendingPkceStored = { verifier, state, redirectUri };
     await this.secrets.store(
       SECRET_KEYS.pendingPkce,
-      JSON.stringify(stored),
+      JSON.stringify({ state }),
     );
 
-    const url = buildAuthorizeUrl({
-      hostedUiBaseUrl: cfg.hostedUiBaseUrl,
-      clientId: cfg.clientId,
-      redirectUri,
-      codeChallenge: challenge,
-      state,
-    });
+    const authUrl = new URL('/connect/ide', cfg.webAppUrl.replace(/\/$/, ''));
+    authUrl.searchParams.set('state', state);
+    authUrl.searchParams.set('redirect_uri', IDE_REDIRECT_URI);
 
     const result = await new Promise<boolean>((resolve, reject) => {
-      this.pending = {
-        ...stored,
-        resolve,
-        reject,
-      };
-      void vscode.env.openExternal(vscode.Uri.parse(url));
+      this.pending = { state, resolve, reject };
+      void vscode.env.openExternal(vscode.Uri.parse(authUrl.toString()));
       setTimeout(() => {
         if (this.pending?.state === state) {
           this.pending = null;
@@ -164,8 +138,8 @@ export class AuthService {
 
   async handleAuthCallback(uri: vscode.Uri): Promise<void> {
     const params = new URLSearchParams(uri.query);
-    const code = params.get('code');
     const state = params.get('state');
+    const code = params.get('code');
     const err = params.get('error');
 
     let pending = this.pending;
@@ -175,9 +149,9 @@ export class AuthService {
       );
       if (raw) {
         try {
-          const stored = JSON.parse(raw) as PendingPkceStored;
+          const stored = JSON.parse(raw) as { state: string };
           pending = {
-            ...stored,
+            state: stored.state,
             resolve: () => undefined,
             reject: () => undefined,
           };
@@ -195,10 +169,20 @@ export class AuthService {
       pending.reject(new Error(err));
       return;
     }
-    if (!code || !state || state !== pending.state) {
+    if (!state || state !== pending.state) {
       this.pending = null;
       await this.secrets.delete(SECRET_KEYS.pendingPkce);
-      pending.reject(new Error('Invalid OAuth callback (state/code mismatch)'));
+      pending.reject(new Error('Invalid callback (state mismatch)'));
+      return;
+    }
+    if (!code) {
+      this.pending = null;
+      await this.secrets.delete(SECRET_KEYS.pendingPkce);
+      pending.reject(
+        new Error(
+          'Auth callback missing code. Deploy the latest WalkCroach Web + IDE BFF.',
+        ),
+      );
       return;
     }
 
@@ -206,18 +190,15 @@ export class AuthService {
     await this.secrets.delete(SECRET_KEYS.pendingPkce);
 
     try {
-      const cfg = getCognitoConfig();
-      const tokens = await exchangeAuthorizationCode({
-        hostedUiBaseUrl: cfg.hostedUiBaseUrl,
-        clientId: cfg.clientId,
-        redirectUri: pending.redirectUri,
+      const tokens = await exchangeAuthCode({
         code,
-        codeVerifier: pending.verifier,
+        state,
+        redirectUri: IDE_REDIRECT_URI,
       });
       await this.storeAccessToken(tokens.access_token, {
         refreshToken: tokens.refresh_token,
         idToken: tokens.id_token,
-        expiresIn: tokens.expires_in,
+        expiresIn: tokens.expires_in ?? 3600,
       });
       pending.resolve(true);
     } catch (e) {
@@ -238,13 +219,13 @@ export class AuthService {
           );
         }
         const cfg = getCognitoConfig();
-        if (!cfg.hostedUiBaseUrl || !cfg.clientId) {
+        if (!cfg.clientId || !cfg.region) {
           return Promise.resolve(
             this.secrets.get(SECRET_KEYS.cognitoAccessToken),
           );
         }
-        const tokens = await refreshAccessToken({
-          hostedUiBaseUrl: cfg.hostedUiBaseUrl,
+        const tokens = await refreshWithSpaClient({
+          region: cfg.region,
           clientId: cfg.clientId,
           refreshToken,
         });
@@ -266,25 +247,56 @@ export class AuthService {
   }
 }
 
+async function exchangeAuthCode(params: {
+  code: string;
+  state: string;
+  redirectUri: string;
+}): Promise<{
+  access_token: string;
+  refresh_token?: string;
+  id_token?: string;
+  expires_in?: number;
+}> {
+  const base = getIdeApiBaseUrl();
+  const res = await fetch(`${base}/ide/v1/oauth/token`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      accept: 'application/json',
+    },
+    body: JSON.stringify(params),
+  });
+  const data = (await res.json()) as {
+    access_token?: string;
+    refresh_token?: string;
+    id_token?: string;
+    expires_in?: number;
+    error?: string;
+  };
+  if (!res.ok || !data.access_token) {
+    throw new Error(data.error || `Token exchange failed (${res.status})`);
+  }
+  return {
+    access_token: data.access_token,
+    refresh_token: data.refresh_token,
+    id_token: data.id_token,
+    expires_in: data.expires_in,
+  };
+}
+
 export function getCognitoConfig(): {
-  hostedUiBaseUrl: string;
+  webAppUrl: string;
   clientId: string;
   region: string;
   userPoolId: string;
 } {
   const c = vscode.workspace.getConfiguration('walkcroach.ide');
   return {
-    hostedUiBaseUrl: String(c.get('cognitoHostedUiUrl') ?? ''),
+    webAppUrl: String(c.get('webAppUrl') ?? ''),
     clientId: String(c.get('cognitoClientId') ?? ''),
     region: String(c.get('cognitoRegion') ?? 'eu-west-2'),
     userPoolId: String(c.get('cognitoUserPoolId') ?? ''),
   };
 }
 
-export function getIdeApiBaseUrl(): string {
-  const c = vscode.workspace.getConfiguration('walkcroach.ide');
-  return String(c.get('apiBaseUrl') ?? 'http://localhost:3003').replace(
-    /\/$/,
-    '',
-  );
-}
+export { getIdeApiBaseUrl } from './session-config.js';

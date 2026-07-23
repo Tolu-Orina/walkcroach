@@ -14,6 +14,11 @@ import {
   handleUpdateMemoryEntry,
 } from './memory.js';
 import { handleListMyProjects, handleMe } from './me.js';
+import {
+  extractBearer,
+  handleCreateSessionCode,
+  handleExchangeToken,
+} from './oauth.js';
 
 /** Strip API Gateway stage prefix if present (`/v1/ide/...` → `/ide/...`). */
 export function normalizeIdePath(path: string): string {
@@ -43,9 +48,23 @@ export async function handleIdeRest(req: HttpRequest) {
     });
   }
 
+  // Public: authorization-code → token (native app OAuth pattern).
+  if (method === 'POST' && /\/ide\/v1\/oauth\/token\/?$/.test(path)) {
+    return handleExchangeToken(req.body);
+  }
+
   const auth = await requireCognitoAuth(req.headers);
   if ('error' in auth) {
     return jsonResponse(auth.status, { error: auth.error });
+  }
+
+  // Authenticated: Web issues a one-time code after normal sign-in.
+  if (method === 'POST' && /\/ide\/v1\/oauth\/session-code\/?$/.test(path)) {
+    const bearer = extractBearer(req.headers);
+    if (!bearer) {
+      return jsonResponse(401, { error: 'authorization required' });
+    }
+    return handleCreateSessionCode(auth, req.body, bearer);
   }
 
   if (method === 'GET' && /\/ide\/v1\/me\/projects\/?$/.test(path)) {

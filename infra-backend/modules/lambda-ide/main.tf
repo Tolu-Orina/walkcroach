@@ -52,11 +52,6 @@ variable "cognito_client_id" {
   default = ""
 }
 
-variable "cognito_ide_client_id" {
-  type    = string
-  default = ""
-}
-
 variable "allow_dev_auth" {
   type    = bool
   default = false
@@ -145,17 +140,16 @@ resource "aws_lambda_function" "ide" {
 
   environment {
     variables = {
-      ENVIRONMENT           = var.environment
-      BEDROCK_REGION        = var.bedrock_region
-      NOVA_MODEL_ID         = var.nova_model_id
-      TITAN_EMBED_MODEL_ID  = var.titan_embed_model_id
-      RUNTIME_SECRET_ARN    = var.runtime_secret_arn
-      COGNITO_USER_POOL_ID  = var.cognito_user_pool_id
-      COGNITO_CLIENT_ID     = var.cognito_client_id
-      COGNITO_IDE_CLIENT_ID = var.cognito_ide_client_id
-      ALLOW_DEV_AUTH        = var.allow_dev_auth ? "true" : "false"
-      CORS_ALLOW_ORIGIN     = var.cors_allow_origin
-      NODE_OPTIONS          = "--enable-source-maps"
+      ENVIRONMENT          = var.environment
+      BEDROCK_REGION       = var.bedrock_region
+      NOVA_MODEL_ID        = var.nova_model_id
+      TITAN_EMBED_MODEL_ID = var.titan_embed_model_id
+      RUNTIME_SECRET_ARN   = var.runtime_secret_arn
+      COGNITO_USER_POOL_ID = var.cognito_user_pool_id
+      COGNITO_CLIENT_ID    = var.cognito_client_id
+      ALLOW_DEV_AUTH       = var.allow_dev_auth ? "true" : "false"
+      CORS_ALLOW_ORIGIN    = var.cors_allow_origin
+      NODE_OPTIONS         = "--enable-source-maps"
     }
   }
 

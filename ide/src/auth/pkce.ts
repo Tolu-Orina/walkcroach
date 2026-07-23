@@ -1,14 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 
-/** RFC 7636 PKCE helpers (no vscode imports). */
-export function generateCodeVerifier(): string {
-  return base64Url(randomBytes(32));
-}
-
-export function codeChallengeS256(verifier: string): string {
-  return base64Url(createHash('sha256').update(verifier, 'utf8').digest());
-}
-
+/** CSRF / handoff state for Web → IDE auth (no Hosted UI). */
 export function generateOAuthState(): string {
   return base64Url(randomBytes(16));
 }
@@ -29,78 +21,57 @@ export type CognitoTokenResponse = {
   token_type?: string;
 };
 
-export function buildAuthorizeUrl(params: {
-  hostedUiBaseUrl: string;
-  clientId: string;
-  redirectUri: string;
-  codeChallenge: string;
-  state: string;
-  scopes?: string[];
-}): string {
-  const u = new URL(`${params.hostedUiBaseUrl.replace(/\/$/, '')}/oauth2/authorize`);
-  u.searchParams.set('client_id', params.clientId);
-  u.searchParams.set('response_type', 'code');
-  u.searchParams.set('redirect_uri', params.redirectUri);
-  u.searchParams.set(
-    'scope',
-    (params.scopes ?? ['openid', 'email', 'profile']).join(' '),
-  );
-  u.searchParams.set('code_challenge_method', 'S256');
-  u.searchParams.set('code_challenge', params.codeChallenge);
-  u.searchParams.set('state', params.state);
-  return u.toString();
-}
-
-export async function exchangeAuthorizationCode(params: {
-  hostedUiBaseUrl: string;
-  clientId: string;
-  redirectUri: string;
-  code: string;
-  codeVerifier: string;
-}): Promise<CognitoTokenResponse> {
-  const tokenUrl = `${params.hostedUiBaseUrl.replace(/\/$/, '')}/oauth2/token`;
-  const body = new URLSearchParams({
-    grant_type: 'authorization_code',
-    client_id: params.clientId,
-    code: params.code,
-    redirect_uri: params.redirectUri,
-    code_verifier: params.codeVerifier,
-  });
-  const res = await fetch(tokenUrl, {
-    method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body,
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(
-      `Cognito token exchange failed (${res.status}): ${text.slice(0, 300)}`,
-    );
-  }
-  return (await res.json()) as CognitoTokenResponse;
-}
-
-export async function refreshAccessToken(params: {
-  hostedUiBaseUrl: string;
+/**
+ * Refresh via Cognito InitiateAuth (same SPA client as Web — USER_PASSWORD pool).
+ */
+export async function refreshWithSpaClient(params: {
+  region: string;
   clientId: string;
   refreshToken: string;
 }): Promise<CognitoTokenResponse> {
-  const tokenUrl = `${params.hostedUiBaseUrl.replace(/\/$/, '')}/oauth2/token`;
-  const body = new URLSearchParams({
-    grant_type: 'refresh_token',
-    client_id: params.clientId,
-    refresh_token: params.refreshToken,
-  });
-  const res = await fetch(tokenUrl, {
+  const endpoint = `https://cognito-idp.${params.region}.amazonaws.com/`;
+  const res = await fetch(endpoint, {
     method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body,
+    headers: {
+      'content-type': 'application/x-amz-json-1.1',
+      'x-amz-target': 'AWSCognitoIdentityProviderService.InitiateAuth',
+    },
+    body: JSON.stringify({
+      AuthFlow: 'REFRESH_TOKEN_AUTH',
+      ClientId: params.clientId,
+      AuthParameters: {
+        REFRESH_TOKEN: params.refreshToken,
+      },
+    }),
   });
-  if (!res.ok) {
-    const text = await res.text();
+  const data = (await res.json()) as {
+    AuthenticationResult?: {
+      AccessToken?: string;
+      IdToken?: string;
+      ExpiresIn?: number;
+    };
+    message?: string;
+    __type?: string;
+  };
+  if (!res.ok || !data.AuthenticationResult?.AccessToken) {
     throw new Error(
-      `Cognito token refresh failed (${res.status}): ${text.slice(0, 300)}`,
+      `Cognito token refresh failed (${res.status}): ${data.message ?? data.__type ?? 'unknown'}`,
     );
   }
-  return (await res.json()) as CognitoTokenResponse;
+  return {
+    access_token: data.AuthenticationResult.AccessToken,
+    id_token: data.AuthenticationResult.IdToken,
+    refresh_token: params.refreshToken,
+    expires_in: data.AuthenticationResult.ExpiresIn,
+  };
+}
+
+/** @deprecated Hosted UI PKCE removed — kept only for test migration clarity. */
+export function generateCodeVerifier(): string {
+  return base64Url(randomBytes(32));
+}
+
+/** @deprecated */
+export function codeChallengeS256(verifier: string): string {
+  return base64Url(createHash('sha256').update(verifier, 'utf8').digest());
 }

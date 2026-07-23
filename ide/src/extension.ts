@@ -35,7 +35,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('walkcroach.signIn', async () => {
-      await provider.signInPkce();
+      await provider.signInWithWeb();
     }),
   );
 

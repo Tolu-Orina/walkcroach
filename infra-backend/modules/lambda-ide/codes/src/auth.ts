@@ -1,6 +1,6 @@
 /**
  * Cognito JWT (and optional local dev:) auth for IDE BFF.
- * Accepts access tokens from the SPA client and/or IDE PKCE client.
+ * Accepts access tokens from the shared WalkCroach Web SPA Cognito client.
  */
 import { CognitoJwtVerifier } from 'aws-jwt-verify';
 import type { CognitoJwtVerifierSingleUserPool } from 'aws-jwt-verify/cognito-verifier';
@@ -39,11 +39,8 @@ function bearerToken(
 }
 
 function cognitoClientIds(): string[] {
-  const ids = [
-    process.env.COGNITO_CLIENT_ID,
-    process.env.COGNITO_IDE_CLIENT_ID,
-  ].filter((v): v is string => Boolean(v && v.trim()));
-  return [...new Set(ids)];
+  const id = process.env.COGNITO_CLIENT_ID?.trim();
+  return id ? [id] : [];
 }
 
 function getAccessVerifier():

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import type { HostToWebviewMessage } from '@walkcroach/agent-engine';
 import { MessageBridge } from './messageBridge.js';
 
@@ -153,7 +153,3 @@ describe('MessageBridge', () => {
     expect(errMsg.message).toBe('something broke');
   });
 });
-
-function afterEach(fn: () => void) {
-  return globalThis.afterEach?.(fn) ?? void 0;
-}

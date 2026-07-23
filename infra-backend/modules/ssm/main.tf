@@ -21,18 +21,6 @@ variable "cognito_client_id" {
   description = "Cognito app client ID for web SPA"
 }
 
-variable "cognito_ide_client_id" {
-  type        = string
-  description = "Cognito app client ID for IDE PKCE"
-  default     = ""
-}
-
-variable "cognito_hosted_ui_url" {
-  type        = string
-  description = "Cognito Hosted UI base URL"
-  default     = ""
-}
-
 variable "web_app_url" {
   type        = string
   description = "Public SPA URL for E2E (published to SSM when set)"
@@ -72,26 +60,6 @@ resource "aws_ssm_parameter" "cognito_client_id" {
   description = "Cognito app client ID for WalkCroach web SPA"
   type        = "String"
   value       = var.cognito_client_id
-  overwrite   = true
-  tags        = var.tags
-}
-
-# Always create — values come from Cognito resource attrs that are unknown at
-# plan time; using count = value != "" makes Terraform fail planning.
-resource "aws_ssm_parameter" "cognito_ide_client_id" {
-  name        = "/${var.name_prefix}/${var.environment}/ide/cognito_client_id"
-  description = "Cognito app client ID for WalkCroach IDE PKCE"
-  type        = "String"
-  value       = var.cognito_ide_client_id
-  overwrite   = true
-  tags        = var.tags
-}
-
-resource "aws_ssm_parameter" "cognito_hosted_ui_url" {
-  name        = "/${var.name_prefix}/${var.environment}/ide/cognito_hosted_ui_url"
-  description = "Cognito Hosted UI base URL for WalkCroach IDE PKCE"
-  type        = "String"
-  value       = var.cognito_hosted_ui_url
   overwrite   = true
   tags        = var.tags
 }

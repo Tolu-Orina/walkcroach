@@ -7,8 +7,8 @@ describe('Phase C IDE routes', () => {
     expect(normalizeIdePath('/v1/ide/v1/me/projects')).toBe(
       '/ide/v1/me/projects',
     );
-    expect(normalizeIdePath('/ide/v1/memory/recall')).toBe(
-      '/ide/v1/memory/recall',
+    expect(normalizeIdePath('/ide/v1/oauth/token')).toBe(
+      '/ide/v1/oauth/token',
     );
   });
 });

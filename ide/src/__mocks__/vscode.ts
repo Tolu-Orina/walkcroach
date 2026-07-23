@@ -4,7 +4,7 @@ export const workspace = {
   getConfiguration: vi.fn(() => ({
     get: vi.fn((key: string) => {
       const map: Record<string, string> = {
-        cognitoHostedUiUrl: 'https://auth.test.com',
+        webAppUrl: 'https://walkcroach.test',
         cognitoClientId: 'client-123',
         cognitoRegion: 'eu-west-2',
         cognitoUserPoolId: 'pool-1',
