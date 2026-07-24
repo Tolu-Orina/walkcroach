@@ -4,12 +4,9 @@ import { loadStoredAuth } from '../../auth/storage';
 import { useAuth } from '../../auth/useAuth';
 import { AuthCard, AuthError, AuthLink } from '../../components/auth/AuthCard';
 
-/** Must stay in sync with IDE BFF ALLOWED_REDIRECTS (lambda-ide oauth handler). */
-const ALLOWED_REDIRECTS = new Set([
-  'vscode://walkcroach.walkcroach-ide/auth',
-  'cursor://walkcroach.walkcroach-ide/auth',
-  'vscode-insiders://walkcroach.walkcroach-ide/auth',
-]);
+/** Must stay in sync with IDE BFF oauth redirect allowlist. */
+const REDIRECT_PATTERN =
+  /^(vscode|cursor|vscode-insiders|vscodium|windsurf|code-oss):\/\/walkcroach\.walkcroach-ide\/auth$/;
 
 const DEFAULT_REDIRECT = 'vscode://walkcroach.walkcroach-ide/auth';
 
@@ -50,7 +47,7 @@ export function ConnectIdePage() {
         );
         return;
       }
-      if (!ALLOWED_REDIRECTS.has(redirectUri)) {
+      if (!REDIRECT_PATTERN.test(redirectUri)) {
         setError('Invalid redirect URI.');
         return;
       }
@@ -127,7 +124,7 @@ export function ConnectIdePage() {
       subtitle="Using your existing WalkCroach account"
       footer={
         <p className="text-sm text-mist">
-          <AuthLink to="/dashboard">Back to dashboard</AuthLink>
+          <AuthLink to="/app/projects">Back to projects</AuthLink>
           {' · '}
           <Link className="underline" to="/signin">
             Switch account

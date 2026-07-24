@@ -165,18 +165,52 @@ export function useAgentSession(
           if (event.tool === 'write_file' || event.tool === 'edit_file') {
             hadFileWrites.current = true;
           }
-          if (event.tool === 'write_file') {
-            await act.applyWriteFile(
-              String(event.args.path ?? ''),
-              String(event.args.content ?? ''),
+          if (
+            (event.tool === 'write_file' || event.tool === 'edit_file') &&
+            event.awaitResult !== false
+          ) {
+            let ok = true;
+            let stderr = '';
+            try {
+              if (event.tool === 'write_file') {
+                await act.applyWriteFile(
+                  String(event.args.path ?? ''),
+                  String(event.args.content ?? ''),
+                );
+              } else {
+                await act.applyEditFile(
+                  String(event.args.path ?? ''),
+                  String(event.args.old_str ?? ''),
+                  String(event.args.new_str ?? ''),
+                );
+              }
+            } catch (err) {
+              ok = false;
+              stderr = err instanceof Error ? err.message : String(err);
+            }
+            assistantBuf.current = '';
+            await handleEvents(
+              streamToolResult(
+                sid,
+                {
+                  projectId: pid,
+                  toolCallId: event.id,
+                  ok,
+                  stdout: ok
+                    ? `Applied ${event.tool} on ${String(event.args.path ?? 'file')}`
+                    : '',
+                  stderr,
+                },
+                signal,
+              ),
+              sid,
+              pid,
+              signal,
             );
-          } else if (event.tool === 'edit_file') {
-            await act.applyEditFile(
-              String(event.args.path ?? ''),
-              String(event.args.old_str ?? ''),
-              String(event.args.new_str ?? ''),
-            );
-          } else if (event.tool === 'run_terminal' && event.awaitResult) {
+          } else if (
+            event.tool === 'run_terminal' &&
+            event.awaitResult !== false
+          ) {
             const cmd = String(event.args.cmd ?? '');
             const result = await act.applyTerminal(cmd);
             assistantBuf.current = '';
@@ -194,6 +228,11 @@ export function useAgentSession(
               signal,
             );
           }
+        } else if (event.type === 'warning') {
+          setMessages((prev) => [
+            ...prev,
+            { id: uid(), role: 'system', content: event.message },
+          ]);
         } else if (event.type === 'error') {
           setMessages((prev) => [
             ...prev,
@@ -205,6 +244,17 @@ export function useAgentSession(
             setPendingPlan(null);
           }
           setActivityRefresh((n) => n + 1);
+          if (event.reason === 'stuck_tool_loop') {
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: uid(),
+                role: 'system',
+                content:
+                  'Stopped: the agent was retrying the same failing command. Change the approach or try a different prompt.',
+              },
+            ]);
+          }
           if (
             event.reason === 'complete' &&
             hadFileWrites.current &&
@@ -311,7 +361,14 @@ export function useAgentSession(
         if (cancelled || detail.status !== 'awaiting_tool' || !detail.pendingTool) {
           return;
         }
-        if (detail.pendingTool.tool !== 'run_terminal') return;
+        const tool = detail.pendingTool.tool;
+        if (
+          tool !== 'run_terminal' &&
+          tool !== 'write_file' &&
+          tool !== 'edit_file'
+        ) {
+          return;
+        }
 
         pendingResumed.current = true;
         setStreaming(true);
@@ -320,25 +377,56 @@ export function useAgentSession(
           {
             id: uid(),
             role: 'system',
-            content: `Resuming pending tool: ${detail.pendingTool!.tool}`,
+            content: `Resuming pending tool: ${tool}`,
           },
         ]);
 
-        const cmd = String(detail.pendingTool.args.cmd ?? '');
-        const result = await actionsRef.current.applyTerminal(cmd);
+        const act = actionsRef.current;
+        const args = detail.pendingTool.args;
+        let ok = true;
+        let exitCode: number | undefined;
+        let stdout = '';
+        let stderr = '';
+        try {
+          if (tool === 'run_terminal') {
+            const result = await act.applyTerminal(String(args.cmd ?? ''));
+            ok = result.ok;
+            exitCode = result.exitCode;
+            stdout = result.stdout;
+            stderr = result.stderr;
+          } else if (tool === 'write_file') {
+            await act.applyWriteFile(
+              String(args.path ?? ''),
+              String(args.content ?? ''),
+            );
+            stdout = `Applied write_file on ${String(args.path ?? 'file')}`;
+          } else {
+            await act.applyEditFile(
+              String(args.path ?? ''),
+              String(args.old_str ?? ''),
+              String(args.new_str ?? ''),
+            );
+            stdout = `Applied edit_file on ${String(args.path ?? 'file')}`;
+          }
+        } catch (err) {
+          ok = false;
+          stderr = err instanceof Error ? err.message : String(err);
+        }
+
         await handleEvents(
           streamToolResult(sessionId, {
             projectId,
             toolCallId: detail.pendingTool.toolCallId,
-            ok: result.ok,
-            exitCode: result.exitCode,
-            stdout: result.stdout,
-            stderr: result.stderr,
+            ok,
+            exitCode,
+            stdout,
+            stderr,
           }),
           sessionId,
           projectId,
         );
       } catch (err) {
+        pendingResumed.current = false;
         if (!cancelled) {
           setMessages((prev) => [
             ...prev,
@@ -400,6 +488,8 @@ export function useAgentSession(
     abortRef.current?.abort();
     abortRef.current = null;
     assistantBuf.current = '';
+    // Allow pending-tool resume to retry after an aborted mid-tool stream.
+    pendingResumed.current = false;
     setStreaming(false);
     setMessages((prev) => [
       ...prev,

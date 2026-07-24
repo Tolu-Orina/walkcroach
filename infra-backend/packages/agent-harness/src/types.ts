@@ -14,9 +14,14 @@ export type AgentEvent =
       files: Array<{ path: string; reason: string }>;
     }
   | { type: 'plan_awaiting_approval'; planId: string }
+  | { type: 'warning'; message: string }
   | {
       type: 'done';
-      reason: 'complete' | 'awaiting_tool' | 'awaiting_plan_approval';
+      reason:
+        | 'complete'
+        | 'awaiting_tool'
+        | 'awaiting_plan_approval'
+        | 'stuck_tool_loop';
     }
   | { type: 'error'; message: string };
 

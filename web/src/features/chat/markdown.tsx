@@ -1,9 +1,14 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
+import { Link } from 'react-router-dom';
+import { createCodeArtefact } from '../../api/client';
 
 type MarkdownBlock =
   | { type: 'paragraph'; text: string }
-  | { type: 'code'; text: string }
+  | { type: 'code'; text: string; language: string | null }
   | { type: 'ul'; items: string[] };
+
+const SAVE_MIN_CHARS = 40;
+const SAVE_MIN_LINES = 3;
 
 function parseBlocks(source: string): MarkdownBlock[] {
   const blocks: MarkdownBlock[] = [];
@@ -11,8 +16,12 @@ function parseBlocks(source: string): MarkdownBlock[] {
   for (let i = 0; i < parts.length; i++) {
     const chunk = parts[i] ?? '';
     if (i % 2 === 1) {
-      const code = chunk.replace(/^\w*\n/, '');
-      blocks.push({ type: 'code', text: code.trimEnd() });
+      const langMatch = chunk.match(/^(\w+)\r?\n/);
+      const language = langMatch?.[1] ?? null;
+      const code = language
+        ? chunk.slice(langMatch![0].length)
+        : chunk.replace(/^\w*\n/, '');
+      blocks.push({ type: 'code', text: code.trimEnd(), language });
       continue;
     }
     const paragraphs = chunk.split(/\n\n+/);
@@ -47,7 +56,10 @@ function inlineFormat(text: string): ReactNode[] {
     const token = match[0];
     if (token.startsWith('`')) {
       nodes.push(
-        <code key={match.index} className="rounded bg-ink/80 px-1 py-0.5 text-[0.9em] text-signal">
+        <code
+          key={match.index}
+          className="rounded bg-ink/80 px-1 py-0.5 text-[0.9em] text-signal"
+        >
           {token.slice(1, -1)}
         </code>,
       );
@@ -79,24 +91,111 @@ function inlineFormat(text: string): ReactNode[] {
   return nodes;
 }
 
+function isSubstantial(text: string): boolean {
+  return (
+    text.trim().length >= SAVE_MIN_CHARS ||
+    text.split('\n').length >= SAVE_MIN_LINES
+  );
+}
+
+type SaveContext = {
+  projectId?: string | null;
+  sessionId?: string | null;
+};
+
+function CodeBlock({
+  text,
+  language,
+  saveContext,
+  streaming,
+}: {
+  text: string;
+  language: string | null;
+  saveContext?: SaveContext;
+  streaming?: boolean;
+}) {
+  const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>(
+    'idle',
+  );
+  const [savedId, setSavedId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const canSave = !streaming && !!saveContext && isSubstantial(text);
+
+  const onSave = async () => {
+    if (!saveContext || !canSave) return;
+    setStatus('saving');
+    setError(null);
+    try {
+      const artefact = await createCodeArtefact({
+        content: text,
+        language: language ?? undefined,
+        projectId: saveContext.projectId ?? null,
+        sessionId: saveContext.sessionId ?? null,
+      });
+      setSavedId(artefact.id);
+      setStatus('saved');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setStatus('error');
+    }
+  };
+
+  return (
+    <div className="overflow-hidden rounded-[var(--radius-control)] border border-line bg-ink/80">
+      <div className="flex items-center justify-between gap-2 border-b border-line/80 px-2 py-1">
+        <span className="font-mono text-[10px] uppercase tracking-wider text-mist">
+          {language ?? 'code'}
+        </span>
+        {canSave && status !== 'saved' && (
+          <button
+            type="button"
+            onClick={() => void onSave()}
+            disabled={status === 'saving'}
+            className="interactive text-[10px] font-semibold uppercase tracking-wider text-signal hover:underline disabled:opacity-50"
+          >
+            {status === 'saving' ? 'Saving…' : 'Save as code'}
+          </button>
+        )}
+        {status === 'saved' && savedId && (
+          <Link
+            to={`/app/code/${savedId}`}
+            className="interactive text-[10px] font-semibold uppercase tracking-wider text-teal hover:underline"
+          >
+            Saved · view
+          </Link>
+        )}
+      </div>
+      <pre className="overflow-x-auto p-2 font-mono text-xs text-mist">{text}</pre>
+      {error && <p className="px-2 pb-2 text-[10px] text-ember">{error}</p>}
+    </div>
+  );
+}
+
 type MarkdownContentProps = {
   text: string;
   streaming?: boolean;
+  /** When set, substantial code blocks offer “Save as code”. */
+  saveContext?: SaveContext;
 };
 
-export function MarkdownContent({ text, streaming }: MarkdownContentProps) {
+export function MarkdownContent({
+  text,
+  streaming,
+  saveContext,
+}: MarkdownContentProps) {
   const blocks = parseBlocks(text);
   return (
     <div className="space-y-2 text-sm leading-relaxed text-paper/90">
       {blocks.map((block, i) => {
         if (block.type === 'code') {
           return (
-            <pre
+            <CodeBlock
               key={i}
-              className="overflow-x-auto rounded-sm border border-line bg-ink/80 p-2 font-mono text-xs text-mist"
-            >
-              {block.text}
-            </pre>
+              text={block.text}
+              language={block.language}
+              saveContext={saveContext}
+              streaming={streaming}
+            />
           );
         }
         if (block.type === 'ul') {
@@ -115,7 +214,10 @@ export function MarkdownContent({ text, streaming }: MarkdownContentProps) {
         );
       })}
       {streaming && (
-        <span className="inline-block h-4 w-0.5 animate-pulse bg-signal align-middle" aria-hidden />
+        <span
+          className="inline-block h-4 w-0.5 animate-pulse bg-signal align-middle"
+          aria-hidden
+        />
       )}
     </div>
   );

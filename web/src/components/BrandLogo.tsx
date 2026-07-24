@@ -21,7 +21,7 @@ export function BrandLogo({
         height={32}
       />
       {showWordmark && (
-        <span className="font-display text-sm font-bold tracking-tight text-paper">
+        <span className="font-display text-base font-extrabold tracking-tight text-paper">
           WalkCroach
         </span>
       )}

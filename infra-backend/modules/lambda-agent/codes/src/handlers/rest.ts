@@ -5,6 +5,7 @@ import {
   getSession,
   listBuildEvents,
   listMessages,
+  listProjectMemoryEntries,
 } from '@walkcroach/agent-harness';
 import { requireAuth, type AuthContext } from '../auth.js';
 import { jsonResponse } from '../http.js';
@@ -36,6 +37,16 @@ import {
   handleProxySql,
   handlePutSecret,
 } from './phase2.js';
+import {
+  handleSandboxFileGet,
+  handleSandboxRoutes,
+} from './sandbox.js';
+import {
+  handleCreateCodeArtefact,
+  handleGetCodeArtefact,
+  handleListCodeArtefacts,
+} from './codeArtefacts.js';
+import { handleListMyApps } from './apps.js';
 
 export type RestResult = {
   statusCode: number;
@@ -78,6 +89,9 @@ type ProjectRow = {
   created_at: Date;
   template_id: string | null;
   memory_summary: string | null;
+  kind?: string | null;
+  description?: string | null;
+  instructions?: string | null;
 };
 
 async function assertProjectOwner(
@@ -86,7 +100,8 @@ async function assertProjectOwner(
   auth: AuthContext,
 ): Promise<ProjectRow | null> {
   const { rows } = await db.query<ProjectRow>(
-    `SELECT id, owner_id, name, status, updated_at, created_at, template_id, memory_summary
+    `SELECT id, owner_id, name, status, updated_at, created_at, template_id,
+            memory_summary, kind, description, instructions
      FROM projects
      WHERE id = $1::uuid AND deleted_at IS NULL`,
     [projectId],
@@ -104,6 +119,18 @@ function mapProjectSummary(row: ProjectRow) {
     status: row.status ?? 'draft',
     updatedAt: row.updated_at.toISOString(),
     memorySummary: row.memory_summary,
+    kind: row.kind ?? 'app',
+    description: row.description ?? null,
+  };
+}
+
+function mapProjectDetail(row: ProjectRow) {
+  return {
+    ...mapProjectSummary(row),
+    ownerId: row.owner_id,
+    createdAt: row.created_at.toISOString(),
+    templateId: row.template_id,
+    instructions: row.instructions ?? null,
   };
 }
 
@@ -117,9 +144,99 @@ export async function handleRest(
   rawBody: string | undefined,
   pathParameters: Record<string, string | undefined> = {},
   headers: Record<string, string | undefined> = {},
+  queryString = '',
 ): Promise<RestResult> {
   if (method === 'GET' && (path === '/health' || path.endsWith('/health'))) {
     return jsonResponse(200, { ok: true, service: 'walkcroach-backend' });
+  }
+
+  // Phase E — Code library + Apps hub
+  if (
+    method === 'GET' &&
+    (path === '/code-artefacts' || path.endsWith('/code-artefacts'))
+  ) {
+    const authResult = await requireAuth(headers);
+    if ('error' in authResult) {
+      return jsonResponse(authResult.status, { error: authResult.error });
+    }
+    const db = createDbClient();
+    try {
+      const projectId = pathParameters.projectId;
+      return await handleListCodeArtefacts(db, authResult, {
+        projectId: projectId || undefined,
+      });
+    } finally {
+      await db.close();
+    }
+  }
+
+  if (
+    method === 'POST' &&
+    (path === '/code-artefacts' || path.endsWith('/code-artefacts'))
+  ) {
+    const authResult = await requireAuth(headers);
+    if ('error' in authResult) {
+      return jsonResponse(authResult.status, { error: authResult.error });
+    }
+    const db = createDbClient();
+    try {
+      return await handleCreateCodeArtefact(db, rawBody, authResult);
+    } finally {
+      await db.close();
+    }
+  }
+
+  const codeArtefactMatch = path.match(/\/code-artefacts\/([^/]+)\/?$/);
+  const codeArtefactId = codeArtefactMatch?.[1] ?? pathParameters.artefactId;
+  if (method === 'GET' && codeArtefactId && path.includes('/code-artefacts/')) {
+    const authResult = await requireAuth(headers);
+    if ('error' in authResult) {
+      return jsonResponse(authResult.status, { error: authResult.error });
+    }
+    const db = createDbClient();
+    try {
+      return await handleGetCodeArtefact(db, codeArtefactId, authResult);
+    } finally {
+      await db.close();
+    }
+  }
+
+  if (method === 'GET' && (path === '/apps/mine' || path.endsWith('/apps/mine'))) {
+    const authResult = await requireAuth(headers);
+    if ('error' in authResult) {
+      return jsonResponse(authResult.status, { error: authResult.error });
+    }
+    const db = createDbClient();
+    try {
+      return await handleListMyApps(db, authResult);
+    } finally {
+      await db.close();
+    }
+  }
+
+  // E2B sandbox (Phase D RT-10) — before generic project routes
+  if (path.includes('/sandbox')) {
+    const sandboxFileMatch = path.match(
+      /\/projects\/([^/]+)\/sandbox\/file\/?$/,
+    );
+    if (method === 'GET' && sandboxFileMatch) {
+      const qPath =
+        pathParameters.path ??
+        (typeof pathParameters.filePath === 'string'
+          ? pathParameters.filePath
+          : '');
+      // Query string is stripped from `path`; clients use POST /sandbox/read.
+      if (qPath) {
+        return handleSandboxFileGet(sandboxFileMatch[1]!, qPath, headers);
+      }
+    }
+    const sandboxResult = await handleSandboxRoutes(
+      method,
+      path,
+      rawBody,
+      headers,
+    );
+    if (sandboxResult) return sandboxResult;
   }
 
   const projectIdParam =
@@ -134,9 +251,11 @@ export async function handleRest(
     const db = createDbClient();
     try {
       const { rows } = await db.query<ProjectRow>(
-        `SELECT id, owner_id, name, status, updated_at, created_at, template_id, memory_summary
+        `SELECT id, owner_id, name, status, updated_at, created_at, template_id,
+                memory_summary, kind, description, instructions
          FROM projects
          WHERE owner_id = $1 AND deleted_at IS NULL AND archived_at IS NULL
+           AND COALESCE(kind, 'app') <> 'general'
          ORDER BY updated_at DESC
          LIMIT 100`,
         [authResult.ownerId],
@@ -233,12 +352,66 @@ export async function handleRest(
       if (!row) {
         return jsonResponse(404, { error: 'project not found' });
       }
-      return jsonResponse(200, {
-        ...mapProjectSummary(row),
-        ownerId: row.owner_id,
-        createdAt: row.created_at.toISOString(),
-        templateId: row.template_id,
-      });
+      return jsonResponse(200, mapProjectDetail(row));
+    } finally {
+      await db.close();
+    }
+  }
+
+  if (
+    method === 'PATCH' &&
+    projectIdParam &&
+    path.match(/\/projects\/[^/]+\/?$/)
+  ) {
+    const authResult = await requireAuth(headers);
+    if ('error' in authResult) {
+      return jsonResponse(authResult.status, { error: authResult.error });
+    }
+    const body = JSON.parse(rawBody ?? '{}') as {
+      name?: string;
+      description?: string | null;
+      instructions?: string | null;
+      templateId?: string;
+    };
+    const db = createDbClient();
+    try {
+      const project = await assertProjectOwner(db, projectIdParam, authResult);
+      if (!project) {
+        return jsonResponse(404, { error: 'project not found' });
+      }
+      const name =
+        typeof body.name === 'string' && body.name.trim()
+          ? body.name.trim().slice(0, 200)
+          : project.name;
+      const description =
+        body.description === undefined
+          ? (project.description ?? null)
+          : body.description === null
+            ? null
+            : String(body.description).slice(0, 8000);
+      const instructions =
+        body.instructions === undefined
+          ? (project.instructions ?? null)
+          : body.instructions === null
+            ? null
+            : String(body.instructions).slice(0, 16000);
+      const templateId =
+        typeof body.templateId === 'string' && body.templateId.trim()
+          ? body.templateId.trim().slice(0, 80)
+          : project.template_id;
+      const { rows } = await db.query<ProjectRow>(
+        `UPDATE projects
+         SET name = $2,
+             description = $3,
+             instructions = $4,
+             template_id = $5,
+             updated_at = now()
+         WHERE id = $1::uuid
+         RETURNING id, owner_id, name, status, updated_at, created_at, template_id,
+                   memory_summary, kind, description, instructions`,
+        [projectIdParam, name, description, instructions, templateId],
+      );
+      return jsonResponse(200, mapProjectDetail(rows[0]!));
     } finally {
       await db.close();
     }
@@ -252,6 +425,7 @@ export async function handleRest(
     const body = JSON.parse(rawBody ?? '{}') as {
       name?: string;
       templateId?: string;
+      kind?: 'app' | 'general';
     };
     const db = createDbClient();
     try {
@@ -265,13 +439,49 @@ export async function handleRest(
       }
 
       const templateId = body.templateId ?? 'blank';
+      const kind = body.kind === 'general' ? 'general' : 'app';
       const { rows } = await db.query<{ id: string }>(
-        `INSERT INTO projects (owner_id, name, template_id)
-         VALUES ($1, $2, $3)
+        `INSERT INTO projects (owner_id, name, template_id, kind)
+         VALUES ($1, $2, $3, $4)
          RETURNING id`,
-        [authResult.ownerId, body.name ?? 'Untitled', templateId],
+        [authResult.ownerId, body.name ?? 'Untitled', templateId, kind],
       );
-      return jsonResponse(201, { id: rows[0]!.id, templateId });
+      return jsonResponse(201, { id: rows[0]!.id, templateId, kind });
+    } finally {
+      await db.close();
+    }
+  }
+
+  // Personal Chat workspace (kind=general) — get or create
+  if (
+    method === 'POST' &&
+    (path === '/me/chat-workspace' || path.endsWith('/me/chat-workspace'))
+  ) {
+    const authResult = await requireAuth(headers);
+    if ('error' in authResult) {
+      return jsonResponse(authResult.status, { error: authResult.error });
+    }
+    const db = createDbClient();
+    try {
+      const existing = await db.query<{ id: string }>(
+        `SELECT id FROM projects
+         WHERE owner_id = $1 AND deleted_at IS NULL
+           AND COALESCE(kind, 'app') = 'general'
+           AND name = $2
+         ORDER BY created_at ASC
+         LIMIT 1`,
+        [authResult.ownerId, '__walkcroach_chat__'],
+      );
+      if (existing.rows[0]) {
+        return jsonResponse(200, { id: existing.rows[0].id });
+      }
+      const { rows } = await db.query<{ id: string }>(
+        `INSERT INTO projects (owner_id, name, template_id, kind, status)
+         VALUES ($1, $2, NULL, 'general', 'ready')
+         RETURNING id`,
+        [authResult.ownerId, '__walkcroach_chat__'],
+      );
+      return jsonResponse(201, { id: rows[0]!.id });
     } finally {
       await db.close();
     }
@@ -282,10 +492,14 @@ export async function handleRest(
     if ('error' in authResult) {
       return jsonResponse(authResult.status, { error: authResult.error });
     }
-    const body = JSON.parse(rawBody ?? '{}') as { projectId?: string };
+    const body = JSON.parse(rawBody ?? '{}') as {
+      projectId?: string;
+      mode?: 'chat' | 'builder';
+    };
     if (!body.projectId) {
       return jsonResponse(400, { error: 'projectId required' });
     }
+    const mode = body.mode === 'chat' ? 'chat' : 'builder';
     const db = createDbClient();
     try {
       const project = await assertProjectOwner(db, body.projectId, authResult);
@@ -293,10 +507,14 @@ export async function handleRest(
         return jsonResponse(404, { error: 'project not found' });
       }
       const { rows } = await db.query<{ id: string }>(
-        `INSERT INTO sessions (project_id)
-         VALUES ($1::uuid)
+        `INSERT INTO sessions (project_id, mode, title)
+         VALUES ($1::uuid, $2, $3)
          RETURNING id`,
-        [body.projectId],
+        [
+          body.projectId,
+          mode,
+          mode === 'chat' ? 'New chat' : null,
+        ],
       );
       await db.query(
         `UPDATE projects SET updated_at = now() WHERE id = $1::uuid`,
@@ -305,6 +523,246 @@ export async function handleRest(
       return jsonResponse(201, {
         id: rows[0]!.id,
         projectId: body.projectId,
+        mode,
+      });
+    } finally {
+      await db.close();
+    }
+  }
+
+  // List sessions for a project (chat + builder timeline)
+  const sessionsListMatch = path.match(/\/projects\/([^/]+)\/sessions\/?$/);
+  const sessionsListProjectId = sessionsListMatch?.[1];
+  if (method === 'GET' && sessionsListProjectId && !path.includes('/latest')) {
+    const authResult = await requireAuth(headers);
+    if ('error' in authResult) {
+      return jsonResponse(authResult.status, { error: authResult.error });
+    }
+    const db = createDbClient();
+    try {
+      const project = await assertProjectOwner(
+        db,
+        sessionsListProjectId,
+        authResult,
+      );
+      if (!project) {
+        return jsonResponse(404, { error: 'project not found' });
+      }
+      const qs = new URLSearchParams(queryString);
+      const modeFilter = qs.get('mode');
+      const limitRaw = Number(qs.get('limit') ?? 40);
+      const limit = Math.min(
+        Math.max(Number.isFinite(limitRaw) ? limitRaw : 40, 1),
+        100,
+      );
+      const params: unknown[] = [sessionsListProjectId];
+      let modeSql = '';
+      if (modeFilter === 'chat' || modeFilter === 'builder') {
+        params.push(modeFilter);
+        modeSql = ` AND COALESCE(mode, 'builder') = $${params.length}`;
+      }
+      params.push(limit);
+      const { rows } = await db.query<{
+        id: string;
+        title: string | null;
+        mode: string | null;
+        started_at: Date;
+      }>(
+        `SELECT id, title, mode, started_at
+         FROM sessions
+         WHERE project_id = $1::uuid${modeSql}
+         ORDER BY started_at DESC
+         LIMIT $${params.length}`,
+        params,
+      );
+      return jsonResponse(200, {
+        sessions: rows.map((r) => ({
+          id: r.id,
+          title: r.title,
+          mode: r.mode ?? 'builder',
+          createdAt: r.started_at.toISOString(),
+        })),
+      });
+    } finally {
+      await db.close();
+    }
+  }
+
+  // Project documents
+  const documentsListMatch = path.match(
+    /\/projects\/([^/]+)\/documents\/?$/,
+  );
+  const documentsProjectId = documentsListMatch?.[1];
+  const documentItemMatch = path.match(
+    /\/projects\/([^/]+)\/documents\/([^/]+)\/?$/,
+  );
+  const documentItemProjectId = documentItemMatch?.[1];
+  const documentId = documentItemMatch?.[2];
+
+  if (method === 'GET' && documentsProjectId && !documentId) {
+    const authResult = await requireAuth(headers);
+    if ('error' in authResult) {
+      return jsonResponse(authResult.status, { error: authResult.error });
+    }
+    const db = createDbClient();
+    try {
+      const project = await assertProjectOwner(
+        db,
+        documentsProjectId,
+        authResult,
+      );
+      if (!project) {
+        return jsonResponse(404, { error: 'project not found' });
+      }
+      const { rows } = await db.query<{
+        id: string;
+        name: string;
+        mime: string;
+        byte_size: string | number;
+        created_at: Date;
+        text_content: string | null;
+      }>(
+        `SELECT id, name, mime, byte_size, created_at, text_content
+         FROM project_documents
+         WHERE project_id = $1::uuid
+         ORDER BY created_at DESC
+         LIMIT 50`,
+        [documentsProjectId],
+      );
+      return jsonResponse(200, {
+        documents: rows.map((r) => ({
+          id: r.id,
+          name: r.name,
+          mime: r.mime,
+          byteSize: Number(r.byte_size) || 0,
+          createdAt: r.created_at.toISOString(),
+          hasText: Boolean(r.text_content?.trim()),
+        })),
+      });
+    } finally {
+      await db.close();
+    }
+  }
+
+  if (method === 'POST' && documentsProjectId && !documentId) {
+    const authResult = await requireAuth(headers);
+    if ('error' in authResult) {
+      return jsonResponse(authResult.status, { error: authResult.error });
+    }
+    const body = JSON.parse(rawBody ?? '{}') as {
+      name?: string;
+      mime?: string;
+      textContent?: string;
+    };
+    const name = body.name?.trim();
+    if (!name) {
+      return jsonResponse(400, { error: 'name required' });
+    }
+    const textContent = (body.textContent ?? '').slice(0, 200_000);
+    const mime = body.mime?.trim() || 'text/plain';
+    const db = createDbClient();
+    try {
+      const project = await assertProjectOwner(
+        db,
+        documentsProjectId,
+        authResult,
+      );
+      if (!project) {
+        return jsonResponse(404, { error: 'project not found' });
+      }
+      const { rows } = await db.query<{
+        id: string;
+        name: string;
+        mime: string;
+        byte_size: string | number;
+        created_at: Date;
+      }>(
+        `INSERT INTO project_documents
+           (project_id, name, mime, s3_key, byte_size, text_content)
+         VALUES ($1::uuid, $2, $3, NULL, $4, $5)
+         RETURNING id, name, mime, byte_size, created_at`,
+        [
+          documentsProjectId,
+          name.slice(0, 240),
+          mime.slice(0, 120),
+          Buffer.byteLength(textContent, 'utf8'),
+          textContent || null,
+        ],
+      );
+      await db.query(
+        `UPDATE projects SET updated_at = now() WHERE id = $1::uuid`,
+        [documentsProjectId],
+      );
+      const row = rows[0]!;
+      return jsonResponse(201, {
+        id: row.id,
+        name: row.name,
+        mime: row.mime,
+        byteSize: Number(row.byte_size) || 0,
+        createdAt: row.created_at.toISOString(),
+        hasText: Boolean(textContent.trim()),
+      });
+    } finally {
+      await db.close();
+    }
+  }
+
+  if (method === 'DELETE' && documentItemProjectId && documentId) {
+    const authResult = await requireAuth(headers);
+    if ('error' in authResult) {
+      return jsonResponse(authResult.status, { error: authResult.error });
+    }
+    const db = createDbClient();
+    try {
+      const project = await assertProjectOwner(
+        db,
+        documentItemProjectId,
+        authResult,
+      );
+      if (!project) {
+        return jsonResponse(404, { error: 'project not found' });
+      }
+      const { rows: deleted } = await db.query<{ id: string }>(
+        `DELETE FROM project_documents
+         WHERE id = $1::uuid AND project_id = $2::uuid
+         RETURNING id`,
+        [documentId, documentItemProjectId],
+      );
+      if (!deleted[0]) {
+        return jsonResponse(404, { error: 'document not found' });
+      }
+      await db.query(
+        `UPDATE projects SET updated_at = now() WHERE id = $1::uuid`,
+        [documentItemProjectId],
+      );
+      return jsonResponse(200, { ok: true, id: documentId });
+    } finally {
+      await db.close();
+    }
+  }
+
+  // Remembered panel — project memory entries
+  const memoryMatch = path.match(/\/projects\/([^/]+)\/memory\/?$/);
+  const memoryProjectId = memoryMatch?.[1];
+  if (method === 'GET' && memoryProjectId) {
+    const authResult = await requireAuth(headers);
+    if ('error' in authResult) {
+      return jsonResponse(authResult.status, { error: authResult.error });
+    }
+    const db = createDbClient();
+    try {
+      const project = await assertProjectOwner(db, memoryProjectId, authResult);
+      if (!project) {
+        return jsonResponse(404, { error: 'project not found' });
+      }
+      const entries = await listProjectMemoryEntries({
+        db,
+        projectId: memoryProjectId,
+        limit: 40,
+      });
+      return jsonResponse(200, {
+        summary: project.memory_summary,
+        entries,
       });
     } finally {
       await db.close();
@@ -684,6 +1142,8 @@ export async function handleRest(
           role: m.role,
           content: textFromContent(m.content),
           raw: m.content,
+          attachments: Array.isArray(m.attachments) ? m.attachments : null,
+          citations: Array.isArray(m.citations) ? m.citations : null,
         })),
       });
     } finally {

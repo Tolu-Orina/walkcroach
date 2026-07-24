@@ -136,6 +136,7 @@ export {
   runAgentLoop,
   DEFAULT_MAX_ITERATIONS,
   DEFAULT_MAX_SUBAGENTS,
+  DEFAULT_IDENTICAL_FAILURE_LIMIT,
   MAX_TODO_WRITE_NUDGES,
   MAX_TODO_PROGRESS_NUDGES,
   MAX_VERIFY_REVIEWS,
@@ -150,6 +151,15 @@ export {
   type LoopPhase,
   type RunLoopParams,
 } from './loop.js';
+
+export {
+  fingerprintToolCall,
+  beforeToolCall,
+  afterToolResult,
+  emptyToolLoopGuard,
+  buildStuckLoopNudge,
+  type ToolLoopGuardState,
+} from './tool-loop-guard.js';
 
 export { ApprovalController, bindApprovals } from './approval-controller.js';
 export { createFakeHost } from './fake-host.js';

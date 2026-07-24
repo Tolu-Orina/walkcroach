@@ -23,6 +23,7 @@ export function useWebContainer(
   projectName: string,
   templateId: string | null | undefined,
   onFilesMutated?: () => void,
+  enabled = true,
 ) {
   const [status, setStatus] = useState<WcStatus>('idle');
   const [bootPhase, setBootPhase] = useState<WcBootPhase>('container');
@@ -44,17 +45,28 @@ export function useWebContainer(
 
   const enqueue = useCallback(
     (fn: () => Promise<void>) => {
-      queueRef.current = queueRef.current.then(fn).catch((err) => {
+      const next = queueRef.current.then(fn);
+      // Keep the queue alive after failures, but let callers observe rejection.
+      queueRef.current = next.catch((err) => {
         appendLog(
           `action error: ${err instanceof Error ? err.message : String(err)}`,
         );
       });
-      return queueRef.current;
+      return next;
     },
     [appendLog],
   );
 
   useEffect(() => {
+    if (!enabled) {
+      setStatus('idle');
+      setBootPhase('container');
+      setError(null);
+      setPreviewUrl(null);
+      wcRef.current = null;
+      return;
+    }
+
     let cancelled = false;
     setStatus('booting');
     setBootPhase('container');
@@ -100,7 +112,7 @@ export function useWebContainer(
     return () => {
       cancelled = true;
     };
-  }, [projectId, projectName, templateId, appendLog]);
+  }, [enabled, projectId, projectName, templateId, appendLog]);
 
   const listFiles = useCallback(async (): Promise<ProjectFile[]> => {
     const wc = wcRef.current;

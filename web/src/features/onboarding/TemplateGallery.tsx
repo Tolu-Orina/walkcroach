@@ -7,6 +7,8 @@ type TemplateGalleryProps = {
   onClose: () => void;
   onSelect: (templateId: string, name: string) => void;
   creating: boolean;
+  title?: string;
+  description?: string;
 };
 
 export function TemplateGallery({
@@ -14,6 +16,8 @@ export function TemplateGallery({
   onClose,
   onSelect,
   creating,
+  title = 'Choose a starter',
+  description = 'Curated starters mount in the App Builder sandbox — target under 8s to preview.',
 }: TemplateGalleryProps) {
   const handleClose = useCallback(() => {
     if (!creating) onClose();
@@ -39,10 +43,10 @@ export function TemplateGallery({
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 id="template-gallery-title" className="font-display text-2xl font-bold text-paper">
-              Choose a template
+              {title}
             </h2>
             <p className="mt-1 text-sm text-mist">
-              Curated starters mount in WebContainer — target under 8s to preview.
+              {description}
             </p>
           </div>
           <button

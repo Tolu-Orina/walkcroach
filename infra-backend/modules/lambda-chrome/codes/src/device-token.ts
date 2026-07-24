@@ -35,6 +35,13 @@ export function getDeviceSigningKey(): string {
   throw new Error('CHROME_DEVICE_SIGNING_KEY is required');
 }
 
+/** Non-throwing check for handlers that should return 503 instead of 500. */
+export function hasDeviceSigningKey(): boolean {
+  const key = process.env.CHROME_DEVICE_SIGNING_KEY;
+  if (key && key.length >= 16) return true;
+  return process.env.ALLOW_DEV_AUTH === 'true';
+}
+
 export function hashDeviceKey(deviceKey: string): string {
   return createHash('sha256').update(deviceKey, 'utf8').digest('hex');
 }

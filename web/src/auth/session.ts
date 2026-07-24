@@ -8,10 +8,12 @@ export function sessionFromCognitoTokens(tokens: CognitoTokens): StoredAuth {
       id: profile.sub,
       displayName: profile.name ?? profile.email ?? 'Builder',
       isAnonymous: false,
+      email: profile.email ?? null,
     },
     token: tokens.idToken,
     cognito: {
       idToken: tokens.idToken,
+      accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken,
       expiresAt: tokens.expiresAt,
     },

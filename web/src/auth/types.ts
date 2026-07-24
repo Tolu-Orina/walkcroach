@@ -2,6 +2,7 @@ export type AuthUser = {
   id: string;
   displayName: string;
   isAnonymous: boolean;
+  email?: string | null;
 };
 
 export type AuthState = {

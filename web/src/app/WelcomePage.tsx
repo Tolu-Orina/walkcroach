@@ -4,22 +4,21 @@ import { markWelcomeComplete } from '../auth/session';
 import { useAuth } from '../auth/useAuth';
 import { AppShell } from '../components/AppShell';
 import { LoadingScreen } from '../components/LoadingScreen';
-import { TemplateGallery } from '../features/onboarding/TemplateGallery';
 import { createProject } from '../api/client';
 import { peekPendingPrompt, projectNameFromPrompt } from '../lib/pending-prompt';
 
 const STEPS = [
   {
-    title: 'Memory that sticks',
-    body: 'Tell the agent your preferences once — CockroachDB recalls them on every return visit.',
+    title: 'Chat is the front door',
+    body: 'Ask anything with attachments and search. Projects hold standing context across many chats.',
   },
   {
-    title: 'Plan, then build',
-    body: 'Use Plan mode to reason without file writes. Switch to Build when you are ready to ship.',
+    title: 'Projects hold memory',
+    body: 'Description, documents, and instructions belong to the whole project timeline — not one thread.',
   },
   {
-    title: 'Preview & deploy',
-    body: 'WebContainer runs your app in-browser. Deploy to your subdomain from the Ship tab.',
+    title: 'Builder is a room',
+    body: 'Open App Builder from a project when you want a live preview. Starter templates live there.',
   },
 ] as const;
 
@@ -27,7 +26,6 @@ export function WelcomePage() {
   const { status } = useAuth();
   const navigate = useNavigate();
   const [step, setStep] = useState(0);
-  const [galleryOpen, setGalleryOpen] = useState(false);
   const [creating, setCreating] = useState(() => !!peekPendingPrompt());
   const [error, setError] = useState<string | null>(null);
 
@@ -44,7 +42,9 @@ export function WelcomePage() {
           projectNameFromPrompt(pending.prompt),
           pending.templateId,
         );
-        if (!cancelled) navigate(`/project/${id}`, { replace: true });
+        if (!cancelled) {
+          navigate(`/app/projects/${id}/builder`, { replace: true });
+        }
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : String(err));
@@ -74,21 +74,7 @@ export function WelcomePage() {
 
   const finishWelcome = () => {
     markWelcomeComplete();
-    setGalleryOpen(true);
-  };
-
-  const handleCreate = async (templateId: string, name: string) => {
-    if (creating) return;
-    setCreating(true);
-    setError(null);
-    try {
-      markWelcomeComplete();
-      const { id } = await createProject(name, templateId);
-      navigate(`/project/${id}`, { replace: true });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      setCreating(false);
-    }
+    navigate('/app/chat', { replace: true });
   };
 
   return (
@@ -96,7 +82,7 @@ export function WelcomePage() {
       <div className="prose-marketing mx-auto flex max-w-2xl flex-col px-4 py-12 sm:px-6">
         <p className="text-[11px] uppercase tracking-[0.2em] text-signal">Welcome</p>
         <h1 className="mt-2 font-display text-3xl font-extrabold text-paper">
-          You're in. Let's build something that remembers.
+          You're in. Memory first, Builder when you need it.
         </h1>
 
         <div className="mt-8 rounded-sm border border-line bg-panel/50 p-6">
@@ -110,34 +96,24 @@ export function WelcomePage() {
               type="button"
               onClick={() => {
                 markWelcomeComplete();
-                navigate('/dashboard');
+                navigate('/app/chat');
               }}
               className="btn-ghost text-sm"
             >
-              Skip to dashboard
+              Skip to chat
             </button>
             <button
               type="button"
               onClick={() => (isLast ? finishWelcome() : setStep(step + 1))}
               className="btn-primary text-sm"
             >
-              {isLast ? 'Pick a template' : 'Next'}
+              {isLast ? 'Open Chat' : 'Next'}
             </button>
           </div>
         </div>
 
         {error && <p className="mt-4 text-sm text-ember">{error}</p>}
       </div>
-
-      <TemplateGallery
-        open={galleryOpen}
-        onClose={() => {
-          setGalleryOpen(false);
-          navigate('/dashboard');
-        }}
-        onSelect={(templateId, name) => void handleCreate(templateId, name)}
-        creating={creating}
-      />
     </AppShell>
   );
 }

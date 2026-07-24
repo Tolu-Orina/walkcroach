@@ -7,6 +7,8 @@ export type StoredAuth = {
   token: string;
   cognito?: {
     idToken: string;
+    /** Cognito access token — used by Chrome/IDE paste/upgrade paths. */
+    accessToken?: string;
     refreshToken: string;
     expiresAt: number;
   };

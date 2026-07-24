@@ -43,6 +43,7 @@ const AUTO_CONTINUE_REASONS = new Set([
   'incomplete',
   'unverified',
 ]);
+// Intentionally excluded: stuck_tool_loop (identical failing tool retries)
 const AUTO_CONTINUE_BASE_MS = 5_000;
 const AUTO_CONTINUE_MAX_MS = 40_000;
 const AUTO_CONTINUE_MAX_ATTEMPTS = 8;

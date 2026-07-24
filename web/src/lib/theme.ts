@@ -9,7 +9,11 @@ export function getStoredTheme(): Theme | null {
 }
 
 export function resolveTheme(): Theme {
-  return getStoredTheme() ?? 'dark';
+  if (typeof window === 'undefined') return 'light';
+  return (
+    getStoredTheme() ??
+    (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+  );
 }
 
 export function applyTheme(theme: Theme): void {

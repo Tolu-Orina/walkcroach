@@ -4,11 +4,9 @@ import type { AuthContext } from '../auth.js';
 import { jsonResponse } from '../http.js';
 import { metricLog, parseJsonBody } from '../util.js';
 
-const ALLOWED_REDIRECTS = new Set([
-  'vscode://walkcroach.walkcroach-ide/auth',
-  'cursor://walkcroach.walkcroach-ide/auth',
-  'vscode-insiders://walkcroach.walkcroach-ide/auth',
-]);
+/** Accept known editor schemes; reject arbitrary custom schemes. */
+const REDIRECT_PATTERN =
+  /^(vscode|cursor|vscode-insiders|vscodium|windsurf|code-oss):\/\/walkcroach\.walkcroach-ide\/auth$/;
 
 const CODE_TTL_MS = 5 * 60_000;
 
@@ -48,7 +46,7 @@ export async function handleCreateSessionCode(
   if (!state || state.length < 8) {
     return jsonResponse(400, { error: 'state is required' });
   }
-  if (!redirectUri || !ALLOWED_REDIRECTS.has(redirectUri)) {
+  if (!redirectUri || !REDIRECT_PATTERN.test(redirectUri)) {
     return jsonResponse(400, { error: 'redirectUri is not allowed' });
   }
   if (sessionBearer.startsWith('dev:')) {
@@ -127,7 +125,7 @@ export async function handleExchangeToken(
       error: 'code, state, and redirectUri are required',
     });
   }
-  if (!ALLOWED_REDIRECTS.has(redirectUri)) {
+  if (!REDIRECT_PATTERN.test(redirectUri)) {
     return jsonResponse(400, { error: 'redirectUri is not allowed' });
   }
 

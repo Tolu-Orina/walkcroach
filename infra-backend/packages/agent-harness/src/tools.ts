@@ -3,25 +3,38 @@
  *
  * | kind           | Examples                         | Behaviour                                      |
  * |----------------|----------------------------------|------------------------------------------------|
- * | server         | recall_*, remember_preference    | Executed in harness; never pauses HTTP stream  |
- * | client_local   | write_file, edit_file            | Yielded to client; auto-acked for Converse     |
- * | client_resume  | run_terminal                     | Yielded; stream ends; POST /tool-result        |
+ * | server         | recall_*, remember_preference,   | Executed in harness; never pauses HTTP stream  |
+ * |                | web_search, web_extract          |                                                |
+ * | client_resume  | write_file, edit_file,           | Yielded; stream ends; POST /tool-result after  |
+ * |                | run_terminal                     | client verifies apply (no optimistic acks)     |
+ *
+ * Tool profiles (revamp Phase A):
+ *   chat          — general Chat (search + memory; no file/terminal writes)
+ *   project_chat  — project-scoped Chat (search + memory; optional save artefacts later)
+ *   builder       — App Builder (all tools; client sandbox for file/terminal)
+ *   plan          — builder plan mode (server tools only)
  */
 
-export type ToolKind = 'server' | 'client_local' | 'client_resume';
+export type ToolKind = 'server' | 'client_resume';
+
+/** Which product surface mounts which tools. */
+export type ToolProfile = 'chat' | 'project_chat' | 'builder' | 'plan';
 
 export type ToolDef = {
   name: string;
   description: string;
   kind: ToolKind;
+  /** Profiles that include this tool. */
+  profiles: ToolProfile[];
   inputSchema: Record<string, unknown>;
 };
 
 export const TOOLS: ToolDef[] = [
   {
     name: 'write_file',
-    description: 'Create or overwrite a file in the project workspace',
-    kind: 'client_local',
+    description: 'Create or overwrite a file in the project sandbox workspace',
+    kind: 'client_resume',
+    profiles: ['builder'],
     inputSchema: {
       type: 'object',
       properties: {
@@ -33,8 +46,9 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'edit_file',
-    description: 'Apply an exact search/replace edit to an existing file',
-    kind: 'client_local',
+    description: 'Apply an exact search/replace edit to an existing file in the project sandbox',
+    kind: 'client_resume',
+    profiles: ['builder'],
     inputSchema: {
       type: 'object',
       properties: {
@@ -48,8 +62,9 @@ export const TOOLS: ToolDef[] = [
   {
     name: 'run_terminal',
     description:
-      'Run a shell command in the WebContainer (e.g. npm install, npm run build). Use sparingly; results return asynchronously.',
+      'Run a shell command in the project sandbox (e.g. npm install, npm run build). Use sparingly; results return after the client verifies the command.',
     kind: 'client_resume',
+    profiles: ['builder'],
     inputSchema: {
       type: 'object',
       properties: {
@@ -59,10 +74,40 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: 'web_search',
+    description:
+      'Search the live web via SearXNG. Use for current facts, docs, and citations. Prefer this over guessing.',
+    kind: 'server',
+    profiles: ['chat', 'project_chat', 'builder', 'plan'],
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Search query' },
+        limit: { type: 'number', description: 'Max results (1-10, default 5)' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'web_extract',
+    description:
+      'Fetch a URL and return cleaned text for grounding. Use after web_search when a page looks relevant.',
+    kind: 'server',
+    profiles: ['chat', 'project_chat', 'builder', 'plan'],
+    inputSchema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: 'Absolute http(s) URL' },
+      },
+      required: ['url'],
+    },
+  },
+  {
     name: 'recall_project_memory',
     description:
       'Semantic search over durable project memory in CockroachDB (preferences, decisions, captures)',
     kind: 'server',
+    profiles: ['chat', 'project_chat', 'builder', 'plan'],
     inputSchema: {
       type: 'object',
       properties: {
@@ -77,6 +122,7 @@ export const TOOLS: ToolDef[] = [
     description:
       'Persist a lasting user preference or architectural decision into project memory',
     kind: 'server',
+    profiles: ['chat', 'project_chat', 'builder', 'plan'],
     inputSchema: {
       type: 'object',
       properties: {
@@ -100,20 +146,32 @@ export function getToolDef(name: string): ToolDef | undefined {
 }
 
 export function getToolKind(name: string): ToolKind {
-  return getToolDef(name)?.kind ?? 'client_local';
+  return getToolDef(name)?.kind ?? 'client_resume';
 }
 
-/** @deprecated use getToolKind — kept for callers expecting awaitResult flag */
+/** True when the HTTP stream must pause for POST /tool-result. */
 export function toolAwaitResult(name: string): boolean {
   return getToolKind(name) === 'client_resume';
 }
 
+/**
+ * Resolve tool profile from mode + optional explicit profile.
+ * Legacy: mode plan|build maps to plan|builder.
+ */
+export function resolveToolProfile(
+  modeOrProfile: 'plan' | 'build' | ToolProfile = 'builder',
+): ToolProfile {
+  if (modeOrProfile === 'build') return 'builder';
+  if (modeOrProfile === 'plan') return 'plan';
+  return modeOrProfile;
+}
+
 /** Bedrock Converse toolConfig.tools */
-export function toBedrockTools(mode: 'plan' | 'build' = 'build') {
-  const list =
-    mode === 'plan'
-      ? TOOLS.filter((t) => t.kind === 'server')
-      : TOOLS;
+export function toBedrockTools(
+  modeOrProfile: 'plan' | 'build' | ToolProfile = 'builder',
+) {
+  const profile = resolveToolProfile(modeOrProfile);
+  const list = TOOLS.filter((t) => t.profiles.includes(profile));
 
   return list.map((t) => ({
     toolSpec: {

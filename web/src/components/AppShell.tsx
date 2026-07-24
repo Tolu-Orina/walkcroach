@@ -25,8 +25,10 @@ function NavItem({
       to={to}
       end={end}
       className={({ isActive }) =>
-        `interactive rounded-sm px-2.5 py-1.5 text-sm ${
-          isActive ? 'text-paper' : 'text-mist hover:text-paper'
+        `interactive rounded-[var(--radius-control)] px-3 py-2 text-sm font-medium transition ${
+          isActive
+            ? 'bg-panel text-paper'
+            : 'text-mist hover:bg-panel/70 hover:text-paper'
         }`
       }
     >
@@ -35,34 +37,48 @@ function NavItem({
   );
 }
 
-export function AppShell({ children, wide = false, minimal = false, marketing = false }: AppShellProps) {
+export function AppShell({
+  children,
+  wide = false,
+  minimal = false,
+  marketing = false,
+}: AppShellProps) {
   const { status, signOut, cognitoEnabled, devAuthAllowed, user } = useAuth();
   const location = useLocation();
   const onBuilder =
-    location.pathname.startsWith('/project/') || location.pathname === '/try';
+    location.pathname.startsWith('/project/') ||
+    location.pathname.includes('/builder') ||
+    location.pathname === '/try';
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="shrink-0 border-b border-line bg-ink/80 backdrop-blur-sm">
+      <header
+        className={`shrink-0 ${
+          marketing
+            ? 'border-b border-white/10 bg-ink/40 backdrop-blur-xl'
+            : 'border-b border-line/80 bg-ink/75 backdrop-blur-md'
+        }`}
+      >
         <div
-          className={`flex items-center justify-between gap-4 px-4 py-3 sm:px-6 ${
-            wide || marketing ? 'w-full' : 'mx-auto max-w-6xl'
-          }`}
+          className={`flex w-full items-center justify-between gap-4 py-3.5 ${
+            marketing ? 'px-4 sm:px-5' : 'px-5 sm:px-6'
+          } ${wide || marketing ? '' : 'mx-auto max-w-6xl'}`}
         >
           <BrandLogo to="/" />
 
           {!minimal && (
             <nav
-              className="flex flex-1 items-center justify-end gap-1 sm:gap-2"
+              className="flex flex-1 items-center justify-end gap-1 sm:gap-1.5"
               aria-label="Main"
             >
               {status === 'authenticated' && (
                 <>
-                  <NavItem to="/dashboard" end>
-                    Projects
+                  <NavItem to="/app/chat" end>
+                    Chat
                   </NavItem>
+                  <NavItem to="/app/projects">Projects</NavItem>
                   {onBuilder && (
-                    <span className="hidden text-xs text-mist/60 sm:inline">
+                    <span className="hidden px-2 font-mono text-[10px] uppercase tracking-wider text-mist/70 sm:inline">
                       Builder
                     </span>
                   )}
@@ -70,9 +86,9 @@ export function AppShell({ children, wide = false, minimal = false, marketing = 
               )}
 
               {status === 'authenticated' ? (
-                <div className="ml-2 flex items-center gap-3 border-l border-line pl-3">
+                <div className="ml-2 flex items-center gap-2 border-l border-line pl-3">
                   <ThemeToggle />
-                  <span className="hidden max-w-[10rem] truncate text-xs text-mist sm:inline">
+                  <span className="hidden max-w-[10rem] truncate text-sm text-mist sm:inline">
                     {user?.displayName}
                   </span>
                   <button
@@ -101,7 +117,10 @@ export function AppShell({ children, wide = false, minimal = false, marketing = 
                     </Link>
                   )}
                   {devAuthAllowed && (
-                    <Link to="/try" className="btn-ghost hidden text-xs sm:inline-flex">
+                    <Link
+                      to="/try"
+                      className="btn-ghost hidden text-xs sm:inline-flex"
+                    >
                       Try guest
                     </Link>
                   )}
@@ -113,7 +132,9 @@ export function AppShell({ children, wide = false, minimal = false, marketing = 
       </header>
 
       <main
-        className={`min-h-0 flex-1 ${wide || marketing ? 'flex w-full flex-col' : 'mx-auto w-full max-w-6xl'}`}
+        className={`min-h-0 flex-1 ${
+          wide || marketing ? 'flex w-full flex-col' : 'mx-auto w-full max-w-6xl'
+        }`}
       >
         {children}
       </main>

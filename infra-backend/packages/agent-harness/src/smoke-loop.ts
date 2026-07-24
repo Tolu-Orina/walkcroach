@@ -1,11 +1,11 @@
 /**
- * Phase 1 CLI smoke: full agent loop with mocked WebContainer tool results.
+ * Phase 1 CLI smoke: full agent loop with mocked client sandbox tool results.
  *
  * Flow:
  *  1. Create project + session
  *  2. Seed a preference into memory (direct write)
  *  3. Prompt agent to build a tiny file + run a terminal command
- *  4. Auto-ack client_local tools; on awaiting_tool, POST-equivalent continueAfterTool
+ *  4. On awaiting_tool (file or terminal), mock POST-equivalent continueAfterTool
  *  5. Assert messages + build_events in CRDB
  *  6. New session on same project → memory_recalled > 0
  *

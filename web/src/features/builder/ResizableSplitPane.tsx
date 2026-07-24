@@ -9,20 +9,23 @@ type ResizableSplitPaneProps = {
   minRightPx?: number;
 };
 
-const DEFAULT_KEY = 'walkcroach.builder.split.v1';
+/** v2: default chat ~20% (preview-first). */
+const DEFAULT_KEY = 'walkcroach.builder.split.v2';
 
 export function ResizableSplitPane({
   left,
   right,
   storageKey = DEFAULT_KEY,
-  defaultLeftPercent = 42,
-  minLeftPx = 280,
+  defaultLeftPercent = 20,
+  minLeftPx = 200,
   minRightPx = 320,
 }: ResizableSplitPaneProps) {
   const [leftPercent, setLeftPercent] = useState(() => {
     const stored = localStorage.getItem(storageKey);
     const n = stored ? Number(stored) : defaultLeftPercent;
-    return Number.isFinite(n) ? Math.min(70, Math.max(25, n)) : defaultLeftPercent;
+    return Number.isFinite(n)
+      ? Math.min(55, Math.max(15, n))
+      : defaultLeftPercent;
   });
   const [dragging, setDragging] = useState(false);
 
@@ -42,7 +45,10 @@ export function ResizableSplitPane({
       const x = e.clientX - rect.left;
       const minLeft = (minLeftPx / rect.width) * 100;
       const maxLeft = 100 - (minRightPx / rect.width) * 100;
-      const pct = Math.min(maxLeft, Math.max(minLeft, (x / rect.width) * 100));
+      const pct = Math.min(
+        Math.min(55, maxLeft),
+        Math.max(Math.max(15, minLeft), (x / rect.width) * 100),
+      );
       setLeftPercent(pct);
     };
 

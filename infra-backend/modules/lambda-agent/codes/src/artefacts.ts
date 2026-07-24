@@ -55,6 +55,14 @@ export function exportStorageKey(projectId: string, exportId: string): string {
   return `projects/${projectId}/exports/${exportId}.zip`;
 }
 
+export function attachmentStorageKey(
+  sessionId: string,
+  attachmentId: string,
+): string {
+  const safe = attachmentId.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
+  return `sessions/${sessionId}/attachments/${safe}`;
+}
+
 export async function putObject(key: string, body: Buffer | string): Promise<void> {
   const bucket = bucketName();
   if (bucket) {
@@ -65,7 +73,9 @@ export async function putObject(key: string, body: Buffer | string): Promise<voi
         Body: typeof body === 'string' ? Buffer.from(body, 'utf8') : body,
         ContentType: key.endsWith('.zip')
           ? 'application/zip'
-          : 'application/json',
+          : key.includes('/attachments/')
+            ? 'application/octet-stream'
+            : 'application/json',
       }),
     );
     return;

@@ -476,15 +476,45 @@ async function resumeShellTools(params: {
       throw new Error('awaiting_tool but no awaitResult tool_call');
     }
 
-    const cmd =
-      pendingCall.tool === 'run_terminal'
-        ? String(pendingCall.args.cmd ?? '')
-        : '';
-    const shell = await runShell(params.workspace, cmd || 'echo ok');
+    let ok = true;
+    let exitCode = 0;
+    let stdout = '';
+    let stderr = '';
 
-    console.log(
-      `\n=== ${params.turnPrefix}: real shell (${pendingCall.tool}) exit=${shell.exitCode} ===`,
-    );
+    if (pendingCall.tool === 'run_terminal') {
+      const cmd = String(pendingCall.args.cmd ?? '');
+      const shell = await runShell(params.workspace, cmd || 'echo ok');
+      ok = shell.ok;
+      exitCode = shell.exitCode;
+      stdout = shell.stdout.slice(0, 8000);
+      stderr = shell.stderr.slice(0, 4000);
+      console.log(
+        `\n=== ${params.turnPrefix}: real shell exit=${shell.exitCode} ===`,
+      );
+    } else if (
+      pendingCall.tool === 'write_file' ||
+      pendingCall.tool === 'edit_file'
+    ) {
+      try {
+        applyFileTools(params.workspace, [
+          {
+            id: pendingCall.id,
+            tool: pendingCall.tool,
+            args: pendingCall.args,
+            awaitResult: true,
+          },
+        ]);
+        stdout = `Applied ${pendingCall.tool} on ${String(pendingCall.args.path ?? 'file')}`;
+        console.log(
+          `\n=== ${params.turnPrefix}: applied ${pendingCall.tool} ${String(pendingCall.args.path ?? '')} ===`,
+        );
+      } catch (err) {
+        ok = false;
+        stderr = err instanceof Error ? err.message : String(err);
+      }
+    } else {
+      stdout = `noop for ${pendingCall.tool}`;
+    }
 
     ({ events, lastDone } = await drain(
       continueAfterTool({
@@ -493,10 +523,10 @@ async function resumeShellTools(params: {
         projectId: params.projectId,
         toolResult: {
           toolCallId: pendingCall.id,
-          ok: shell.ok,
-          exitCode: shell.exitCode,
-          stdout: shell.stdout.slice(0, 8000),
-          stderr: shell.stderr.slice(0, 4000),
+          ok,
+          exitCode,
+          stdout,
+          stderr,
         },
       }),
       params.ndjsonPath,

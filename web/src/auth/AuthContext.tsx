@@ -111,7 +111,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signIn = useCallback(
     (displayName?: string) => {
-      if (cognitoEnabled) return;
+      // Local debug: allow forged Bearer tokens when VITE_ALLOW_DEV_AUTH=true,
+      // even if Cognito client env is also present.
+      if (cognitoEnabled && !devAuthAllowed) return;
       const id = makeUserId('user');
       const user: AuthUser = {
         id,
@@ -120,7 +122,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       };
       applySession(setState, { user, token: devToken(id) });
     },
-    [cognitoEnabled],
+    [cognitoEnabled, devAuthAllowed],
   );
 
   const loginWithPassword = useCallback(async (email: string, password: string) => {

@@ -288,7 +288,13 @@ export async function handleGithubPush(
   }
 
   const message = body.message?.trim() || 'WalkCroach sync';
-  await pushFilesToRepo(token, repo, files, message);
+  try {
+    await pushFilesToRepo(token, repo, files, message);
+  } catch (err) {
+    return jsonResponse(502, {
+      error: err instanceof Error ? err.message : 'GitHub push failed',
+    });
+  }
 
   return jsonResponse(200, { ok: true, repo, fileCount: files.length });
 }

@@ -11,7 +11,9 @@
 
 > WalkCroach Web is a codegen agent that cannot build coherently without recalling what it already decided — and every decision lives in CockroachDB before the session ends.
 
-The WebContainer preview is the **surface**. CockroachDB is the **product**. AWS Lambda + Bedrock is the **runtime**.
+The Builder preview is the **surface** (E2B cloud when keyed, WebContainer
+fallback locally). CockroachDB is the **product**. AWS Lambda + Bedrock is the
+**agent runtime**.
 
 ---
 
@@ -47,8 +49,8 @@ These are deliberate choices for Module 1. Do not reopen unless blocked.
 | Compute | **Lambda** (no Fargate / App Runner for MVP) | Scales to $0 idle; fits budget |
 | Agent text streaming | **API Gateway REST + Lambda response streaming** | Native Bedrock `ConverseStream` → `streamifyResponse`; TTFB; up to 15 min per invocation |
 | Bidirectional transport | **None for M1** — HTTP only | Bolt.new pattern; WebSocket not required |
-| Tool resume after shell | **`POST /sessions/:id/tool-result`** | Client runs `npm i` in WebContainer; server not waiting |
-| Workspace execution | **WebContainer (temporary)** | In-browser Node sandbox; not durable storage |
+| Tool resume after shell | **`POST /sessions/:id/tool-result`** | Client runs tools in the project sandbox; server not waiting |
+| Workspace execution | **E2B primary; WebContainer fallback** | Cloud microVM when keyed; in-browser Node otherwise |
 | Durable memory | **CockroachDB Cloud** | System of record for all surfaces |
 | GraphQL / AppSync | **Defer** | Resolvers cannot stream Bedrock (10s sync limit); long-running AppSync pattern = WebSocket tax with GraphQL. Revisit AppSync Events for Chrome push (Phase 5+) |
 | Generated stack | React + TypeScript + Vite + Tailwind | Opinionated (Lovable/Bolt proven default) |
@@ -66,9 +68,12 @@ These are deliberate choices for Module 1. Do not reopen unless blocked.
 
 | Tool class | Examples | Where it runs | Server round-trip? |
 |------------|----------|---------------|-------------------|
-| **Client-local** | `write_file`, `edit_file`, `delete_file`, `read_file` (optional) | WebContainer on parse | No — execute while stream continues |
-| **Client-resume** | `run_terminal`, `npm_install`, `npm_run` | WebContainer | **Yes** — stream ends with `tool_call`; client POSTs result |
-| **Server-side** | `recall_project_memory`, MCP schema ops, embed + write memory | Lambda | N/A |
+| **Client-resume** | `write_file`, `edit_file`, `run_terminal` | Client project sandbox (E2B or WC) | **Yes** — stream ends with `tool_call`; client verifies apply then POSTs `/tool-result` |
+| **Server-side** | `recall_project_memory`, `remember_preference`, `web_search`, `web_extract` | Lambda / harness | N/A |
+
+> Historical note: early drafts used **client-local** optimistic acks for
+> file tools. That path is removed — all builder file/terminal tools are
+> client-resume with verified results.
 
 ---
 
@@ -394,7 +399,7 @@ Each phase has **exit criteria**. Do not start the next phase until the previous
 
 **Harness behaviour (locked):**
 - `server` tools (`recall_project_memory`, `remember_preference`) run in-process
-- `client_local` tools (`write_file`, `edit_file`) emitted to client and auto-acked for Converse continuity
+- `client_resume` tools (`write_file`, `edit_file`, `run_terminal`) pause the stream until verified `POST /tool-result` (no optimistic acks)
 - `client_resume` tools (`run_terminal`) set `sessions.pending_tool` and end the stream until `POST /tool-result`
 
 ---

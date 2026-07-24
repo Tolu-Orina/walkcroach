@@ -1,5 +1,6 @@
 import { createDbClient } from '@walkcroach/db';
 import {
+  hasDeviceSigningKey,
   hashDeviceKey,
   mintDeviceKey,
   mintOwnerId,
@@ -17,6 +18,14 @@ export async function handleDeviceSession(
 ): Promise<ReturnType<typeof jsonResponse>> {
   const limited = assertRateLimit('device_session:global', 120, 60_000);
   if (limited) return jsonResponse(429, { error: limited });
+
+  if (!hasDeviceSigningKey()) {
+    return jsonResponse(503, {
+      error: 'chrome_device_signing_unconfigured',
+      message:
+        'CHROME_DEVICE_SIGNING_KEY (or chrome_device_signing_key in runtime secret) is required',
+    });
+  }
 
   let body: DeviceSessionBody = {};
   if (rawBody?.trim()) {

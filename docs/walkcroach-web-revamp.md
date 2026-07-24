@@ -16,10 +16,13 @@ Build intent   : **Build to completion this weekend** (Fri Jul 24 → Sun Jul 26
                  2026). All six surfaces ship. Phases below are a same-weekend
                  execution sequence (hours/blocks), not a multi-week roadmap.
                  Descope only if a block slips — see §8.3.  
-Version        : 1.1  
-Date           : July 24, 2026 (v1.1 — replacement + weekend completion)  
+Version        : 1.3  
+Date           : July 24, 2026 (v1.3 — Phase C Projects as memory containers;
+                 E2B locked as App Builder runtime)  
 Related docs   :
-  - `docs/plan1.md` — locked infra (Lambda stream, WC, CRDB, Bedrock) — keep
+  - `docs/plan1.md` — locked infra (Lambda stream, CRDB, Bedrock) — keep;
+                 **WebContainer as sole builder runtime is superseded by E2B**
+                 (see §5 Decision Log)
   - `docs/walkcroach-web-prd.md` — **superseded** (archive / do not extend)
   - `docs/walkcroach-web-implementation-plan.md` — **superseded**
   - IDE / Chrome / Desktop PRDs — sibling surfaces this hub unifies
@@ -558,24 +561,26 @@ wants:
 Those gaps are exactly why Lovable leans hosted+Supabase and Replit leans
 cloud VMs — and why Bolt can stay on WC (JS-centric).
 
-**RT-01 (near-term):** Keep WebContainer as the App Builder preview runtime.  
-**RT-02 (architecture):** Introduce a `SandboxRuntime` interface in the web
-client + agent harness so tools (`write_file`, `run_terminal`, `preview_url`)
-are runtime-agnostic.  
-**RT-03 (mid-term spike):** Evaluate **E2B** (or Daytona) as:
-  - (a) fallback when WC unsupported (Firefox/Safari degrade),
-  - (b) “Power / Backend” builder mode,
-  - (c) server-side codegen verification in CI.  
-**RT-04 (do not):** Migrate wholesale to cloud VMs in the revamp’s early
-phases — cost and tenancy complexity are high; memory wedge doesn’t require it.  
-**RT-05 (license):** Confirm StackBlitz commercial embedding license status
-for production WalkCroach before scale marketing.
+**RT-01 (LOCKED Jul 24, 2026):** **E2B** is the App Builder sandbox runtime.
+Replace WebContainer as the execution/preview substrate for builder tool
+calls (`write_file`, `edit_file`, `run_terminal`, preview URL).  
+**RT-02 (architecture):** `SandboxRuntime` interface in web + harness; **E2B
+adapter is the primary implementation.** WebContainer may remain briefly as a
+legacy/dev fallback behind a flag during migration, then remove.  
+**RT-03:** ~~Mid-term E2B spike~~ — **done / superseded by RT-01.**  
+**RT-04:** Wholesale cloud migration **is** the weekend path for Builder —
+budget E2B API key in Secrets Manager (`E2B_API_KEY`), cost guards
+(idle kill, max sandbox-seconds), and preview via E2B host URL / port
+forward.  
+**RT-05:** StackBlitz/WC commercial license — **deprioritized** (exit WC).  
 
-**Verdict:** WebContainer was a *good* choice and remains the *right default*
-for a polished preview-first Builder this weekend. It was never the *only*
-choice long-term — keep a light runtime adapter, but **do not** migrate to
-E2B/Daytona during the weekend build. Hybrid path is explicit post-weekend
-follow-on, not incomplete replacement scope.
+**Verdict (updated):** User decision — **use E2B.** WebContainer was right for
+the hackathon zero-server bet; E2B wins for durable sandboxes, full Linux/Node
+fidelity, agent work that survives tab quirks, and escaping the Node-WASM
+ceiling. Phase A introduced `SandboxRuntime` + E2B; Phase D + post-weekend
+P0/P1 closed template mount, durable sandbox identity, and verified client
+tool results. **WC remains the local/dev fallback** when `E2B_API_KEY` is
+unset or E2B boot fails — not a second primary runtime.
 
 
 ================================================================================
@@ -591,9 +596,10 @@ Legend: **P0** must ship Sunday · **P1** ship if ahead · **P2** stub or cut
 
 Weekend operating rules:
   1. This doc wins over `walkcroach-web-prd.md` / implementation-plan on conflict.
-  2. Reuse existing harness, WC, deploy, Cognito, file sync — no infra rewrite.
+  2. Reuse existing harness, Cognito, file sync, deploy — no CRDB/Bedrock rewrite.
   3. Prefer thin vertical slices (route + API + UI) over perfect polish mid-blocks.
-  4. `SandboxRuntime` = light adapter only; **no** E2B/Daytona this weekend.
+  4. **Runtime = E2B (locked).** `SandboxRuntime` + E2B adapter in Phase A;
+     finish Builder cutover in Phase D. Do not invest in new WC features.
   5. SearXNG: self-host or managed instance by Friday night; same tool interface.
   6. Redirects from `/dashboard` and `/project/:id` land in `/app/...` before
      Saturday morning so nothing dead-ends mid-build.
@@ -627,14 +633,23 @@ Goal: Unlock everything else. No big-bang UX yet, but shell routes exist.
 | REV-00 | Confirm six surfaces + Chat-default (this doc = locked) | P0 |
 | REV-01 | Route map + redirects (`/dashboard` → `/app/projects`, `/project/:id` → builder mode) | P0 |
 | REV-02 | AppShell layout (left rail placeholders) + design tokens | P0 |
-| REV-03 | Light `SandboxRuntime` wrap over existing WC (no behavior change) | P1 |
+| REV-03 | `SandboxRuntime` interface + **E2B adapter skeleton** (API key via SM/`E2B_API_KEY`) | P0 |
 | REV-04 | Tool registry: `chat` vs `builder` profiles in agent harness | P0 |
 | REV-05 | Schema: `description`, `instructions`, `project_documents`, generalize sessions→chats, `code_artefacts` | P0 |
 | REV-06 | Stand up SearXNG (or agent-search); wire `web_search` / `web_extract` | P0 |
 | REV-07 | Feature flag `web_revamp_shell` if needed for mid-weekend rollback | P1 |
+| RT-01 | **LOCKED: E2B** is the App Builder runtime (doc §5) | P0 |
 
 **Exit (Fri ~afternoon):** Migrations applied (or dual-write ready); `/app/*`
-routes render shell chrome; search tool returns JSON in agent path.
+routes render shell chrome; search tool returns JSON in agent path; E2B
+`SandboxRuntime` compiles and can create/kill a sandbox in staging when
+`E2B_API_KEY` is set.
+
+**Phase A status (Jul 24, 2026):** ✅ In code — schema `010_web_revamp.sql`,
+`EcosystemShell` + `/app/*` routes + legacy redirects, tool profiles
+`chat|builder|plan`, `web_search`/`web_extract`, E2B `SandboxRuntime` skeleton,
+secrets keys `e2b_api_key` + `searxng_url`. Apply migration + set secrets before
+Phase B.
 
 --------------------------------------------------------------------------------
 PHASE B — SHELL + STANDALONE CHAT (Fri PM → Sat AM)
@@ -656,6 +671,13 @@ Goal: Authenticated home is Chat, not Builder.
 **Exit (Sat late morning):** Sign-in → Chat; attach a file; get cited search
 answer; rail navigates to empty Projects/Code/Apps stubs.
 
+**Phase B status (Jul 24, 2026):** ✅ In code — collapsible ecosystem rail
+(Claude-like: icon mode ↔ expanded with brand, labels, New chat, Recents,
+profile); Chat empty state; streaming `mode=chat`; attachments + web-search;
+citations. **Visual system (Jul 24):** Bricolage Grotesque + Source Sans 3 +
+JetBrains Mono; moss-ledger tokens; light-preferring theme default. Apply
+`010_web_revamp.sql` before use.
+
 --------------------------------------------------------------------------------
 PHASE C — PROJECTS AS MEMORY CONTAINERS (Sat AM, overlaps B)
 --------------------------------------------------------------------------------
@@ -663,71 +685,91 @@ Goal: Projects hold docs + instructions across the chat timeline.
 
 | ID | Work | Priority |
 |----|------|----------|
-| PJ-10 | Project home: description, standing instructions, document library | P0 |
-| PJ-11 | Multi-chat timeline under a project | P0 |
-| PJ-12 | Inject/retrieve project docs + instructions into agent context | P0 |
-| PJ-13 | “Remembered” panel (surface existing CRDB memory summaries) | P0 |
-| PJ-14 | Backfill existing builder projects into new model | P0 |
-| PJ-15 | “Start App Builder” from project home | P0 |
-| PJ-16 | Archive / delete on project home | P1 |
-| PJ-17 | Templates create Project first, then open Builder | P1 |
+| PJ-10 | Project home: description, standing instructions, document library | P0 | ✅ |
+| PJ-11 | Multi-chat timeline under a project | P0 | ✅ |
+| PJ-12 | Inject/retrieve project docs + instructions into agent context | P0 | ✅ |
+| PJ-13 | “Remembered” panel (surface existing CRDB memory summaries) | P0 | ✅ |
+| PJ-14 | Backfill existing builder projects into new model | P0 | ✅ |
+| PJ-15 | “Start App Builder” from project home | P0 | ✅ |
+| PJ-16 | Archive / delete on project home | P1 | ✅ |
+| PJ-17 | Templates create Project first, then open Builder | P1 | ✅ |
 
 **Exit (Sat midday):** Create project → add instructions + doc → new chat
 respects them → open Builder as project mode.
 
+**Phase C status (Jul 24, 2026):** ✅ In code — `ProjectHomePage` at
+`/app/projects/:id`; PATCH project + documents CRUD + memory list REST;
+agent injects knowledge on all turn paths; project chats at
+`/app/projects/:id/chat/:chatId`; Start App Builder →
+`/app/projects/:id/builder`; templates land on project home (prompt flows
+open builder). Apply `011_project_documents_text.sql` before use. Backfill
+via migration defaults (`kind='app'`).
+
 --------------------------------------------------------------------------------
-PHASE D — APP BUILDER UX POLISH (Sat PM)  ★ must not slip past Saturday
+PHASE D — APP BUILDER UX POLISH (Sat PM)  ★ done
 --------------------------------------------------------------------------------
 Goal: Metaphor A. Terminal closed by default. Code openable. Lovable-calm.
 
-| ID | Work | Priority |
-|----|------|----------|
-| AB-10 | Builder chrome: preview dominant; chat left; bottom status bar | P0 |
-| AB-11 | **Terminal drawer** collapsed by default; badge; expand/collapse | P0 |
-| AB-12 | **Code drawer**: file tree + Monaco (read + light edit) | P0 |
-| AB-13 | Structured activity chips instead of always-on mono log | P0 |
-| AB-14 | Focus mode (hide ecosystem rail) | P0 |
-| AB-15 | Plain-language empty/error states | P0 |
-| AB-16 | Restyle Ship / Data / Versions to match shell | P1 |
-| AB-17 | Dev mode toggle (open files+terminal by default) | P2 |
-| RT-10 | Builder tools via `SandboxRuntime` (still WC) | P1 |
+| ID | Work | Priority | Status |
+|----|------|----------|--------|
+| AB-10 | Builder chrome: preview dominant; chat left; bottom status bar | P0 | ✅ |
+| AB-11 | **Terminal drawer** collapsed by default; badge; expand/collapse | P0 | ✅ |
+| AB-12 | **Code drawer**: file tree + Monaco (read + light edit) | P0 | ✅ |
+| AB-13 | Structured activity chips instead of always-on mono log | P0 | ✅ |
+| AB-14 | Focus mode (hide ecosystem rail) + ← Project chip | P0 | ✅ |
+| AB-15 | Plain-language empty/error states | P0 | ✅ |
+| AB-16 | Restyle Ship / Data / Versions to match shell | P1 | ✅ |
+| AB-17 | Dev mode toggle (open files+terminal by default) | P2 | ✅ localStorage |
+| RT-10 | Builder tools on **E2B** via `SandboxRuntime` (WC fallback) | P0 | ✅ Honest: see note below |
+
+**RT-10 status (Jul 24, 2026 — post P0/P1):** Primary path is E2B when
+`E2B_API_KEY` is set: create/reconnect via durable `projects.e2b_*` columns,
+template mount + install/preview, client applies `write_file` /
+`edit_file` / `run_terminal` with **verified** `POST /tool-result` (no
+optimistic acks). Without a key (or on E2B boot failure), the Builder client
+falls back to **in-browser WebContainer** for the same tool protocol. WC is
+fallback/exit-path only — do not treat “RT-10 ✅” as “E2B-only everywhere.”
 
 **Exit (Sat night):** Template → prompt → preview without opening terminal;
-Code + Terminal each open in ≤2 clicks; focus mode works.
+Code + Terminal each open in ≤2 clicks; focus mode works; preview served from
+E2B sandbox host URL when `E2B_API_KEY` is set (else local WC fallback).
 
 --------------------------------------------------------------------------------
-PHASE E — CODE LIBRARY + APPS HUB (Sun AM)
+PHASE E — CODE LIBRARY + APPS HUB (Sun AM)  ★ done
 --------------------------------------------------------------------------------
 Goal: Outputs are first-class collections.
 
-| ID | Work | Priority |
-|----|------|----------|
-| CD-10 | `/app/code` index from chats + builder sync | P0 |
-| CD-11 | Artefact detail: preview / download / open in Builder / GitHub | P0 |
-| CD-12 | “Save as code” from Chat for substantial code blocks | P1 |
-| AP-10 | `/app/apps` — My deployments (existing deploy records) | P0 |
-| AP-11 | Ecosystem products panel (Chrome, IDE, Desktop, CLI) + deep links | P0 |
-| AP-12 | “Plugins — coming soon” stub | P2 |
-| AP-13 | Share-link if time (else cut) | P2 |
+| ID | Work | Priority | Status |
+|----|------|----------|--------|
+| CD-10 | `/app/code` index from chats + builder sync | P0 | ✅ |
+| CD-11 | Artefact detail: preview / download / open in Builder / GitHub | P0 | ✅ |
+| CD-12 | “Save as code” from Chat for substantial code blocks | P1 | ✅ |
+| AP-10 | `/app/apps` — My deployments (existing deploy records) | P0 | ✅ |
+| AP-11 | Ecosystem products panel (Chrome, IDE, Desktop, CLI) + deep links | P0 | ✅ |
+| AP-12 | “Plugins — coming soon” stub | P2 | ✅ |
+| AP-13 | Share-link if time (else cut) | P2 | cut |
 
-**Exit (Sun midday):** Apps lists a live deployment; Code shows ≥1 chat file
-and ≥1 builder file.
+**Exit (Sun midday):** Apps lists deployments via `GET /apps/mine`; Code lists
+artefacts via `GET /code-artefacts` (builder sync + chat save). Detail at
+`/app/code/:artefactId`.
 
 --------------------------------------------------------------------------------
-PHASE F — PROFILE + HARDEN + SHIP (Sun AM late → Sun PM)
+PHASE F — PROFILE + HARDEN + SHIP (Sun AM late → Sun PM)  ★ done
 --------------------------------------------------------------------------------
 Goal: Account destination + production cutover. Weekend complete.
 
-| ID | Work | Priority |
-|----|------|----------|
-| PF-20 | Settings: account, appearance, usage | P0 |
-| PF-21 | Stripe portal — only if already half-wired; else usage + “billing soon” | P1 |
-| PF-22 | Connections: GitHub + IDE link status + Chrome install CTA | P0 |
-| PF-23 | Export / delete account | P2 |
-| PF-24 | Social auth | P2 |
-| REV-30 | Smoke: Chat → Project → Builder → Deploy → Apps → Profile | P0 |
-| REV-31 | Prod deploy + redirect verification | P0 |
-| REV-32 | Demo script (5 min) covering all six surfaces | P0 |
+| ID | Work | Priority | Status |
+|----|------|----------|--------|
+| PF-20 | Settings: account, appearance, usage | P0 | ✅ |
+| PF-21 | Stripe portal — usage + “billing soon” (portal not half-wired) | P1 | ✅ stub |
+| PF-22 | Connections: GitHub status + IDE link + Chrome CTA | P0 | ✅ |
+| PF-23 | Export / delete account | P2 | cut |
+| PF-24 | Social auth | P2 | cut |
+| REV-30 | Smoke: Chat → Project → Builder → Deploy → Apps → Profile | P0 | ✅ docs |
+| REV-31 | Prod deploy + redirect verification | P0 | ✅ docs/ops |
+| REV-32 | Demo script (5 min) covering all six surfaces | P0 | ✅ docs |
+
+Docs: `docs/smoke-and-redirects.md`, `docs/demo-script-web-6-surfaces.md`.
 
 **Weekend done when:** All six surfaces are reachable in prod, Chat is default
 home, Builder terminal is closed by default, Projects carry instructions/docs,
@@ -736,56 +778,74 @@ Code + Apps are browsable, Profile opens from avatar.
 --------------------------------------------------------------------------------
 EXPLICITLY OUT OF WEEKEND SCOPE (do not start)
 --------------------------------------------------------------------------------
-  - E2B / Daytona / cloud-sandbox hybrid (research stands; build later)
+  - Daytona / Codespaces (E2B is the chosen cloud sandbox)
   - MCP marketplace / plugin architecture beyond Apps stub
   - Mobile-first builder redesign
   - Multi-user project membership / collab
   - Two-way GitHub sync / custom domains (unless already done)
-  - Replacing WebContainer
-
-These are post-weekend follow-ons, not incomplete “phases” of this replacement.
+  - New WebContainer features (WC is exit-path only during E2B cutover)
 
 
 ================================================================================
-7. DATA MODEL & API IMPLICATIONS (SKETCH)
+7. DATA MODEL & API IMPLICATIONS (AS BUILT)
 ================================================================================
 
 Additive to existing CockroachDB schema — do not break current projects/sessions.
 
+**Dual-read (intentional):** Product/UI language is “chat”; physical tables and
+REST remain **`sessions` / `messages`**. UI routes use `/app/chat/:chatId` where
+`chatId` === `sessions.id`. There is **no** `chats` / `chat_messages` rename
+table. Do not chase a missing `chats` migration — this is the weekend design.
+
 ```
 projects
-  + description TEXT
-  + instructions TEXT          -- standing instructions (Claude-like)
-  + kind ENUM('general','app') -- app ⇒ has builder workspace
+  + description STRING
+  + instructions STRING
+  + kind STRING DEFAULT 'app'   -- app | general (STRING, not DB ENUM)
 
 project_documents
-  id, project_id, name, mime, s3_key, embedding_id, created_at
+  id, project_id, name, mime, s3_key NULL, byte_size, embedding VECTOR(1024),
+  text_content, created_at
+  -- embedding column (not embedding_id); text-inline via 011
 
-chats                          -- generalize today’s sessions
-  id, user_id, project_id NULL, title, mode ENUM('chat','builder'), ...
+sessions                          -- dual-read “chats”
+  + title, + mode ('chat'|'builder'), project_id NULLABLE
+  -- ownership via projects.owner_id; general Chat uses /me/chat-workspace
 
-chat_messages                  -- if not already normalized
-  + attachments JSONB
-  + citations JSONB
+messages                          -- dual-read “chat_messages”
+  + attachments JSONB             -- 012: Chat file metas (name/mime/preview/storageKey)
+  + citations JSONB               -- 012: assistant URL citations
+  -- content remains JSONB Bedrock blocks
+  -- attachment bodies: sessions/{sessionId}/attachments/{id} via putObject
 
 code_artefacts
-  id, user_id, project_id NULL, chat_id NULL, path, content_hash, s3_key, language
+  id, user_id, project_id NULL, session_id NULL (not chat_id),
+  path, language, content_hash, s3_key, content, created_at, updated_at
 
-deployments                    -- already exist; index from Apps hub
+deployments                       -- indexed by Apps hub GET /apps/mine
 
-tool_invocations               -- optional audit for search/tools
+build_events                      -- tool audit (surface=web)
+tool_invocations                  -- 013: dual-written with build_events (§7)
 ```
 
-API additions (illustrative):
+API (live paths — prefer these over the original sketch names):
 
-  - `POST /chats`, `POST /chats/:id/prompt` (chat tool profile)
-  - `POST /projects/:id/documents`
-  - `PATCH /projects/:id` `{ description, instructions }`
-  - `GET /code-artefacts`
-  - `GET /apps/mine` (deployments + metadata)
-  - `POST /tools/web-search` (or agent-internal only)
+  - `POST /sessions` · `POST /sessions/:id/prompt` (modes: chat | project_chat | build | plan)
+  - `GET /projects/:id/sessions?mode=chat&limit=20` (server-side mode + limit)
+  - `POST /me/chat-workspace` (personal Chat project)
+  - `POST/GET/DELETE /projects/:id/documents…`
+  - `PATCH /projects/:id` `{ name?, description?, instructions? }`
+  - `GET /projects/:id/memory`
+  - `GET/POST /code-artefacts` · `GET /code-artefacts/:id`
+  - `GET /apps/mine`
+  - Web search: **agent-internal** `web_search` / `web_extract` (no REST)
+  - Sandbox: `POST/GET/DELETE /projects/:id/sandbox` + write/edit/terminal/files/read/preview
 
-Agent harness: mount tool profiles `chat | project_chat | builder` from registry.
+Agent harness tool profiles: `chat | project_chat | builder | plan`.
+`project_chat` ≡ chat tools; knowledge injected via system prompt when docs/
+instructions exist. Session rows stay `mode: 'chat'|'builder'`. Prompt HTTP
+body uses `mode: 'project_chat'` for Project Chat and `mode: 'chat'` for
+general Chat.
 
 
 ================================================================================
@@ -883,7 +943,7 @@ APPENDIX A — PROVIDER MATRIX (SUMMARY)
 | Deploy / live URL | publish | ~ | ~ | ✗ | ✓ | ✓ | Vercel | ✓ | ✓ | ✓ + Apps |
 | Cross-product memory | ~ | ~ | ~ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ (CRDB) | ✓✓ surfaced |
 | Profile/settings | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ |
-| Runtime | cloud | cloud | cloud | cloud | hosted | **WC** | Vercel | VM | **WC** | WC + hybrid |
+| Runtime | cloud | cloud | cloud | cloud | hosted | **WC** | Vercel | VM | **E2B + WC fallback** | **E2B (locked)** |
 
 
 ================================================================================

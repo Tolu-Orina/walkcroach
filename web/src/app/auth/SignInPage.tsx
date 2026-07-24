@@ -25,7 +25,7 @@ export function SignInPage() {
     nextParam && nextParam.startsWith('/')
       ? nextParam
       : hasCompletedWelcome()
-        ? '/dashboard'
+        ? '/app/chat'
         : '/welcome';
 
   if (status === 'authenticated') {
@@ -112,6 +112,29 @@ export function SignInPage() {
             try as guest
           </Link>
         </p>
+      )}
+      {devAuthAllowed && (
+        <div className="mt-4 space-y-2 border-t border-line pt-4">
+          <button
+            type="button"
+            className="btn-secondary w-full text-sm"
+            onClick={() => {
+              signIn('Local Debugger');
+              navigate(next, { replace: true });
+            }}
+          >
+            Continue as Builder (local)
+          </button>
+          <p className="text-center text-[11px] text-mist">
+            Or open the{' '}
+            <Link
+              to="/debug/screens"
+              className="interactive text-signal hover:underline"
+            >
+              screen map
+            </Link>
+          </p>
+        </div>
       )}
     </AuthCard>
   );

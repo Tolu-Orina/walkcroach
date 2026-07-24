@@ -7,6 +7,7 @@ export type HttpRequest = {
   body: string | undefined;
   pathParameters: Record<string, string | undefined>;
   headers: Record<string, string | undefined>;
+  queryString: string;
 };
 
 function normalizeHeaders(
@@ -18,6 +19,15 @@ function normalizeHeaders(
     out[k.toLowerCase()] = v;
   }
   return out;
+}
+
+function queryFromEvent(e: Record<string, unknown>): string {
+  if (typeof e.rawQueryString === 'string') return e.rawQueryString;
+  const qs = e.queryStringParameters as Record<string, string> | undefined;
+  if (qs && typeof qs === 'object') {
+    return new URLSearchParams(qs).toString();
+  }
+  return '';
 }
 
 export function normalizeEvent(event: unknown): HttpRequest {
@@ -37,6 +47,7 @@ export function normalizeEvent(event: unknown): HttpRequest {
         headers: normalizeHeaders(
           e.headers as Record<string, string | undefined> | undefined,
         ),
+        queryString: queryFromEvent(e),
       };
     }
   }
@@ -51,5 +62,6 @@ export function normalizeEvent(event: unknown): HttpRequest {
     headers: normalizeHeaders(
       e.headers as Record<string, string | undefined> | undefined,
     ),
+    queryString: queryFromEvent(e),
   };
 }

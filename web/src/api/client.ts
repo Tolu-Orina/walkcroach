@@ -5,6 +5,9 @@ import type {
   CheckpointSummary,
   PlanDecision,
   ProjectDetail,
+  ProjectDocument,
+  ProjectMemoryEntry,
+  ProjectSession,
   ProjectSummary,
 } from './types';
 
@@ -46,7 +49,7 @@ export async function listProjects(): Promise<ProjectSummary[]> {
     headers: authHeaders(),
   });
   const data = await parseJson<{ projects: ProjectSummary[] }>(res);
-  return data.projects;
+  return data.projects ?? [];
 }
 
 export async function getProject(projectId: string): Promise<ProjectDetail> {
@@ -59,11 +62,122 @@ export async function getProject(projectId: string): Promise<ProjectDetail> {
 export async function createProject(
   name: string,
   templateId?: string,
-): Promise<{ id: string; templateId?: string }> {
+  opts?: { kind?: 'app' | 'general' },
+): Promise<{ id: string; templateId?: string; kind?: string }> {
   const res = await fetch(`${API_URL}/projects`, {
     method: 'POST',
     headers: authHeaders(),
-    body: JSON.stringify({ name, templateId }),
+    body: JSON.stringify({
+      name,
+      templateId,
+      kind: opts?.kind ?? 'app',
+    }),
+  });
+  return parseJson(res);
+}
+
+/** Personal Chat workspace (kind=general) — one per user. */
+export async function ensureChatWorkspace(): Promise<{ id: string }> {
+  const res = await fetch(`${API_URL}/me/chat-workspace`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({}),
+  });
+  return parseJson(res);
+}
+
+export async function listChatSessions(
+  workspaceId: string,
+): Promise<Array<{ id: string; title: string }>> {
+  const res = await fetch(
+    `${API_URL}/projects/${workspaceId}/sessions?mode=chat&limit=20`,
+    { headers: authHeaders() },
+  );
+  const data = await parseJson<{
+    sessions: Array<{
+      id: string;
+      title: string | null;
+      mode?: string;
+      createdAt?: string;
+    }>;
+  }>(res);
+  // Server filters mode=chat; keep a soft guard for older backends.
+  return (data.sessions ?? [])
+    .filter((s) => (s.mode ?? 'chat') === 'chat')
+    .map((s) => ({
+      id: s.id,
+      title: s.title?.trim() || `Chat ${s.id.slice(0, 8)}`,
+    }));
+}
+
+export async function listProjectSessions(
+  projectId: string,
+): Promise<ProjectSession[]> {
+  const res = await fetch(`${API_URL}/projects/${projectId}/sessions`, {
+    headers: authHeaders(),
+  });
+  const data = await parseJson<{ sessions: ProjectSession[] }>(res);
+  return data.sessions ?? [];
+}
+
+export async function patchProject(
+  projectId: string,
+  patch: {
+    name?: string;
+    description?: string | null;
+    instructions?: string | null;
+    templateId?: string;
+  },
+): Promise<ProjectDetail> {
+  const res = await fetch(`${API_URL}/projects/${projectId}`, {
+    method: 'PATCH',
+    headers: authHeaders(),
+    body: JSON.stringify(patch),
+  });
+  return parseJson(res);
+}
+
+export async function listProjectDocuments(
+  projectId: string,
+): Promise<ProjectDocument[]> {
+  const res = await fetch(`${API_URL}/projects/${projectId}/documents`, {
+    headers: authHeaders(),
+  });
+  const data = await parseJson<{ documents: ProjectDocument[] }>(res);
+  return data.documents ?? [];
+}
+
+export async function createProjectDocument(
+  projectId: string,
+  input: { name: string; mime?: string; textContent: string },
+): Promise<ProjectDocument> {
+  const res = await fetch(`${API_URL}/projects/${projectId}/documents`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify(input),
+  });
+  return parseJson(res);
+}
+
+export async function deleteProjectDocument(
+  projectId: string,
+  documentId: string,
+): Promise<void> {
+  const res = await fetch(
+    `${API_URL}/projects/${projectId}/documents/${documentId}`,
+    {
+      method: 'DELETE',
+      headers: authHeaders(),
+    },
+  );
+  await parseJson(res);
+}
+
+export async function listProjectMemory(
+  projectId: string,
+): Promise<{ summary: string | null; entries: ProjectMemoryEntry[] }> {
+  const res = await fetch(`${API_URL}/projects/${projectId}/memory`, {
+    headers: authHeaders(),
   });
   return parseJson(res);
 }
@@ -95,11 +209,12 @@ export async function getLatestSession(
 
 export async function createSession(
   projectId: string,
+  mode: 'chat' | 'builder' = 'builder',
 ): Promise<{ id: string; projectId: string }> {
   const res = await fetch(`${API_URL}/sessions`, {
     method: 'POST',
     headers: authHeaders(),
-    body: JSON.stringify({ projectId }),
+    body: JSON.stringify({ projectId, mode }),
   });
   return parseJson(res);
 }
@@ -118,6 +233,13 @@ export type SessionDetail = {
     id: string;
     role: 'user' | 'assistant' | 'tool';
     content: string;
+    attachments?: Array<{
+      name: string;
+      mime: string;
+      textPreview: string;
+      byteSize?: number;
+    }> | null;
+    citations?: Array<{ title: string; url: string }> | null;
   }>;
 };
 
@@ -133,7 +255,7 @@ export async function getSessionActivity(sessionId: string): Promise<ActivityEve
     headers: authHeaders(),
   });
   const data = await parseJson<{ events: ActivityEvent[] }>(res);
-  return data.events;
+  return data.events ?? [];
 }
 
 export async function* streamPlanDecision(
@@ -177,7 +299,7 @@ export async function listCheckpoints(
     headers: authHeaders(),
   });
   const data = await parseJson<{ checkpoints: CheckpointSummary[] }>(res);
-  return data.checkpoints;
+  return data.checkpoints ?? [];
 }
 
 export async function createCheckpoint(
@@ -270,7 +392,19 @@ async function* readNdjson(
 
 export async function* streamPrompt(
   sessionId: string,
-  body: { message: string; projectId: string; mode: AgentMode },
+  body: {
+    message: string;
+    projectId: string;
+    mode: AgentMode;
+    attachments?: Array<{
+      name: string;
+      mime: string;
+      textPreview: string;
+      byteSize?: number;
+      contentText?: string;
+      contentBase64?: string;
+    }>;
+  },
   signal?: AbortSignal,
 ): AsyncGenerator<AgentEvent> {
   const res = await fetch(`${API_URL}/sessions/${sessionId}/prompt`, {
@@ -414,7 +548,7 @@ export async function getDeployments(
     headers: authHeaders(),
   });
   const data = await parseJson<{ deployments: DeploymentSummary[] }>(res);
-  return data.deployments;
+  return data.deployments ?? [];
 }
 
 export async function triggerDeploy(
@@ -493,4 +627,79 @@ export async function pushGithub(
     body: JSON.stringify(body),
   });
   await parseJson(res);
+}
+
+/* —— Phase E: Code library + Apps hub —— */
+
+export type CodeArtefactSummary = {
+  id: string;
+  projectId: string | null;
+  projectName: string | null;
+  sessionId: string | null;
+  path: string;
+  language: string | null;
+  contentHash: string | null;
+  byteSize: number | null;
+  createdAt: string;
+  updatedAt: string;
+  source: 'chat' | 'builder' | string;
+};
+
+export type CodeArtefactDetail = CodeArtefactSummary & {
+  content: string | null;
+  s3Key: string | null;
+};
+
+export async function listCodeArtefacts(): Promise<CodeArtefactSummary[]> {
+  const res = await fetch(`${API_URL}/code-artefacts`, {
+    headers: authHeaders(),
+  });
+  const data = await parseJson<{ artefacts: CodeArtefactSummary[] }>(res);
+  return data.artefacts ?? [];
+}
+
+export async function getCodeArtefact(
+  artefactId: string,
+): Promise<CodeArtefactDetail> {
+  const res = await fetch(`${API_URL}/code-artefacts/${artefactId}`, {
+    headers: authHeaders(),
+  });
+  const data = await parseJson<{ artefact: CodeArtefactDetail }>(res);
+  return data.artefact;
+}
+
+export async function createCodeArtefact(body: {
+  path?: string;
+  content: string;
+  language?: string;
+  projectId?: string | null;
+  sessionId?: string | null;
+}): Promise<CodeArtefactDetail> {
+  const res = await fetch(`${API_URL}/code-artefacts`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify(body),
+  });
+  const data = await parseJson<{ artefact: CodeArtefactDetail }>(res);
+  return data.artefact;
+}
+
+export type MyAppDeployment = {
+  id: string;
+  projectId: string;
+  projectName: string;
+  target: string;
+  url: string | null;
+  status: string;
+  buildId: string | null;
+  errorMessage: string | null;
+  deployedAt: string;
+};
+
+export async function listMyApps(): Promise<MyAppDeployment[]> {
+  const res = await fetch(`${API_URL}/apps/mine`, {
+    headers: authHeaders(),
+  });
+  const data = await parseJson<{ apps: MyAppDeployment[] }>(res);
+  return data.apps ?? [];
 }

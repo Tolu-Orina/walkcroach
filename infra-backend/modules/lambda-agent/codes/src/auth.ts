@@ -3,7 +3,7 @@ import type { CognitoJwtVerifierSingleUserPool } from 'aws-jwt-verify/cognito-ve
 
 /**
  * Request auth resolution.
- * - Production: Cognito JWT (ID token) verified against JWKS.
+ * - Production: Cognito JWT (ID or access token) verified against JWKS.
  * - Dev/local: optional Bearer dev:user:* / dev:anon:* when ALLOW_DEV_AUTH=true.
  */
 
@@ -16,6 +16,12 @@ export type AuthContext = {
 let idVerifier: CognitoJwtVerifierSingleUserPool<{
   userPoolId: string;
   tokenUse: 'id';
+  clientId: string;
+}> | null = null;
+
+let accessVerifier: CognitoJwtVerifierSingleUserPool<{
+  userPoolId: string;
+  tokenUse: 'access';
   clientId: string;
 }> | null = null;
 
@@ -42,6 +48,26 @@ function getIdVerifier():
     });
   }
   return idVerifier;
+}
+
+function getAccessVerifier():
+  | CognitoJwtVerifierSingleUserPool<{
+      userPoolId: string;
+      tokenUse: 'access';
+      clientId: string;
+    }>
+  | null {
+  const userPoolId = process.env.COGNITO_USER_POOL_ID;
+  const clientId = process.env.COGNITO_CLIENT_ID;
+  if (!userPoolId || !clientId) return null;
+  if (!accessVerifier) {
+    accessVerifier = CognitoJwtVerifier.create({
+      userPoolId,
+      clientId,
+      tokenUse: 'access',
+    });
+  }
+  return accessVerifier;
 }
 
 function normalizeHeaders(
@@ -77,6 +103,34 @@ function resolveDevToken(token: string): AuthContext | null {
   };
 }
 
+async function verifyJwt(token: string): Promise<AuthContext | null> {
+  const id = getIdVerifier();
+  if (id) {
+    try {
+      const payload = await id.verify(token);
+      if (payload.sub) {
+        return { ownerId: payload.sub, isAnonymous: false, source: 'jwt' };
+      }
+    } catch {
+      // try access token next
+    }
+  }
+
+  const access = getAccessVerifier();
+  if (access) {
+    try {
+      const payload = await access.verify(token);
+      if (payload.sub) {
+        return { ownerId: payload.sub, isAnonymous: false, source: 'jwt' };
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
 export async function resolveAuth(
   headers: Record<string, string | undefined> | undefined,
 ): Promise<AuthContext | null> {
@@ -86,17 +140,7 @@ export async function resolveAuth(
   const dev = resolveDevToken(token);
   if (dev) return dev;
 
-  const verifier = getIdVerifier();
-  if (!verifier) return null;
-
-  try {
-    const payload = await verifier.verify(token);
-    const sub = payload.sub;
-    if (!sub) return null;
-    return { ownerId: sub, isAnonymous: false, source: 'jwt' };
-  } catch {
-    return null;
-  }
+  return verifyJwt(token);
 }
 
 export async function requireAuth(

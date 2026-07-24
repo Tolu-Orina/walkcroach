@@ -1,43 +1,34 @@
+import { Glass } from '../../components/Glass';
+import { Reveal, Stagger, StaggerItem } from '../../components/Reveal';
+
 const STATS = [
   { value: '<8s', label: 'Target preview boot' },
   { value: 'Plan → Build', label: 'Approval before writes' },
-  { value: 'CRDB', label: 'Memory + projects persist' },
+  { value: 'Persistent', label: 'Memory across sessions' },
   { value: '1-click', label: 'Deploy to your subdomain' },
-] as const;
-
-const BADGES = [
-  'CockroachDB × AWS Hackathon',
-  'WebContainer in-browser',
-  'GitHub sync',
 ] as const;
 
 export function SocialProof() {
   return (
-    <section className="px-6 py-12 lg:px-10">
-      <div className="w-full">
-        <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {STATS.map((stat) => (
-            <li
-              key={stat.label}
-              className="rounded-sm border border-line bg-panel/40 px-4 py-5 text-center"
+    <section className="relative px-4 py-14 sm:px-5">
+      <Reveal>
+        <p className="eyebrow text-center">Built for continuity</p>
+      </Reveal>
+      <Stagger className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {STATS.map((stat) => (
+          <StaggerItem key={stat.label}>
+            <Glass
+              hairline
+              className="h-full px-4 py-6 text-center transition duration-300 hover:border-teal/35"
             >
-              <p className="font-display text-2xl font-bold text-signal">{stat.value}</p>
-              <p className="mt-1 text-xs text-mist">{stat.label}</p>
-            </li>
-          ))}
-        </ul>
-
-        <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-          {BADGES.map((badge) => (
-            <span
-              key={badge}
-              className="rounded-full border border-line px-3 py-1 text-[11px] text-mist"
-            >
-              {badge}
-            </span>
-          ))}
-        </div>
-      </div>
+              <p className="font-display text-2xl font-extrabold tracking-tight text-signal">
+                {stat.value}
+              </p>
+              <p className="mt-2 text-xs leading-snug text-mist">{stat.label}</p>
+            </Glass>
+          </StaggerItem>
+        ))}
+      </Stagger>
     </section>
   );
 }

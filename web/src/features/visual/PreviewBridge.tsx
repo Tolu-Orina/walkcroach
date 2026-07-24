@@ -1,15 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getInlineEditQuota, recordInlineEdit } from '../../api/client';
 import { AlertDialog } from '../../components/ConfirmDialog';
-import type { WebContainer } from '@webcontainer/api';
 import { ElementToolbar } from './ElementToolbar';
-import { applyInlineTextEdit } from './inlineEdit';
+import { filePathFromWcPath } from './types';
 import type { WcBridgeMessage, WcElementSelection } from './types';
 
 type PreviewBridgeProps = {
   projectId: string;
   previewUrl: string | null;
-  wcRef: React.MutableRefObject<WebContainer | null>;
+  /** Apply a unique text replace in a source file (sandbox-agnostic). */
+  onApplyEdit: (
+    path: string,
+    oldStr: string,
+    newStr: string,
+  ) => void | Promise<void>;
+  /** Optional read for uniqueness checks before edit. */
+  onReadFile?: (path: string) => Promise<string>;
   onScopedPrompt: (text: string) => void;
   onFilesMutated: () => void;
 };
@@ -17,7 +23,8 @@ type PreviewBridgeProps = {
 export function PreviewBridge({
   projectId,
   previewUrl,
-  wcRef,
+  onApplyEdit,
+  onReadFile,
   onScopedPrompt,
   onFilesMutated,
 }: PreviewBridgeProps) {
@@ -29,7 +36,9 @@ export function PreviewBridge({
   const [alertMessage, setAlertMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    void getInlineEditQuota(projectId).then((q) => setRemaining(q.remaining)).catch(() => {});
+    void getInlineEditQuota(projectId)
+      .then((q) => setRemaining(q.remaining))
+      .catch(() => {});
   }, [projectId]);
 
   const postToPreview = useCallback((msg: WcBridgeMessage) => {
@@ -60,11 +69,22 @@ export function PreviewBridge({
 
   const handleSaveText = async (newText: string) => {
     if (!selection) return;
-    const wc = wcRef.current;
-    if (!wc) return;
     setBusy(true);
     try {
-      await applyInlineTextEdit(wc, selection.path, selection.text, newText);
+      const filePath = filePathFromWcPath(selection.path);
+      if (onReadFile) {
+        const current = await onReadFile(filePath);
+        if (!current.includes(selection.text)) {
+          throw new Error(`Text not found in ${filePath}`);
+        }
+        const occurrences = current.split(selection.text).length - 1;
+        if (occurrences > 1) {
+          throw new Error(
+            `Selected text appears ${occurrences} times; refine the selection so it is unique`,
+          );
+        }
+      }
+      await onApplyEdit(filePath, selection.text, newText);
       const quota = await recordInlineEdit(projectId, selection.path);
       setRemaining(quota.remaining);
       onFilesMutated();
@@ -98,26 +118,27 @@ export function PreviewBridge({
         remainingEdits={remaining}
         busy={busy}
         onSaveText={(text) => void handleSaveText(text)}
-        onAskAbout={(prompt) => {
-          onScopedPrompt(prompt);
-          setEditMode(false);
+        onAskAbout={(text) => {
+          onScopedPrompt(text);
           setSelection(null);
+          setEditMode(false);
         }}
         onClose={() => setSelection(null)}
       />
 
-      {previewUrl && (
+      {previewUrl ? (
         <iframe
           ref={iframeRef}
-          title="WalkCroach preview"
+          title="App preview"
           src={previewUrl}
           className="h-full w-full border-0 bg-white"
           allow="cross-origin-isolated"
         />
-      )}
+      ) : null}
+
       <AlertDialog
         open={alertMessage !== null}
-        title="Inline edit failed"
+        title="Could not apply edit"
         message={alertMessage ?? ''}
         onClose={() => setAlertMessage(null)}
       />

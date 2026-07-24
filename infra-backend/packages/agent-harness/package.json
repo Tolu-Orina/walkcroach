@@ -21,7 +21,8 @@
   },
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.800.0",
-    "@walkcroach/db": "*"
+    "@walkcroach/db": "*",
+    "e2b": "^2.35.3"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",

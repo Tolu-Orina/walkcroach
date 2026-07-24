@@ -22,7 +22,7 @@ const STEPS: TourStep[] = [
   {
     target: '[data-wc-tour="preview"]',
     title: 'Live preview',
-    body: 'Your app runs in WebContainer. Click elements in the preview to scope edits.',
+    body: 'Your app runs in a live sandbox preview. Click elements to scope edits.',
   },
   {
     target: '[data-wc-tour="deploy-cta"]',

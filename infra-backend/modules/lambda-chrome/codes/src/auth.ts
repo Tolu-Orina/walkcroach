@@ -8,6 +8,12 @@ export type AuthContext = {
   source: 'device' | 'jwt' | 'dev';
 };
 
+let idVerifier: CognitoJwtVerifierSingleUserPool<{
+  userPoolId: string;
+  tokenUse: 'id';
+  clientId: string;
+}> | null = null;
+
 let accessVerifier: CognitoJwtVerifierSingleUserPool<{
   userPoolId: string;
   tokenUse: 'access';
@@ -33,6 +39,26 @@ function bearerToken(
   if (!auth?.startsWith('Bearer ')) return null;
   const token = auth.slice('Bearer '.length).trim();
   return token || null;
+}
+
+function getIdVerifier():
+  | CognitoJwtVerifierSingleUserPool<{
+      userPoolId: string;
+      tokenUse: 'id';
+      clientId: string;
+    }>
+  | null {
+  const userPoolId = process.env.COGNITO_USER_POOL_ID;
+  const clientId = process.env.COGNITO_CLIENT_ID;
+  if (!userPoolId || !clientId) return null;
+  if (!idVerifier) {
+    idVerifier = CognitoJwtVerifier.create({
+      userPoolId,
+      clientId,
+      tokenUse: 'id',
+    });
+  }
+  return idVerifier;
 }
 
 function getAccessVerifier():
@@ -68,6 +94,34 @@ function resolveDevToken(token: string): AuthContext | null {
   };
 }
 
+async function verifyJwt(token: string): Promise<AuthContext | null> {
+  const id = getIdVerifier();
+  if (id) {
+    try {
+      const payload = await id.verify(token);
+      if (payload.sub) {
+        return { ownerId: payload.sub, isAnonymous: false, source: 'jwt' };
+      }
+    } catch {
+      // try access token next
+    }
+  }
+
+  const access = getAccessVerifier();
+  if (access) {
+    try {
+      const payload = await access.verify(token);
+      if (payload.sub) {
+        return { ownerId: payload.sub, isAnonymous: false, source: 'jwt' };
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
 export async function resolveAuth(
   headers: Record<string, string | undefined> | undefined,
 ): Promise<AuthContext | null> {
@@ -86,15 +140,7 @@ export async function resolveAuth(
     };
   }
 
-  const verifier = getAccessVerifier();
-  if (!verifier) return null;
-  try {
-    const payload = await verifier.verify(token);
-    if (!payload.sub) return null;
-    return { ownerId: payload.sub, isAnonymous: false, source: 'jwt' };
-  } catch {
-    return null;
-  }
+  return verifyJwt(token);
 }
 
 export async function requireAuth(

@@ -7,22 +7,39 @@ import {
 import { recallProjectMemory, writeMemoryEntry } from './memory.js';
 import { refreshProjectMemorySummary } from './project-memory.js';
 import {
+  formatProjectKnowledgeBlock,
+  loadProjectKnowledge,
+} from './project-knowledge.js';
+import {
   appendBuildEvent,
   appendMessage,
   getSession,
   listMessages,
   setSessionStatus,
+  setToolLoopGuard,
   type BedrockToolResult,
   type PendingToolState,
 } from './session-store.js';
 import { getToolKind, toBedrockTools } from './tools.js';
 import type { AgentEvent, MemoryKind, PlanDecisionInput, ToolResultInput } from './types.js';
+import {
+  DEFAULT_IDENTICAL_FAILURE_LIMIT,
+  afterToolResult,
+  beforeToolCall,
+  buildStuckLoopNudge,
+  emptyToolLoopGuard,
+  readPersistedToolLoopGuard,
+} from './tool-loop-guard.js';
+import { webExtract, webSearch } from './web-search.js';
 
-export type LoopMode = 'plan' | 'build';
+export type LoopMode = 'plan' | 'build' | 'chat' | 'project_chat';
 
 const MAX_INNER_TURNS = 12;
 /** FR-08: approval required when unique file paths exceed this (single-file bypass). */
 const PLAN_FILE_THRESHOLD = Number(process.env.PLAN_FILE_THRESHOLD ?? 3);
+const IDENTICAL_FAILURE_LIMIT = Number(
+  process.env.IDENTICAL_TOOL_FAILURE_LIMIT ?? DEFAULT_IDENTICAL_FAILURE_LIMIT,
+);
 
 function isFileTool(name: string): boolean {
   return name === 'write_file' || name === 'edit_file';
@@ -32,19 +49,32 @@ function fileReason(toolName: string): string {
   return toolName === 'write_file' ? 'create or replace file' : 'edit existing file';
 }
 
-function systemPrompt(mode: LoopMode, memoryBlock: string): string {
+function systemPrompt(
+  mode: LoopMode,
+  memoryBlock: string,
+  knowledgeBlock?: string,
+): string {
   const base =
     mode === 'plan'
       ? `You are WalkCroach in Plan mode. Reason about the request and outline steps.
-You may use recall_project_memory and remember_preference.
+You may use web_search, web_extract, recall_project_memory, and remember_preference.
 Do NOT call write_file, edit_file, or run_terminal.`
-      : `You are WalkCroach in Build mode. You scaffold and edit a React + TypeScript + Vite + Tailwind app.
+      : mode === 'chat' || mode === 'project_chat'
+        ? `You are WalkCroach Chat — a helpful assistant for the WalkCroach ecosystem.
+Web search is available and preferred for current facts (web_search, then web_extract when needed).
+Cite sources with titles and URLs when you used search.
+${mode === 'project_chat' ? 'You are working inside a Project — obey standing instructions and use project documents when relevant.' : 'You may use recall_project_memory / remember_preference when a project is linked.'}
+You cannot edit app files or run terminals in Chat mode — suggest opening App Builder for that.`
+        : `You are WalkCroach in Build mode. You scaffold and edit a React + TypeScript + Vite + Tailwind app inside a project sandbox (cloud when available, otherwise local preview).
 Prefer small, correct file diffs. Use write_file / edit_file for code.
 Use run_terminal only when you need package installs or scripts (e.g. npm install).
+Use web_search / web_extract when researching APIs or docs.
 Use recall_project_memory when prior preferences/decisions may matter.
-Use remember_preference when the user states a lasting style or architecture preference.`;
+Use remember_preference when the user states a lasting style or architecture preference.
+Obey project standing instructions and documents when provided.`;
 
-  return memoryBlock ? `${base}\n\n${memoryBlock}` : base;
+  const extras = [knowledgeBlock, memoryBlock].filter(Boolean);
+  return extras.length ? `${base}\n\n${extras.join('\n\n')}` : base;
 }
 
 function memoryBlockFromHits(
@@ -54,6 +84,33 @@ function memoryBlockFromHits(
   return `Project memory (use when relevant):\n${hits
     .map((h) => `- [${h.kind}] ${h.text}`)
     .join('\n')}`;
+}
+
+async function buildSystemForTurn(params: {
+  db: import('@walkcroach/db').DbClient;
+  projectId: string;
+  mode: LoopMode;
+  memoryHits: Array<{ kind: string; text: string }>;
+}): Promise<string> {
+  const knowledge = await loadProjectKnowledge(params.db, params.projectId);
+  const knowledgeBlock = knowledge
+    ? formatProjectKnowledgeBlock(knowledge)
+    : '';
+  const promptMode: LoopMode =
+    (params.mode === 'chat' || params.mode === 'project_chat') &&
+    knowledge &&
+    Boolean(
+      knowledge.instructions?.trim() ||
+        knowledge.description?.trim() ||
+        knowledge.documents.length > 0,
+    )
+      ? 'project_chat'
+      : params.mode;
+  return systemPrompt(
+    promptMode,
+    memoryBlockFromHits(params.memoryHits),
+    knowledgeBlock || undefined,
+  );
 }
 
 function storedToBedrockMessages(
@@ -160,6 +217,74 @@ async function executeServerTool(params: {
       };
     }
 
+    if (tool.name === 'web_search') {
+      const query = String(tool.input.query ?? '');
+      const limit = Number(tool.input.limit ?? 5);
+      const result = await webSearch(query, { limit });
+      await appendBuildEvent(
+        db,
+        sessionId,
+        tool.name,
+        tool.input,
+        `provider=${result.provider} hits=${result.hits.length}`,
+      );
+      if (result.provider === 'none') {
+        return {
+          events,
+          result: {
+            toolUseId: tool.toolUseId,
+            status: 'error',
+            content: [
+              {
+                text: 'web_search unavailable: SEARXNG_URL is not configured. Tell the user search is offline and answer from known knowledge without inventing URLs.',
+              },
+            ],
+          },
+        };
+      }
+      const text =
+        result.hits.length === 0
+          ? `No results for: ${query}`
+          : result.hits
+              .map(
+                (h, i) =>
+                  `${i + 1}. ${h.title}\n   ${h.url}\n   ${h.content.slice(0, 280)}`,
+              )
+              .join('\n\n');
+      return {
+        events,
+        result: {
+          toolUseId: tool.toolUseId,
+          status: 'success',
+          content: [{ text }],
+        },
+      };
+    }
+
+    if (tool.name === 'web_extract') {
+      const url = String(tool.input.url ?? '');
+      const extracted = await webExtract(url);
+      await appendBuildEvent(
+        db,
+        sessionId,
+        tool.name,
+        tool.input,
+        `url=${url} chars=${extracted.text.length}`,
+      );
+      return {
+        events,
+        result: {
+          toolUseId: tool.toolUseId,
+          status: 'success',
+          content: [
+            {
+              text: `Title: ${extracted.title}\nURL: ${extracted.url}\n\n${extracted.text}`,
+            },
+          ],
+        },
+      };
+    }
+
     return {
       events,
       result: {
@@ -183,8 +308,8 @@ async function executeServerTool(params: {
 /**
  * Process tool_use batch from one Converse turn.
  * - server tools: execute now
- * - client_local: yield tool_call, auto-ack success for Bedrock
- * - client_resume: yield tool_call, return pending state (caller must stop)
+ * - client_resume: yield tool_call, pause for verified POST /tool-result
+ *   (queues remaining client tools in the same batch)
  */
 async function* resolveToolBatch(params: {
   db: DbClient;
@@ -193,12 +318,20 @@ async function* resolveToolBatch(params: {
   mode: LoopMode;
   toolUses: ParsedToolUse[];
   assistantContent: ContentBlock[];
+  toolLoopGuard: ReturnType<typeof readPersistedToolLoopGuard>;
 }): AsyncGenerator<
   AgentEvent,
-  { pending: PendingToolState | null; resolved: BedrockToolResult[] }
+  {
+    pending: PendingToolState | null;
+    resolved: BedrockToolResult[];
+    toolLoopGuard: ReturnType<typeof readPersistedToolLoopGuard>;
+    stuckStop: boolean;
+  }
 > {
   const resolved: BedrockToolResult[] = [];
   let pending: PendingToolState | null = null;
+  let toolLoopGuard = params.toolLoopGuard;
+  let stuckStop = false;
 
   const fileTools = params.toolUses.filter((t) => isFileTool(t.name));
   const uniquePaths = new Set(
@@ -209,76 +342,41 @@ async function* resolveToolBatch(params: {
     uniquePaths.size > PLAN_FILE_THRESHOLD &&
     uniquePaths.size > 1;
 
+  // Pass 1 — server tools (order preserved in resolvedResults)
   for (const tool of params.toolUses) {
-    if (needsPlanApproval && isFileTool(tool.name)) {
-      continue;
-    }
+    if (needsPlanApproval && isFileTool(tool.name)) continue;
+    if (getToolKind(tool.name) !== 'server') continue;
 
-    const kind = getToolKind(tool.name);
-
-    if (kind === 'server') {
-      const { result, events } = await executeServerTool({
-        db: params.db,
-        projectId: params.projectId,
-        sessionId: params.sessionId,
-        tool,
-      });
-      for (const e of events) yield e;
-      resolved.push(result);
-      continue;
-    }
-
-    // Client-visible tools
-    yield {
-      type: 'tool_call',
-      id: tool.toolUseId,
-      tool: tool.name,
-      args: tool.input,
-      awaitResult: kind === 'client_resume',
-    };
-
-    if (kind === 'client_local') {
-      await appendBuildEvent(
-        params.db,
-        params.sessionId,
-        tool.name,
-        tool.input,
-        'auto-acked (client_local)',
-      );
-      resolved.push({
-        toolUseId: tool.toolUseId,
-        status: 'success',
-        content: [
-          {
-            text: `Acknowledged ${tool.name}; client will apply in WebContainer.`,
-          },
-        ],
-      });
-      continue;
-    }
-
-    // client_resume — pause after emitting; keep prior resolved results
-    await appendBuildEvent(
-      params.db,
-      params.sessionId,
+    const { result, events } = await executeServerTool({
+      db: params.db,
+      projectId: params.projectId,
+      sessionId: params.sessionId,
+      tool,
+    });
+    for (const e of events) yield e;
+    resolved.push(result);
+    toolLoopGuard = afterToolResult(
+      toolLoopGuard,
       tool.name,
       tool.input,
-      'awaiting client tool-result',
+      result.status,
     );
-    pending = {
-      awaiting: {
-        toolCallId: tool.toolUseId,
-        tool: tool.name,
-        args: tool.input,
-      },
-      resolvedResults: [...resolved],
-      assistantContent: params.assistantContent as unknown[],
-    };
-    // Do not process further tools in this batch until resume
-    break;
   }
 
-  if (needsPlanApproval && fileTools.length > 0) {
+  // Pass 2 — client tools (verified apply via /tool-result; no optimistic acks)
+  // When multi-file plan approval is required, gate files first and stash any
+  // non-file client tools (e.g. run_terminal) to run after the plan resolves.
+  const nonFileClientTools = params.toolUses.filter((t) => {
+    if (isFileTool(t.name)) return false;
+    return getToolKind(t.name) === 'client_resume';
+  });
+  const immediateClientTools = params.toolUses.filter((t) => {
+    if (needsPlanApproval && isFileTool(t.name)) return false;
+    if (needsPlanApproval && getToolKind(t.name) === 'client_resume') return false;
+    return getToolKind(t.name) === 'client_resume';
+  });
+
+  if (needsPlanApproval && fileTools.length > 0 && !stuckStop) {
     const planId = crypto.randomUUID();
     const files = fileTools.map((t) => ({
       path: String(t.input.path ?? ''),
@@ -301,12 +399,84 @@ async function* resolveToolBatch(params: {
         name: t.name,
         input: t.input,
       })),
+      queuedClientTools: nonFileClientTools.map((t) => ({
+        toolUseId: t.toolUseId,
+        name: t.name,
+        input: t.input,
+      })),
       resolvedResults: [...resolved],
       assistantContent: params.assistantContent as unknown[],
     };
+  } else if (immediateClientTools.length > 0 && !stuckStop) {
+    const first = immediateClientTools[0]!;
+    const rest = immediateClientTools.slice(1);
+
+    const gate = beforeToolCall(
+      toolLoopGuard,
+      first.name,
+      first.input,
+      IDENTICAL_FAILURE_LIMIT,
+    );
+    if (gate.action === 'refuse') {
+      yield {
+        type: 'warning',
+        message: `Blocked identical failing tool retry (${first.name})`,
+      };
+      await appendBuildEvent(
+        params.db,
+        params.sessionId,
+        first.name,
+        first.input,
+        gate.message,
+      );
+      resolved.push({
+        toolUseId: first.toolUseId,
+        status: 'error',
+        content: [{ text: gate.message }],
+      });
+      // Fail remaining queued tools so Bedrock gets a full result set
+      for (const t of rest) {
+        resolved.push({
+          toolUseId: t.toolUseId,
+          status: 'error',
+          content: [{ text: gate.message }],
+        });
+      }
+      stuckStop = true;
+    } else {
+      yield {
+        type: 'tool_call',
+        id: first.toolUseId,
+        tool: first.name,
+        args: first.input,
+        awaitResult: true,
+      };
+      await appendBuildEvent(
+        params.db,
+        params.sessionId,
+        first.name,
+        first.input,
+        'awaiting verified client tool-result',
+      );
+      pending = {
+        awaiting: {
+          toolCallId: first.toolUseId,
+          tool: first.name,
+          args: first.input,
+        },
+        resolvedResults: [...resolved],
+        assistantContent: params.assistantContent as unknown[],
+        queuedClientTools: rest.map((t) => ({
+          toolUseId: t.toolUseId,
+          name: t.name,
+          input: t.input,
+        })),
+      };
+    }
   }
 
-  return { pending, resolved };
+  await setToolLoopGuard(params.db, params.sessionId, toolLoopGuard);
+  return { pending, resolved, toolLoopGuard, stuckStop };
 }
 
 async function* runAgentLoop(params: {
@@ -320,6 +490,9 @@ async function* runAgentLoop(params: {
   const { db, sessionId, projectId, mode } = params;
   let messages = [...params.messages];
   const tools = toBedrockTools(mode);
+
+  const session = await getSession(db, sessionId);
+  let toolLoopGuard = readPersistedToolLoopGuard(session?.model_config);
 
   for (let turn = 0; turn < MAX_INNER_TURNS; turn++) {
     const turnResult = yield* streamConverseTurn({
@@ -338,6 +511,7 @@ async function* runAgentLoop(params: {
 
     if (turnResult.toolUses.length === 0) {
       await setSessionStatus(db, sessionId, 'active', null);
+      await setToolLoopGuard(db, sessionId, emptyToolLoopGuard());
       yield { type: 'done', reason: 'complete' };
       return;
     }
@@ -349,7 +523,22 @@ async function* runAgentLoop(params: {
       mode,
       toolUses: turnResult.toolUses,
       assistantContent: turnResult.assistantContent,
+      toolLoopGuard,
     });
+    toolLoopGuard = batch.toolLoopGuard;
+
+    if (batch.stuckStop) {
+      const toolMsg = toolResultMessage(batch.resolved);
+      await appendMessage(db, sessionId, 'user', toolMsg.content);
+      messages.push(toolMsg);
+      await setSessionStatus(db, sessionId, 'active', null);
+      yield {
+        type: 'warning',
+        message: buildStuckLoopNudge(toolLoopGuard),
+      };
+      yield { type: 'done', reason: 'stuck_tool_loop' };
+      return;
+    }
 
     if (batch.pending?.awaiting.tool === 'plan_approval') {
       await setSessionStatus(db, sessionId, 'awaiting_plan_approval', batch.pending);
@@ -385,6 +574,13 @@ export async function* runPromptTurn(params: {
   projectId: string;
   message: string;
   mode?: LoopMode;
+  attachments?: Array<{
+    name: string;
+    mime: string;
+    textPreview: string;
+    byteSize?: number;
+    storageKey?: string;
+  }>;
 }): AsyncGenerator<AgentEvent> {
   const mode = params.mode ?? 'build';
   const session = await getSession(params.db, params.sessionId);
@@ -424,6 +620,8 @@ export async function* runPromptTurn(params: {
      WHERE id = $1::uuid`,
     [params.sessionId, JSON.stringify(mode)],
   );
+  // Fresh user prompt resets identical-failure streak
+  await setToolLoopGuard(params.db, params.sessionId, emptyToolLoopGuard());
 
   const hits = await recallProjectMemory({
     db: params.db,
@@ -438,12 +636,19 @@ export async function* runPromptTurn(params: {
   };
 
   const userContent: ContentBlock[] = [{ text: params.message }];
-  await appendMessage(params.db, params.sessionId, 'user', userContent);
+  await appendMessage(params.db, params.sessionId, 'user', userContent, {
+    attachments: params.attachments?.length ? params.attachments : null,
+  });
 
   const history = await listMessages(params.db, params.sessionId);
   const messages = storedToBedrockMessages(history);
 
-  const system = systemPrompt(mode, memoryBlockFromHits(hits));
+  const system = await buildSystemForTurn({
+    db: params.db,
+    projectId: params.projectId,
+    mode,
+    memoryHits: hits,
+  });
 
   yield* runAgentLoop({
     db: params.db,
@@ -456,7 +661,9 @@ export async function* runPromptTurn(params: {
 }
 
 /**
- * Resume after WebContainer shell tool (POST /tool-result).
+ * Resume after a verified client tool apply (POST /tool-result).
+ * Drains queuedClientTools one-by-one before appending the full tool-result
+ * message and continuing Converse.
  */
 export async function* continueAfterTool(params: {
   db: DbClient;
@@ -527,13 +734,65 @@ export async function* continueAfterTool(params: {
     `client result ok=${params.toolResult.ok} ${summary.slice(0, 200)}`,
   );
 
-  const allResults = [...pending.resolvedResults, resumeResult];
-  const toolMsg = toolResultMessage(allResults);
+  // Persist identical-failure streak across client resumes
+  let toolLoopGuard = readPersistedToolLoopGuard(session.model_config);
+  toolLoopGuard = afterToolResult(
+    toolLoopGuard,
+    pending.awaiting.tool,
+    pending.awaiting.args,
+    params.toolResult.ok ? 'success' : 'error',
+  );
+  await setToolLoopGuard(params.db, params.sessionId, toolLoopGuard);
+
+  const allResultsSoFar = [...pending.resolvedResults, resumeResult];
+  const queue = pending.queuedClientTools ?? [];
+
+  // More client tools in this Converse batch — emit next, stay awaiting_tool
+  if (queue.length > 0) {
+    const next = queue[0]!;
+    const rest = queue.slice(1);
+    yield {
+      type: 'tool_call',
+      id: next.toolUseId,
+      tool: next.name,
+      args: next.input,
+      awaitResult: true,
+    };
+    await appendBuildEvent(
+      params.db,
+      params.sessionId,
+      next.name,
+      next.input,
+      'awaiting verified client tool-result',
+    );
+    await setSessionStatus(params.db, params.sessionId, 'awaiting_tool', {
+      awaiting: {
+        toolCallId: next.toolUseId,
+        tool: next.name,
+        args: next.input,
+      },
+      resolvedResults: allResultsSoFar,
+      assistantContent: pending.assistantContent,
+      queuedClientTools: rest,
+    });
+    yield { type: 'done', reason: 'awaiting_tool' };
+    return;
+  }
+
+  const toolMsg = toolResultMessage(allResultsSoFar);
   await appendMessage(params.db, params.sessionId, 'user', toolMsg.content);
   await setSessionStatus(params.db, params.sessionId, 'active', null);
 
-  // Rebuild conversation: history already has assistant tool_use message;
-  // we just appended tool results. Load full history for next Converse.
+  if (
+    !params.toolResult.ok &&
+    toolLoopGuard.streak >= IDENTICAL_FAILURE_LIMIT
+  ) {
+    yield {
+      type: 'warning',
+      message: buildStuckLoopNudge(toolLoopGuard),
+    };
+  }
+
   const history = await listMessages(params.db, params.sessionId);
   const messages = storedToBedrockMessages(history);
 
@@ -551,7 +810,12 @@ export async function* continueAfterTool(params: {
 
   const mode: LoopMode =
     (session.model_config?.mode as LoopMode | undefined) ?? 'build';
-  const system = systemPrompt(mode, memoryBlockFromHits(hits));
+  const system = await buildSystemForTurn({
+    db: params.db,
+    projectId: params.projectId,
+    mode,
+    memoryHits: hits,
+  });
 
   yield* runAgentLoop({
     db: params.db,
@@ -567,34 +831,104 @@ async function* executeDeferredFileTools(params: {
   db: DbClient;
   sessionId: string;
   deferred: NonNullable<PendingToolState['deferredToolUses']>;
-}): AsyncGenerator<AgentEvent, BedrockToolResult[]> {
-  const results: BedrockToolResult[] = [];
-  for (const tool of params.deferred) {
+  resolvedResults: BedrockToolResult[];
+  assistantContent: unknown[];
+  /** Non-file client tools stashed while plan was pending (e.g. run_terminal). */
+  existingQueued?: NonNullable<PendingToolState['queuedClientTools']>;
+}): AsyncGenerator<
+  AgentEvent,
+  { pending: PendingToolState | null; resolved: BedrockToolResult[] }
+> {
+  if (params.deferred.length === 0) {
+    const queued = params.existingQueued ?? [];
+    if (queued.length === 0) {
+      return { pending: null, resolved: params.resolvedResults };
+    }
+    const [first, ...rest] = queued;
     yield {
       type: 'tool_call',
-      id: tool.toolUseId,
-      tool: tool.name,
-      args: tool.input,
-      awaitResult: false,
+      id: first!.toolUseId,
+      tool: first!.name,
+      args: first!.input,
+      awaitResult: true,
     };
     await appendBuildEvent(
       params.db,
       params.sessionId,
-      tool.name,
-      tool.input,
-      'plan approved',
+      first!.name,
+      first!.input,
+      'plan resolved — awaiting verified client tool-result',
     );
-    results.push({
-      toolUseId: tool.toolUseId,
-      status: 'success',
-      content: [
-        {
-          text: `Applied ${tool.name} on ${String(tool.input.path ?? 'file')} after plan approval.`,
+    return {
+      pending: {
+        awaiting: {
+          toolCallId: first!.toolUseId,
+          tool: first!.name,
+          args: first!.input,
         },
-      ],
+        resolvedResults: params.resolvedResults,
+        assistantContent: params.assistantContent,
+        queuedClientTools: rest,
+      },
+      resolved: params.resolvedResults,
+    };
+  }
+  const [first, ...rest] = params.deferred;
+  yield {
+    type: 'tool_call',
+    id: first!.toolUseId,
+    tool: first!.name,
+    args: first!.input,
+    awaitResult: true,
+  };
+  await appendBuildEvent(
+    params.db,
+    params.sessionId,
+    first!.name,
+    first!.input,
+    'plan approved — awaiting verified client apply',
+  );
+  return {
+    pending: {
+      awaiting: {
+        toolCallId: first!.toolUseId,
+        tool: first!.name,
+        args: first!.input,
+      },
+      resolvedResults: params.resolvedResults,
+      assistantContent: params.assistantContent,
+      queuedClientTools: [...rest, ...(params.existingQueued ?? [])],
+    },
+    resolved: params.resolvedResults,
+  };
+}
+
+/** Close unresolved Bedrock tool_use blocks so the session can continue. */
+async function closeUnresolvedClientTools(params: {
+  db: DbClient;
+  sessionId: string;
+  pending: PendingToolState;
+  reason: string;
+}): Promise<void> {
+  const cancelled: BedrockToolResult[] = [];
+  for (const t of params.pending.deferredToolUses ?? []) {
+    cancelled.push({
+      toolUseId: t.toolUseId,
+      status: 'error',
+      content: [{ text: params.reason }],
     });
   }
-  return results;
+  for (const t of params.pending.queuedClientTools ?? []) {
+    cancelled.push({
+      toolUseId: t.toolUseId,
+      status: 'error',
+      content: [{ text: params.reason }],
+    });
+  }
+  const allResults = [...params.pending.resolvedResults, ...cancelled];
+  if (allResults.length === 0) return;
+  const toolMsg = toolResultMessage(allResults);
+  await appendMessage(params.db, params.sessionId, 'user', toolMsg.content);
 }
 
 /**
@@ -647,6 +981,12 @@ export async function* continueAfterPlanDecision(params: {
     (session.model_config?.mode as LoopMode | undefined) ?? 'build';
 
   if (params.decision.decision === 'cancel') {
+    await closeUnresolvedClientTools({
+      db: params.db,
+      sessionId: params.sessionId,
+      pending,
+      reason: 'Plan cancelled — no files were written.',
+    });
     await setSessionStatus(params.db, params.sessionId, 'active', null);
     yield {
       type: 'error',
@@ -660,6 +1000,12 @@ export async function* continueAfterPlanDecision(params: {
     const adjustment =
       params.decision.adjustment?.trim() ||
       'Please revise the file plan based on my feedback.';
+    await closeUnresolvedClientTools({
+      db: params.db,
+      sessionId: params.sessionId,
+      pending,
+      reason: 'Plan adjusted — previous proposed file writes were not applied.',
+    });
     await setSessionStatus(params.db, params.sessionId, 'active', null);
     await appendMessage(params.db, params.sessionId, 'user', [
       { text: `[Plan adjustment] ${adjustment}` },
@@ -677,7 +1023,12 @@ export async function* continueAfterPlanDecision(params: {
       count: hits.length,
       kinds: [...new Set(hits.map((h) => h.kind))],
     };
-    const system = systemPrompt(mode, memoryBlockFromHits(hits));
+    const system = await buildSystemForTurn({
+      db: params.db,
+      projectId: params.projectId,
+      mode,
+      memoryHits: hits,
+    });
     yield* runAgentLoop({
       db: params.db,
       sessionId: params.sessionId,
@@ -690,14 +1041,27 @@ export async function* continueAfterPlanDecision(params: {
   }
 
   const deferred = pending.deferredToolUses ?? [];
-  const deferredResults = yield* executeDeferredFileTools({
+  const started = yield* executeDeferredFileTools({
     db: params.db,
     sessionId: params.sessionId,
     deferred,
+    resolvedResults: pending.resolvedResults,
+    assistantContent: pending.assistantContent,
+    existingQueued: pending.queuedClientTools ?? [],
   });
 
-  const allResults = [...pending.resolvedResults, ...deferredResults];
-  const toolMsg = toolResultMessage(allResults);
+  if (started.pending) {
+    await setSessionStatus(
+      params.db,
+      params.sessionId,
+      'awaiting_tool',
+      started.pending,
+    );
+    yield { type: 'done', reason: 'awaiting_tool' };
+    return;
+  }
+
+  const toolMsg = toolResultMessage(started.resolved);
   await appendMessage(params.db, params.sessionId, 'user', toolMsg.content);
   await setSessionStatus(params.db, params.sessionId, 'active', null);
 
@@ -714,8 +1078,12 @@ export async function* continueAfterPlanDecision(params: {
     count: hits.length,
     kinds: [...new Set(hits.map((h) => h.kind))],
   };
-  const system = systemPrompt(mode, memoryBlockFromHits(hits));
-
+  const system = await buildSystemForTurn({
+    db: params.db,
+    projectId: params.projectId,
+    mode,
+    memoryHits: hits,
+  });
   yield* runAgentLoop({
     db: params.db,
     sessionId: params.sessionId,

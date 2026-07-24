@@ -8,7 +8,7 @@ const blankApp = (name: string) => `export default function App() {
         <p className="text-sm uppercase tracking-[0.2em] text-stone-500">${safeProjectSlug(name)}</p>
         <h1 className="text-3xl font-semibold" data-wc-path="src/App.tsx:#title">Ready when you are</h1>
         <p className="text-stone-600" data-wc-path="src/App.tsx:#subtitle">
-          Describe what to build in WalkCroach. Files land here in the WebContainer preview.
+          Describe what to build in WalkCroach. Files land here in the live preview.
         </p>
       </div>
     </main>

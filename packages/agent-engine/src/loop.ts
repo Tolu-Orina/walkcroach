@@ -34,9 +34,19 @@ import {
   needsTodoWriteNudge,
   normalizeTodos,
 } from './todos.js';
+import {
+  DEFAULT_IDENTICAL_FAILURE_LIMIT,
+  afterToolResult,
+  beforeToolCall,
+  buildStuckLoopNudge,
+  emptyToolLoopGuard,
+  type ToolLoopGuardState,
+} from './tool-loop-guard.js';
 
 export const DEFAULT_MAX_ITERATIONS = 24;
 export const DEFAULT_MAX_SUBAGENTS = 3;
+/** Stop after this many identical failed run_terminal/verify calls. */
+export { DEFAULT_IDENTICAL_FAILURE_LIMIT };
 
 /** Soft todo re-prompts (write once + progress once). */
 export const MAX_TODO_WRITE_NUDGES = 1;
@@ -128,6 +138,11 @@ export type RunLoopParams = {
   maxTokens?: number;
   /** Auto-continue rounds on max_tokens (default DEFAULT_MAX_OUTPUT_CONTINUATIONS). */
   maxOutputContinuations?: number;
+  /**
+   * Identical failed run_terminal/verify calls before refuse + stop
+   * (default DEFAULT_IDENTICAL_FAILURE_LIMIT).
+   */
+  identicalFailureLimit?: number;
   /**
    * Prior Bedrock messages for multi-turn continuity (Continue / follow-ups).
    * When set with followUp, prompt is appended as a lightweight user turn.
@@ -252,7 +267,11 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
   const maxTokens = params.maxTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
   const maxOutputContinuations =
     params.maxOutputContinuations ?? DEFAULT_MAX_OUTPUT_CONTINUATIONS;
+  const identicalFailureLimit =
+    params.identicalFailureLimit ?? DEFAULT_IDENTICAL_FAILURE_LIMIT;
   let subagentCount = 0;
+  let toolLoopGuard: ToolLoopGuardState = emptyToolLoopGuard();
+  let stuckLoopStop = false;
 
   host.emit({ type: 'phase', phase: 'gather' });
 
@@ -403,6 +422,27 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
   }
 
   async function runOneTool(tool: ParsedToolUse): Promise<ToolResultBlock> {
+    const gate = beforeToolCall(
+      toolLoopGuard,
+      tool.name,
+      tool.input,
+      identicalFailureLimit,
+    );
+    if (gate.action === 'refuse') {
+      host.emit({
+        type: 'warning',
+        message: `Blocked identical failing tool retry (${tool.name})`,
+      });
+      stuckLoopStop = true;
+      return {
+        toolResult: {
+          toolUseId: tool.toolUseId,
+          content: [{ text: gate.message }],
+          status: 'error',
+        },
+      };
+    }
+
     if (tool.name === 'spawn_subagent') {
       if (!subagentsEnabled) {
         return {
@@ -464,6 +504,23 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
       } catch {
         /* normalize already failed inside executeTool */
       }
+    }
+
+    toolLoopGuard = afterToolResult(
+      toolLoopGuard,
+      tool.name,
+      tool.input,
+      exec.status === 'success' ? 'success' : 'error',
+    );
+    if (
+      toolLoopGuard.streak >= identicalFailureLimit &&
+      exec.status !== 'success'
+    ) {
+      host.emit({
+        type: 'warning',
+        message: buildStuckLoopNudge(toolLoopGuard),
+      });
+      stuckLoopStop = true;
     }
 
     if (
@@ -768,6 +825,22 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
         role: 'user',
         content: toolResults,
       });
+
+      if (stuckLoopStop) {
+        host.emit({ type: 'phase', phase: 'verify' });
+        host.emit({
+          type: 'telemetry',
+          name: 'session_complete',
+          counters: telemetry.counters,
+        });
+        persistSession(params, messages);
+        host.emit({
+          type: 'done',
+          reason: 'stuck_tool_loop',
+          canContinue: false,
+        });
+        return;
+      }
     }
 
     host.emit({ type: 'phase', phase: 'verify' });

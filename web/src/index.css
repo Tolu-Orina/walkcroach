@@ -1,16 +1,42 @@
 @import "tailwindcss";
 
+/*
+  WalkCroach design system — 2026
+  Direction: “Graphite Lumen” — cool graphite canvas, amber CTA, steel accent
+  (replaces green Obsidian Loom — see docs/color-system-research.md)
+  Display: Bricolage Grotesque · UI: Source Sans 3 · Code: JetBrains Mono
+*/
+
 @theme {
-  --font-display: "Syne", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
-  --font-sans: "Syne", ui-sans-serif, system-ui, sans-serif;
-  --color-ink: #0c1210;
-  --color-panel: #141c18;
-  --color-line: #24302a;
-  --color-mist: #9aada2;
-  --color-paper: #e8f0eb;
-  --color-signal: #c8f542;
-  --color-ember: #ff6b4a;
+  --font-display: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Source Sans 3", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --color-ink: #0b0c0f;
+  --color-panel: #14161b;
+  --color-raised: #1c1f26;
+  --color-line: #2e333c;
+  --color-mist: #9198a4;
+  --color-paper: #f2f3f5;
+  /* Amber gold — premium CTA (≤10%) */
+  --color-signal: #f0b429;
+  /* Steel blue — secondary / memory / eyebrows (token name kept as teal) */
+  --color-teal: #6b9eff;
+  --color-ember: #f07167;
+  --color-fog: color-mix(in oklab, var(--color-mist) 55%, transparent);
+
+  --radius-control: 0.5rem;
+  --radius-surface: 0.75rem;
+  --shadow-soft: 0 1px 0 color-mix(in oklab, white 6%, transparent),
+    0 20px 50px color-mix(in oklab, black 45%, transparent);
+  --glass-bg: color-mix(in oklab, var(--color-panel) 45%, transparent);
+  --glass-bg-strong: color-mix(in oklab, var(--color-raised) 58%, transparent);
+  --glass-border: color-mix(in oklab, white 16%, var(--color-line));
+  --glass-blur: 22px;
+}
+
+html {
+  color-scheme: dark;
 }
 
 html,
@@ -22,48 +48,99 @@ body,
 body {
   margin: 0;
   background:
-    radial-gradient(1200px 600px at 10% -10%, #1a3328 0%, transparent 55%),
-    radial-gradient(900px 500px at 100% 0%, #1f2a22 0%, transparent 50%),
-    var(--color-ink);
+    radial-gradient(1000px 560px at 10% -10%, #1a2440 0%, transparent 55%),
+    radial-gradient(900px 500px at 90% 5%, #2a2218 0%, transparent 48%),
+    radial-gradient(700px 400px at 50% 100%, #12151c 0%, transparent 45%),
+    linear-gradient(180deg, #0e1014 0%, var(--color-ink) 42%, #090a0c 100%);
+  background-attachment: fixed;
   color: var(--color-paper);
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.5;
+  letter-spacing: -0.01em;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 ::selection {
   background: color-mix(in oklab, var(--color-signal) 40%, transparent);
+  color: var(--color-ink);
 }
 
-/* Phase A: keyboard focus + shared control styles */
 @utility interactive {
   &:focus {
     outline: none;
   }
 
   &:focus-visible {
-    outline: 2px solid color-mix(in oklab, var(--color-signal) 75%, white);
+    outline: 2px solid color-mix(in oklab, var(--color-signal) 70%, white);
     outline-offset: 2px;
   }
 }
 
 .btn-primary {
-  @apply interactive rounded-sm bg-signal px-4 py-2 font-medium text-ink transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50;
+  @apply interactive inline-flex items-center justify-center gap-2 rounded-[var(--radius-control)] bg-signal px-4 py-2.5 font-sans text-sm font-semibold text-ink transition duration-150 hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45;
 }
 
 .btn-secondary {
-  @apply interactive rounded-sm border border-line px-4 py-2 text-paper transition hover:border-signal/40 disabled:cursor-not-allowed disabled:opacity-50;
+  @apply interactive inline-flex items-center justify-center gap-2 rounded-[var(--radius-control)] border border-line bg-raised/60 px-4 py-2.5 font-sans text-sm font-medium text-paper transition duration-150 hover:border-teal/40 hover:bg-raised active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45;
 }
 
 .btn-ghost {
-  @apply interactive rounded-sm px-2 py-1 text-mist transition hover:text-paper disabled:cursor-not-allowed disabled:opacity-50;
+  @apply interactive inline-flex items-center justify-center gap-1.5 rounded-[var(--radius-control)] px-2.5 py-1.5 font-sans text-sm text-mist transition duration-150 hover:bg-panel hover:text-paper disabled:cursor-not-allowed disabled:opacity-45;
 }
 
 .field {
-  @apply interactive w-full rounded-sm border border-line bg-ink/60 px-3 py-2 text-sm text-paper placeholder:text-mist/60 focus:border-signal/50;
+  @apply interactive w-full rounded-[var(--radius-control)] border border-line bg-ink/70 px-3.5 py-2.5 font-sans text-sm text-paper placeholder:text-mist/55 transition focus:border-signal/45 focus:bg-ink;
+}
+
+.surface {
+  @apply rounded-[var(--radius-surface)] border border-line bg-panel/85;
+}
+
+.surface-raised {
+  @apply rounded-[var(--radius-surface)] border border-line bg-raised/92;
+}
+
+.glass {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-surface);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.25);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.25);
+  box-shadow: var(--shadow-soft);
+  transform: translateZ(0);
+}
+
+.glass-strong {
+  background: var(--glass-bg-strong);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-surface);
+  backdrop-filter: blur(26px) saturate(1.35);
+  -webkit-backdrop-filter: blur(26px) saturate(1.35);
+  box-shadow: var(--shadow-soft);
+  transform: translateZ(0);
+}
+
+.glass-hairline {
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklab, white 18%, transparent),
+    var(--shadow-soft);
+}
+
+.eyebrow {
+  @apply font-sans text-[11px] font-semibold uppercase tracking-[0.18em] text-teal;
 }
 
 .prose-marketing {
   font-family: var(--font-sans);
+}
+
+.prose-marketing h1,
+.prose-marketing h2,
+.prose-marketing h3 {
+  font-family: var(--font-display);
+  letter-spacing: -0.03em;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -76,25 +153,55 @@ body {
   }
 }
 
-/* Phase D: optional light theme */
+/* Light — cool graphite paper (no sage green) */
 html[data-theme='light'] {
   color-scheme: light;
-  --color-ink: #eef3ef;
+  --color-ink: #f4f5f7;
   --color-panel: #ffffff;
-  --color-line: #c8d6cc;
-  --color-mist: #4f6358;
-  --color-paper: #0c1210;
-  --color-signal: #6a9e00;
+  --color-raised: #ebeef2;
+  --color-line: #d0d4dc;
+  --color-mist: #5c6470;
+  --color-paper: #12141a;
+  --color-signal: #c48a0a;
+  --color-teal: #3b6fd4;
   --color-ember: #c2410c;
+  --glass-bg: color-mix(in oklab, white 68%, transparent);
+  --glass-bg-strong: color-mix(in oklab, white 82%, transparent);
+  --glass-border: color-mix(in oklab, black 9%, var(--color-line));
+  --shadow-soft: 0 1px 0 color-mix(in oklab, black 4%, transparent),
+    0 20px 48px color-mix(in oklab, #1a2440 12%, transparent);
 }
 
 html[data-theme='light'] body {
   background:
-    radial-gradient(1200px 600px at 10% -10%, #d8eadf 0%, transparent 55%),
-    radial-gradient(900px 500px at 100% 0%, #e2ebe5 0%, transparent 50%),
-    var(--color-ink);
+    radial-gradient(1000px 560px at 10% -10%, #dce4f5 0%, transparent 55%),
+    radial-gradient(900px 500px at 90% 5%, #f0e8dc 0%, transparent 48%),
+    linear-gradient(180deg, #f7f8fa 0%, var(--color-ink) 45%, #eef0f4 100%);
 }
 
 html[data-theme='light'] .btn-primary {
-  @apply text-paper;
+  color: #0b0c0f;
+}
+
+html[data-theme='light'] .eyebrow {
+  color: var(--color-teal);
+}
+
+@keyframes wc-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.wc-enter {
+  animation: wc-fade-up 0.45s ease-out both;
+}
+
+.wc-enter-delay {
+  animation: wc-fade-up 0.5s ease-out 0.08s both;
 }

@@ -16,6 +16,7 @@ import {
   type ProjectSnapshot,
   type SnapshotFile,
 } from '../artefacts.js';
+import { upsertCodeArtefactsFromFiles } from './codeArtefacts.js';
 
 type RestResult = {
   statusCode: number;
@@ -44,7 +45,10 @@ async function upsertProjectFiles(
   db: DbClient,
   projectId: string,
   files: SnapshotFile[],
+  ownerId?: string,
 ): Promise<void> {
+  const withKeys: Array<{ path: string; content: string; storageKey: string }> =
+    [];
   for (const file of files) {
     const hash = contentHash(file.content);
     const storageKey = fileStorageKey(projectId, file.path);
@@ -58,11 +62,28 @@ async function upsertProjectFiles(
          updated_at = now()`,
       [projectId, file.path, hash, storageKey],
     );
+    withKeys.push({
+      path: file.path,
+      content: file.content,
+      storageKey,
+    });
   }
   await db.query(
     `UPDATE projects SET updated_at = now() WHERE id = $1::uuid`,
     [projectId],
   );
+  if (ownerId && withKeys.length > 0) {
+    await upsertCodeArtefactsFromFiles(
+      db,
+      ownerId,
+      projectId,
+      withKeys.map((f) => ({
+        path: f.path,
+        content: f.content,
+        storageKey: f.storageKey,
+      })),
+    );
+  }
 }
 
 export async function loadProjectFilesForDeploy(
@@ -131,7 +152,7 @@ export async function handleSyncFiles(
       !f.path.includes('node_modules/') &&
       !f.path.startsWith('node_modules/'),
   );
-  await upsertProjectFiles(db, projectId, filtered);
+  await upsertProjectFiles(db, projectId, filtered, auth.ownerId);
   return jsonResponse(200, { ok: true, synced: filtered.length });
 }
 
@@ -172,7 +193,7 @@ export async function handleCreateCheckpoint(
   };
 
   if (body.files?.length) {
-    await upsertProjectFiles(db, projectId, body.files);
+    await upsertProjectFiles(db, projectId, body.files, auth.ownerId);
   }
 
   const snapshotFiles = body.files?.length

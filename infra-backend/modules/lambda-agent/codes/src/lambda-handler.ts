@@ -25,6 +25,16 @@ function writeHttp(
   stream.end();
 }
 
+function parseJsonBody<T>(raw: string | undefined):
+  | { ok: true; value: T }
+  | { ok: false } {
+  try {
+    return { ok: true, value: JSON.parse(raw ?? '{}') as T };
+  } catch {
+    return { ok: false };
+  }
+}
+
 async function streamHandler(
   event: unknown,
   responseStream: NodeJS.WritableStream,
@@ -41,7 +51,17 @@ async function streamHandler(
 
     const promptMatch = req.path.match(/\/sessions\/([^/]+)\/prompt\/?$/);
     if (req.method === 'POST' && promptMatch) {
-      const body = JSON.parse(req.body ?? '{}') as PromptBody;
+      const parsed = parseJsonBody<PromptBody>(req.body);
+      if (!parsed.ok) {
+        writeHttp(
+          responseStream,
+          400,
+          { 'content-type': 'application/json', ...CORS_HEADERS },
+          JSON.stringify({ error: 'invalid json body' }),
+        );
+        return;
+      }
+      const body = parsed.value;
       const access = await assertSessionAccess(
         promptMatch[1]!,
         body.projectId,
@@ -72,7 +92,17 @@ async function streamHandler(
 
     const planMatch = req.path.match(/\/sessions\/([^/]+)\/plan-decision\/?$/);
     if (req.method === 'POST' && planMatch) {
-      const body = JSON.parse(req.body ?? '{}') as PlanDecisionBody;
+      const parsed = parseJsonBody<PlanDecisionBody>(req.body);
+      if (!parsed.ok) {
+        writeHttp(
+          responseStream,
+          400,
+          { 'content-type': 'application/json', ...CORS_HEADERS },
+          JSON.stringify({ error: 'invalid json body' }),
+        );
+        return;
+      }
+      const body = parsed.value;
       const access = await assertSessionAccess(
         planMatch[1]!,
         body.projectId,
@@ -103,7 +133,17 @@ async function streamHandler(
 
     const toolMatch = req.path.match(/\/sessions\/([^/]+)\/tool-result\/?$/);
     if (req.method === 'POST' && toolMatch) {
-      const body = JSON.parse(req.body ?? '{}') as ToolResultBody;
+      const parsed = parseJsonBody<ToolResultBody>(req.body);
+      if (!parsed.ok) {
+        writeHttp(
+          responseStream,
+          400,
+          { 'content-type': 'application/json', ...CORS_HEADERS },
+          JSON.stringify({ error: 'invalid json body' }),
+        );
+        return;
+      }
+      const body = parsed.value;
       const access = await assertSessionAccess(
         toolMatch[1]!,
         body.projectId,
@@ -138,6 +178,7 @@ async function streamHandler(
       req.body,
       req.pathParameters,
       req.headers,
+      req.queryString,
     );
     writeHttp(
       responseStream,

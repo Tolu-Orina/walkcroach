@@ -24,7 +24,7 @@ export function AuthGithubCallbackPage() {
           state,
         );
         if (!cancelled) {
-          navigate(`/project/${result.projectId}`, { replace: true });
+          navigate(`/app/projects/${result.projectId}/builder`, { replace: true });
         }
       } catch (err) {
         if (!cancelled) {
