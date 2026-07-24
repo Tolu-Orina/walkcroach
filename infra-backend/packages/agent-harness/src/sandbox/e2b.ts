@@ -18,8 +18,12 @@ type E2BSandbox = {
   commands: {
     run: (
       cmd: string,
-      opts?: { cwd?: string; timeoutMs?: number },
-    ) => Promise<{ exitCode: number; stdout: string; stderr: string }>;
+      opts?: {
+        cwd?: string;
+        timeoutMs?: number;
+        background?: boolean;
+      },
+    ) => Promise<{ exitCode: number; stdout: string; stderr: string } | unknown>;
   };
   getHost?: (port: number) => string;
   kill: () => Promise<void>;
@@ -44,6 +48,10 @@ export type E2BSandboxRuntimeOpts = {
   /** Reconnect to an existing sandbox instead of creating. */
   sandboxId?: string;
 };
+
+const PREVIEW_PORT = 5173;
+const PORT_WAIT_ATTEMPTS = 30;
+const PORT_WAIT_MS = 1000;
 
 export class E2BSandboxRuntime implements SandboxRuntime {
   readonly kind = 'e2b' as const;
@@ -72,7 +80,7 @@ export class E2BSandboxRuntime implements SandboxRuntime {
 
     if (this.reconnectId) {
       this.sandbox = await Sandbox.connect(this.reconnectId, createOpts);
-      this.refreshPreviewUrl(5173);
+      this.refreshPreviewUrl(PREVIEW_PORT);
       return;
     }
 
@@ -99,7 +107,8 @@ export class E2BSandboxRuntime implements SandboxRuntime {
   private refreshPreviewUrl(port: number): void {
     const sbx = this.requireSandbox();
     if (typeof sbx.getHost === 'function') {
-      this.previewUrl = `https://${sbx.getHost(port)}`;
+      const host = sbx.getHost(port);
+      this.previewUrl = host.startsWith('http') ? host : `https://${host}`;
     }
   }
 
@@ -138,10 +147,10 @@ export class E2BSandboxRuntime implements SandboxRuntime {
     const sbx = this.requireSandbox();
     const cwd = opts?.cwd ? this.abs(opts.cwd) : this.workdir;
     try {
-      const result = await sbx.commands.run(cmd, {
+      const result = (await sbx.commands.run(cmd, {
         cwd,
         timeoutMs: 180_000,
-      });
+      })) as { exitCode: number; stdout: string; stderr: string };
       return {
         ok: result.exitCode === 0,
         exitCode: result.exitCode,
@@ -160,11 +169,78 @@ export class E2BSandboxRuntime implements SandboxRuntime {
     }
   }
 
-  /** Install deps then start Vite; returns preview URL. */
+  /** True when something accepts TCP on the preview port inside the sandbox. */
+  async isPortOpen(port = PREVIEW_PORT): Promise<boolean> {
+    const check = await this.runTerminal(
+      `bash -lc 'curl -sf --max-time 2 http://127.0.0.1:${port}/ >/dev/null || nc -z 127.0.0.1 ${port}'`,
+    );
+    return check.ok;
+  }
+
+  private async waitForPort(port: number): Promise<void> {
+    for (let i = 0; i < PORT_WAIT_ATTEMPTS; i += 1) {
+      if (await this.isPortOpen(port)) return;
+      await sleep(PORT_WAIT_MS);
+    }
+    throw new Error(
+      `Preview port ${port} did not open within ${PORT_WAIT_ATTEMPTS}s — Vite may have failed to start`,
+    );
+  }
+
+  /**
+   * Ensure Vite accepts requests via *.e2b.app Host headers (Vite 6 blocks
+   * unknown hosts by default → blank/403 iframe).
+   */
+  private async ensurePreviewViteConfig(): Promise<void> {
+    const path = 'vite.config.ts';
+    let current = '';
+    try {
+      current = await this.readFile(path);
+    } catch {
+      current = '';
+    }
+    if (current.includes('allowedHosts')) return;
+
+    if (!current.trim()) {
+      await this.writeFile(
+        path,
+        `import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
+
+export default defineConfig({
+  plugins: [react(), tailwindcss()],
+  server: { host: true, port: ${PREVIEW_PORT}, allowedHosts: true },
+})
+`,
+      );
+      return;
+    }
+
+    // Inject allowedHosts into an existing server block, or append server config.
+    if (/server\s*:\s*\{/.test(current)) {
+      const next = current.replace(
+        /server\s*:\s*\{/,
+        'server: {\n    allowedHosts: true,',
+      );
+      await this.writeFile(path, next);
+      return;
+    }
+
+    const next = current.replace(
+      /defineConfig\(\s*\{/,
+      `defineConfig({\n  server: { host: true, port: ${PREVIEW_PORT}, allowedHosts: true },`,
+    );
+    if (next !== current) {
+      await this.writeFile(path, next);
+    }
+  }
+
+  /** Install deps then start Vite; returns preview URL after port is ready. */
   async installAndStartPreview(opts?: {
     port?: number;
   }): Promise<string> {
-    const port = opts?.port ?? 5173;
+    const port = opts?.port ?? PREVIEW_PORT;
     const install = await this.runTerminal('npm install');
     if (!install.ok) {
       throw new Error(
@@ -175,22 +251,50 @@ export class E2BSandboxRuntime implements SandboxRuntime {
   }
 
   /** Refresh preview host URL from the connected sandbox (no process spawn). */
-  refreshHost(port = 5173): string | null {
+  refreshHost(port = PREVIEW_PORT): string | null {
     if (!this.sandbox) return this.previewUrl;
     this.refreshPreviewUrl(port);
     return this.previewUrl;
   }
 
+  /**
+   * Ensure a live Vite preview. Restarts if the port is not listening
+   * (common after reconnect / idle sandbox).
+   */
+  async ensurePreview(opts?: { port?: number }): Promise<string> {
+    const port = opts?.port ?? PREVIEW_PORT;
+    if (await this.isPortOpen(port)) {
+      this.refreshPreviewUrl(port);
+      if (!this.previewUrl) {
+        throw new Error('E2B sandbox did not expose a preview host URL');
+      }
+      return this.previewUrl;
+    }
+    return this.startPreview({ port });
+  }
+
   async startPreview(opts?: { port?: number; cmd?: string }): Promise<string> {
-    const port = opts?.port ?? 5173;
+    const port = opts?.port ?? PREVIEW_PORT;
     const cmd =
       opts?.cmd ??
       `npm run dev -- --host 0.0.0.0 --port ${port}`;
     const sbx = this.requireSandbox();
 
-    // Fire-and-forget Vite; E2B exposes getHost immediately.
-    void sbx.commands.run(cmd, { cwd: this.workdir }).catch(() => undefined);
+    await this.ensurePreviewViteConfig();
 
+    // Stop any stale listener on the preview port (reconnect / prior crash).
+    await this.runTerminal(
+      `bash -lc 'fuser -k ${port}/tcp 2>/dev/null || true; pkill -f "vite" 2>/dev/null || true; sleep 0.5; true'`,
+    );
+
+    // Must use background:true — otherwise run() waits for Vite forever / kills on cancel.
+    await sbx.commands.run(cmd, {
+      cwd: this.workdir,
+      background: true,
+      timeoutMs: 0,
+    });
+
+    await this.waitForPort(port);
     this.refreshPreviewUrl(port);
     if (!this.previewUrl) {
       throw new Error('E2B sandbox did not expose a preview host URL');
@@ -248,4 +352,8 @@ export async function mountFiles(
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

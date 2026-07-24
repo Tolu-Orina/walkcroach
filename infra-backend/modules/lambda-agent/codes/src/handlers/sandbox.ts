@@ -144,10 +144,8 @@ async function tryReconnect(
     let previewUrl = storedPreview ?? runtime.getInfo().previewUrl;
     try {
       if (runtime instanceof E2BSandboxRuntime) {
-        previewUrl =
-          runtime.refreshHost() ??
-          storedPreview ??
-          (await runtime.startPreview());
+        // Host URL alone is not enough — Vite may have died after idle.
+        previewUrl = await runtime.ensurePreview();
       }
     } catch {
       /* keep stored / getInfo URL */
@@ -406,6 +404,17 @@ export async function handleSandboxRoutes(
 
     if (method === 'GET' && action === 'preview') {
       const entry = await requireEntry(projectId);
+      if (entry.runtime instanceof E2BSandboxRuntime) {
+        try {
+          const url = await entry.runtime.ensurePreview();
+          entry.previewUrl = url;
+          entry.lastUsedAt = Date.now();
+          await persistSandbox(projectId, entry.sandboxId, url);
+          return jsonResponse(200, { url });
+        } catch (err) {
+          return errResponse(err);
+        }
+      }
       return jsonResponse(200, {
         url: entry.previewUrl ?? entry.runtime.getInfo().previewUrl,
       });
