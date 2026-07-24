@@ -108,9 +108,17 @@ export class ApprovalController {
     toolName: string;
     signal?: AbortSignal;
   }): Promise<ApprovalDecision> {
-    // Terminal is never auto-approved (FR-D05 / infra forever).
+    // Critical/infra never auto; routine shell may auto in low_friction.
     if (isInfraCommand(params.cmd)) {
-      // still requires explicit approve — never auto
+      // fall through to explicit approve
+    } else if (
+      shouldAutoApprove({
+        autonomy: this.autonomy,
+        toolName: params.toolName,
+        input: { cmd: params.cmd },
+      })
+    ) {
+      return 'approve';
     }
     const stepId = randomUUID();
     const request: ApprovalRequest = {

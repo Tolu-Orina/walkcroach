@@ -5,6 +5,7 @@ import * as readline from 'node:readline';
 import {
   ApprovalController,
   BackgroundTerminalRegistry,
+  InteractiveSessionRegistry,
   bindApprovals,
   canNonInteractiveApprove,
   clearPersistedTodos,
@@ -16,6 +17,7 @@ import {
   persistAgentSession,
   persistTodos,
   streamShellCommand,
+  applyDiffString,
   type AgentEvent,
   type AgentTodo,
   type ApprovalDecision,
@@ -60,6 +62,7 @@ export class CliHostAdapter implements HostAdapter {
   private readonly bgTerminals = new BackgroundTerminalRegistry(() =>
     this.getWorkspaceRoot(),
   );
+  private readonly sessions = new InteractiveSessionRegistry();
 
   constructor(private readonly opts: CliHostOptions) {
     this.autonomy = opts.autonomy ?? 'strict';
@@ -101,6 +104,7 @@ export class CliHostAdapter implements HostAdapter {
     }
     this.activePids.clear();
     this.bgTerminals.killAll();
+    this.sessions.killAll();
   }
 
   showDiffPreview(
@@ -180,6 +184,11 @@ export class CliHostAdapter implements HostAdapter {
     await fs.writeFile(abs, content, 'utf8');
   }
 
+  async applyDiff(rel: string, diff: string): Promise<void> {
+    const before = await this.readFile(rel);
+    await this.writeFile(rel, applyDiffString(before, diff));
+  }
+
   async listDir(rel: string): Promise<string[]> {
     const abs = this.resolvePath(rel || '.');
     const entries = await fs.readdir(abs, { withFileTypes: true });
@@ -243,12 +252,22 @@ export class CliHostAdapter implements HostAdapter {
 
   async *runTerminal(
     cmd: string,
-    termOpts: { cwd: string; signal?: AbortSignal; timeoutMs?: number },
+    termOpts: {
+      cwd: string;
+      signal?: AbortSignal;
+      timeoutMs?: number;
+      stdin?: string;
+      replies?: string[];
+      onConfirmPrompt?: import('@walkcroach/agent-engine').RunTerminalOpts['onConfirmPrompt'];
+    },
   ): AsyncIterable<TerminalChunk> {
     yield* streamShellCommand(cmd, {
       cwd: termOpts.cwd,
       signal: termOpts.signal,
       timeoutMs: termOpts.timeoutMs,
+      stdin: termOpts.stdin,
+      replies: termOpts.replies,
+      onConfirmPrompt: termOpts.onConfirmPrompt,
       onSpawn: (pid) => this.activePids.add(pid),
       onExit: (pid) => this.activePids.delete(pid),
     });
@@ -285,6 +304,42 @@ export class CliHostAdapter implements HostAdapter {
 
   async killBackgroundTerminal(taskId: string): Promise<boolean> {
     return this.bgTerminals.kill(taskId);
+  }
+
+  async startTerminalSession(params: {
+    cmd: string;
+    cwd: string;
+    cols?: number;
+    rows?: number;
+  }) {
+    return this.sessions.start(params);
+  }
+
+  async writeTerminalSession(
+    sessionId: string,
+    input: string,
+    opts?: { appendNewline?: boolean },
+  ): Promise<void> {
+    this.sessions.write(sessionId, input, opts);
+  }
+
+  async readTerminalSession(
+    sessionId: string,
+    opts?: {
+      timeoutMs?: number;
+      settleMs?: number;
+      maxChars?: number;
+    },
+  ) {
+    return this.sessions.read(sessionId, opts);
+  }
+
+  async closeTerminalSession(sessionId: string): Promise<boolean> {
+    return this.sessions.close(sessionId);
+  }
+
+  async listTerminalSessions() {
+    return this.sessions.list();
   }
 
   async persistTodos(todos: AgentTodo[]): Promise<void> {

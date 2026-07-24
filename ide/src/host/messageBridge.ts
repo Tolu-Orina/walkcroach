@@ -135,6 +135,7 @@ export class MessageBridge {
     > | null;
     mcpConfigured?: boolean;
     bedrockConfigured?: boolean;
+    bedrockModelId?: string;
     ccloudConfigured?: boolean;
     telemetry?: Record<string, number>;
     signedIn?: boolean;
@@ -153,6 +154,7 @@ export class MessageBridge {
       pendingApproval: params.pendingApproval,
       mcpConfigured: params.mcpConfigured,
       bedrockConfigured: params.bedrockConfigured,
+      bedrockModelId: params.bedrockModelId,
       ccloudConfigured: params.ccloudConfigured,
       telemetry: params.telemetry,
       signedIn: params.signedIn,
@@ -166,6 +168,11 @@ export class MessageBridge {
   postError(message: string): void {
     this.coalescer.flushNow();
     this.post({ type: 'ERROR', message });
+  }
+
+  postWarning(message: string): void {
+    this.coalescer.flushNow();
+    this.post({ type: 'WARNING', message });
   }
 
   dispose(): void {

@@ -89,6 +89,17 @@ export type RunTerminalOpts = {
   signal?: AbortSignal;
   /** Kill the process after this many ms (optional). */
   timeoutMs?: number;
+  /** Tier A — raw stdin preload (exact bytes). */
+  stdin?: string;
+  /** Tier A — discrete reply lines (newline appended if missing). */
+  replies?: string[];
+  /**
+   * Tier B — confirm-prompt bridge. When set, stdin stays open and idle
+   * [y/N]-style prompts invoke this callback.
+   */
+  onConfirmPrompt?: (
+    req: import('./terminal-prompts.js').ConfirmPromptRequest,
+  ) => Promise<import('./terminal-prompts.js').ConfirmPromptAnswer>;
 };
 
 export type BackgroundTerminalStart = {
@@ -133,8 +144,33 @@ export interface HostAdapter {
     taskId: string,
   ): Promise<BackgroundTerminalPoll>;
   killBackgroundTerminal?(taskId: string): Promise<boolean>;
-  /** Kill every tracked shell (blocking + background). Called on Stop. */
+  /** Kill every tracked shell (blocking + background + sessions). Called on Stop. */
   killAllTerminals?(): void;
+  /**
+   * Tier C — interactive session (REPL/TUI). Prefer host registry over one-shot
+   * run_terminal when the agent must write/read mid-run.
+   */
+  startTerminalSession?(params: {
+    cmd: string;
+    cwd: string;
+    cols?: number;
+    rows?: number;
+  }): Promise<import('./pty-session.js').SessionInfo>;
+  writeTerminalSession?(
+    sessionId: string,
+    input: string,
+    opts?: { appendNewline?: boolean },
+  ): Promise<void>;
+  readTerminalSession?(
+    sessionId: string,
+    opts?: {
+      timeoutMs?: number;
+      settleMs?: number;
+      maxChars?: number;
+    },
+  ): Promise<import('./pty-session.js').SessionReadResult>;
+  closeTerminalSession?(sessionId: string): Promise<boolean>;
+  listTerminalSessions?(): Promise<import('./pty-session.js').SessionInfo[]>;
   persistTodos?(todos: AgentTodo[]): Promise<void>;
   loadTodos?(): Promise<AgentTodo[] | null>;
   clearTodos?(): Promise<void>;

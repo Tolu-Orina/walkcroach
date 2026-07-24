@@ -12,8 +12,32 @@ export type {
   RunTerminalOpts,
 } from './host.js';
 
+export {
+  InteractiveSessionRegistry,
+  loadPtyModule,
+  resetPtyModuleCache,
+  splitCommandLine,
+  MAX_SESSIONS,
+  MAX_SESSION_BUFFER_CHARS,
+  DEFAULT_SETTLE_MS,
+  DEFAULT_READ_TIMEOUT_MS,
+  type SessionBackend,
+  type SessionStatus,
+  type SessionInfo,
+  type SessionReadResult,
+} from './pty-session.js';
 export { killProcessTree } from './process-kill.js';
-export { streamShellCommand } from './stream-shell.js';
+export { streamShellCommand, buildStdinPayload, MAX_STDIN_CHARS, MAX_STDIN_REPLIES } from './stream-shell.js';
+export {
+  detectConfirmPrompt,
+  looksLikePasswordPrompt,
+  CONFIRM_IDLE_MS,
+  MAX_CONFIRM_PROMPTS,
+  CONFIRM_PROMPT_PATTERNS,
+  type ConfirmPromptAnswer,
+  type ConfirmPromptRequest,
+  type DetectedConfirmPrompt,
+} from './terminal-prompts.js';
 export {
   BackgroundTerminalRegistry,
   type BackgroundTaskInfo,
@@ -40,12 +64,18 @@ export {
 export {
   parseHooksConfig,
   runPostToolUseHooks,
+  runStopHooks,
+  buildStopHookNudgePrompt,
   hookMatches,
   assertHookCommandSafe,
   defaultHooksConfig,
   type HooksConfig,
+  type HookDef,
   type PostToolUseHook,
+  type StopHook,
   type PostToolUsePayload,
+  type StopHookPayload,
+  type StopHookResult,
 } from './hooks.js';
 export {
   loadWorkspaceAgentConfig,
@@ -69,7 +99,9 @@ export type { Message as BedrockMessage } from '@aws-sdk/client-bedrock-runtime'
 export type { AutonomyLevel } from './approvals.js';
 export {
   isInfraCommand,
+  isCriticalCommand,
   isLowFrictionEditEligible,
+  isLowFrictionPatchEligible,
   isSensitivePath,
   shouldAutoApprove,
   canNonInteractiveApprove,
@@ -104,9 +136,17 @@ export {
   runAgentLoop,
   DEFAULT_MAX_ITERATIONS,
   DEFAULT_MAX_SUBAGENTS,
+  MAX_TODO_WRITE_NUDGES,
+  MAX_TODO_PROGRESS_NUDGES,
+  MAX_VERIFY_REVIEWS,
+  MAX_STOP_HOOK_NUDGES,
+  REVIEW_OK_MARKER,
+  PARALLEL_SAFE_TOOLS,
   CONTINUE_PROMPT,
   ACT_NUDGE_PROMPT,
   buildVerifyNudgePrompt,
+  buildVerifyReviewPrompt,
+  isReviewOk,
   type LoopPhase,
   type RunLoopParams,
 } from './loop.js';
@@ -119,14 +159,37 @@ export {
   buildUserTurn,
   buildFollowUpTurn,
   looksLikeActionTask,
+  shouldTreatAsActionTask,
   AGENT_SYSTEM_PROMPT,
+  type ActionBias,
 } from './prompt.js';
+export {
+  compactSessionMessages,
+  summarizeDroppedMessages,
+  DEFAULT_COMPACT_THRESHOLD,
+  DEFAULT_COMPACT_KEEP_RECENT,
+} from './compact.js';
+export {
+  applyPatchEdits,
+  applyDiffString,
+  normalizePatchEdits,
+  type PatchEdit,
+} from './patch.js';
 export {
   normalizeTodos,
   formatTodosForModel,
+  formatTodosChecklistBlock,
+  hasOpenTodos,
+  needsTodoWriteNudge,
+  needsTodoProgressNudge,
+  buildTodoWriteNudgePrompt,
+  buildTodoProgressNudgePrompt,
+  TODO_WRITE_MIN,
+  TODO_WRITE_MAX,
   type AgentTodo,
   type AgentTodoStatus,
 } from './todos.js';
+export { HARD_VERIFY_EXTRA } from './workspace-policy.js';
 export {
   trimSessionMessages,
   cloneMessages,

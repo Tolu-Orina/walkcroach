@@ -94,9 +94,33 @@ export const PHASE_A_TOOLS: ToolDef[] = [
     },
   },
   {
+    name: 'apply_patch',
+    description:
+      'Apply multiple sequential unique search/replace hunks to one existing file (requires approval). Prefer this over many edit_file calls when changing several places in the same file. Each old_str must match exactly once.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string' },
+        edits: {
+          type: 'array',
+          description: '1–20 hunks applied in order',
+          items: {
+            type: 'object',
+            properties: {
+              old_str: { type: 'string' },
+              new_str: { type: 'string' },
+            },
+            required: ['old_str', 'new_str'],
+          },
+        },
+      },
+      required: ['path', 'edits'],
+    },
+  },
+  {
     name: 'run_terminal',
     description:
-      'Run a shell command (requires approval; never auto-approved). Use mode=blocking (default) for npm install/test/build. Use mode=background for long-lived processes (dev servers, watchers) so the agent can keep working — then poll with await_terminal. Prefer write_file for source files.',
+      'Run a shell command. Critical/infra commands always need approval; routine local commands may auto-run in low-friction mode. Use mode=blocking (default) for npm install/test/build. Use mode=background for long-lived processes (dev servers, watchers) so the agent can keep working — then poll with await_terminal. Prefer non-interactive flags (-y/--yes) when available; otherwise pass stdin or replies for planned confirmations (e.g. replies: ["y"]). Unexpected [y/N] prompts are surfaced via ask_user when interactive (default on without preload). Prefer write_file for source files.',
     infra: true,
     inputSchema: {
       type: 'object',
@@ -117,6 +141,22 @@ export const PHASE_A_TOOLS: ToolDef[] = [
           description:
             'blocking (wait for exit) | background (return task_id immediately)',
         },
+        stdin: {
+          type: 'string',
+          description:
+            'Blocking only: raw text written to the process stdin first (include \\n if the CLI expects Enter). Exact bytes — no auto newline.',
+        },
+        replies: {
+          type: 'array',
+          items: { type: 'string' },
+          description:
+            'Blocking only: up to 20 planned answers written after stdin, each with a trailing newline if missing (e.g. ["y","n"]). Stdin is then closed (EOF) unless interactive=true.',
+        },
+        interactive: {
+          type: 'boolean',
+          description:
+            'Blocking only: when true, keep stdin open and surface unexpected [y/N] prompts via ask_user (Tier B). Default true if no stdin/replies; default false when stdin/replies are set. Password prompts abort.',
+        },
       },
       required: ['cmd'],
     },
@@ -134,6 +174,63 @@ export const PHASE_A_TOOLS: ToolDef[] = [
         },
       },
       required: ['task_id'],
+    },
+  },
+  {
+    name: 'terminal_session',
+    description:
+      'Tier C interactive terminal session for REPLs/TUIs and multi-step stdin. Actions: start (approval like run_terminal; returns session_id + backend pty|pipe), write (send input; newline appended by default), read (wait for output settle; returns new output since last read), close, list. Prefer this over blocking run_terminal when you must converse with a process mid-run (python -i, psql, node REPL, debuggers). Use run_terminal for one-shot installs/builds/tests. Max 4 concurrent sessions. Password prompts are not supported — close and use a non-secret flow.',
+    infra: true,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          description: 'start | write | read | close | list',
+        },
+        cmd: {
+          type: 'string',
+          description:
+            'start only: program/command line (e.g. "python -i", "node", "psql -U ...")',
+        },
+        cwd: {
+          type: 'string',
+          description:
+            'start only: working directory relative to workspace (default ".")',
+        },
+        session_id: {
+          type: 'string',
+          description: 'write/read/close: id returned by start',
+        },
+        input: {
+          type: 'string',
+          description: 'write only: text to send to the session stdin',
+        },
+        append_newline: {
+          type: 'boolean',
+          description:
+            'write only: append \\n if missing (default true). Set false for raw control sequences.',
+        },
+        timeout_ms: {
+          type: 'number',
+          description:
+            'read only: max wait for output (default 8000, max 120000)',
+        },
+        settle_ms: {
+          type: 'number',
+          description:
+            'read only: quiet period before returning (default 300)',
+        },
+        cols: {
+          type: 'number',
+          description: 'start only: terminal columns (default 120)',
+        },
+        rows: {
+          type: 'number',
+          description: 'start only: terminal rows (default 40)',
+        },
+      },
+      required: ['action'],
     },
   },
   {
@@ -161,7 +258,7 @@ export const PHASE_A_TOOLS: ToolDef[] = [
   {
     name: 'todo_write',
     description:
-      'Replace the agent task checklist (2–12 items). Keep exactly one item in_progress while working. Update statuses as you finish steps. Call this early on multi-step tasks.',
+      'Replace the agent task checklist (1–20 items). Keep exactly one item in_progress while working. Update statuses as you finish steps. Call this early on multi-step tasks.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -391,6 +488,6 @@ export const READ_ONLY_TOOL_NAMES = new Set([
   'cockroach_mcp',
   'recall_project_memory',
   'ask_user',
-  'todo_write',
   'await_terminal',
 ]);
+/** Subagents / plan mode must not own the parent checklist. */

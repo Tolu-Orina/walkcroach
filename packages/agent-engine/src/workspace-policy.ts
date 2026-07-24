@@ -11,6 +11,9 @@ import {
   type WalkcroachSettings,
 } from './workspace-config.js';
 
+/** Extra verify re-prompts after soft maxNudges (hard gate before end_turn). */
+export const HARD_VERIFY_EXTRA = 3;
+
 export class WorkspacePolicy {
   readonly settings: WalkcroachSettings;
   readonly verify: VerifyConfig;
@@ -38,6 +41,14 @@ export class WorkspacePolicy {
 
   get maxVerifyNudges(): number {
     return this.settings.verify.maxNudges;
+  }
+
+  /**
+   * Soft nudges + hard extras before allowing end_turn while unverified.
+   * Total verify re-prompts = maxNudges + HARD_VERIFY_EXTRA.
+   */
+  get verifyPromptCap(): number {
+    return this.maxVerifyNudges + HARD_VERIFY_EXTRA;
   }
 
   markVerified(): void {

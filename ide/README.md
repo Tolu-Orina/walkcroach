@@ -49,3 +49,7 @@ Produces `walkcroach-ide.vsix` for private distribution.
 ## CLI companion
 
 See `../cli/README.md`.
+
+## Urgent — later
+
+**Native PTY for `terminal_session` (Tier C):** Sessions already work on the **pipe** backend (line REPLs). True PTY (`backend: pty`) needs optional `node-pty` to compile. Python alone is not enough on Windows — install **Visual Studio Build Tools** with the **Desktop development with C++** workload, then reinstall optional deps in `packages/agent-engine` so `node-pty` lands in `node_modules`. Prefer PTY for full-screen TUIs; pipe is fine until then.

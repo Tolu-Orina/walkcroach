@@ -5,35 +5,69 @@ import {
   DEFAULT_MAX_OUTPUT_CONTINUATIONS,
   DEFAULT_MAX_OUTPUT_TOKENS,
   type ConverseTurnResult,
+  type ParsedToolUse,
 } from './bedrock.js';
 import {
   assembleSystemBlocks,
   buildUserTurn,
   buildFollowUpTurn,
-  looksLikeActionTask,
+  shouldTreatAsActionTask,
+  type ActionBias,
 } from './prompt.js';
 import { toBedrockTools } from './tools/defs.js';
-import { executeTool } from './tools/execute.js';
+import { executeTool, type ToolExecResult } from './tools/execute.js';
 import { readWalkcroachMd } from './memory-local.js';
 import { CockroachMcpClient, type McpConfig } from './mcp.js';
 import { SkillsRegistry, defaultSkillRoots } from './skills.js';
 import { TelemetrySink } from './telemetry.js';
 import type { ProjectMemoryBridge } from './project-memory.js';
 import { cloneMessages, trimSessionMessages, appendUserFollowUp } from './session.js';
+import { compactSessionMessages } from './compact.js';
 import { loadWorkspaceAgentConfig } from './workspace-config.js';
 import { WorkspacePolicy } from './workspace-policy.js';
-import { runPostToolUseHooks } from './hooks.js';
+import { runPostToolUseHooks, runStopHooks, buildStopHookNudgePrompt } from './hooks.js';
+import type { AgentTodo } from './todos.js';
+import {
+  buildTodoProgressNudgePrompt,
+  buildTodoWriteNudgePrompt,
+  needsTodoProgressNudge,
+  needsTodoWriteNudge,
+  normalizeTodos,
+} from './todos.js';
 
 export const DEFAULT_MAX_ITERATIONS = 24;
 export const DEFAULT_MAX_SUBAGENTS = 3;
 
+/** Soft todo re-prompts (write once + progress once). */
+export const MAX_TODO_WRITE_NUDGES = 1;
+export const MAX_TODO_PROGRESS_NUDGES = 1;
+
+/** At most one adversarial verify-review subagent per top-level run. */
+export const MAX_VERIFY_REVIEWS = 1;
+
+/** Stop-hook re-prompts when a blocking Stop script exits non-zero. */
+export const MAX_STOP_HOOK_NUDGES = 2;
+
+export const REVIEW_OK_MARKER = 'REVIEW_OK';
+
+/** Tools safe to run concurrently within one assistant tool turn. */
+export const PARALLEL_SAFE_TOOLS = new Set([
+  'read_file',
+  'list_dir',
+  'search',
+  'glob',
+  'await_terminal',
+  'load_skill',
+  'recall_project_memory',
+]);
+
 /** User-visible continuation prompt after max_tokens / max_iterations / stalled act. */
 export const CONTINUE_PROMPT =
-  'Continue the user\'s task now. Do not re-summarize the repo. Do not only list directories. Update todo_write, then call write_file / edit_file / run_terminal to finish remaining work, then briefly confirm what you did.';
+  'Continue the user\'s task now. Do not re-summarize the repo. Do not only list directories. Update todo_write, then call write_file / edit_file / apply_patch / run_terminal to finish remaining work, then briefly confirm what you did.';
 
 /** One-shot nudge when an action task ends after exploration only. */
 export const ACT_NUDGE_PROMPT =
-  'You stopped before finishing. The user asked for concrete work (create/scaffold/start/fix). Call todo_write if helpful, then write_file / edit_file / run_terminal now. Use ask_user only if a real decision blocks you. Do not re-list the whole workspace.';
+  'You stopped before finishing. The user asked for concrete work (create/scaffold/start/fix). Call todo_write if helpful, then write_file / edit_file / apply_patch / run_terminal now. Use ask_user only if a real decision blocks you. Do not re-list the whole workspace.';
 
 /** Soft verify gate: mutating action work without a successful verify recipe. */
 export function buildVerifyNudgePrompt(commands: string[]): string {
@@ -46,11 +80,35 @@ export function buildVerifyNudgePrompt(commands: string[]): string {
   ].join('\n');
 }
 
+export function buildVerifyReviewPrompt(task: string): string {
+  return [
+    'You are a read-only reviewer. Inspect the workspace for issues from the just-completed task.',
+    `Original task:\n${task.trim()}`,
+    'Check that intended files exist, edits look coherent, and nothing obvious is broken.',
+    `If the work looks acceptable, reply with exactly ${REVIEW_OK_MARKER} on the first line, then a one-sentence note.`,
+    'If there are problems, reply with REVIEW_ISSUES: then a short bullet list of what to fix. Do not write files.',
+  ].join('\n');
+}
+
+export function isReviewOk(summary: string): boolean {
+  const first = summary.trim().split(/\r?\n/)[0]?.trim() ?? '';
+  return (
+    first === REVIEW_OK_MARKER ||
+    first.startsWith(`${REVIEW_OK_MARKER} `) ||
+    first.startsWith(`${REVIEW_OK_MARKER}:`)
+  );
+}
+
 export type RunLoopParams = {
   host: HostAdapter;
   prompt: string;
   signal?: AbortSignal;
   mode?: 'ping' | 'full' | 'plan';
+  /**
+   * Prefer IDE Agent/Ask over regex for act/verify gates.
+   * Agent → always; Ask/plan → never; default auto (looksLikeActionTask).
+   */
+  actionBias?: ActionBias;
   /** Feature flag PA.13 — default true. */
   subagentsEnabled?: boolean;
   maxIterations?: number;
@@ -94,6 +152,16 @@ function persistSession(
   messages: Message[],
 ): void {
   params.onSessionMessages?.(trimSessionMessages(cloneMessages(messages)));
+}
+
+/** Mid-loop compact (when large) else pair-safe trim. */
+function prepareMessagesInPlace(messages: Message[]): void {
+  const { messages: compacted, compacted: didCompact } =
+    compactSessionMessages(messages);
+  const next = didCompact ? compacted : trimSessionMessages(messages);
+  if (next.length === messages.length && next === messages) return;
+  messages.length = 0;
+  messages.push(...next);
 }
 
 async function runPing(params: RunLoopParams): Promise<void> {
@@ -141,7 +209,12 @@ export async function runAgentLoop(params: RunLoopParams): Promise<void> {
     }
 
     if (mode === 'plan') {
-      await runFullLoop({ ...params, readOnly: true, mode: 'full' });
+      await runFullLoop({
+        ...params,
+        readOnly: true,
+        mode: 'full',
+        actionBias: params.actionBias ?? 'never',
+      });
       return;
     }
 
@@ -157,9 +230,18 @@ export async function runAgentLoop(params: RunLoopParams): Promise<void> {
   }
 }
 
+type ToolResultBlock = {
+  toolResult: {
+    toolUseId: string;
+    content: Array<{ text: string }>;
+    status: 'success' | 'error';
+  };
+};
+
 async function runFullLoop(params: RunLoopParams): Promise<void> {
   const { host, prompt, signal } = params;
   const depth = params.depth ?? 0;
+  const actionBias: ActionBias = params.actionBias ?? 'auto';
   const subagentsEnabled =
     (params.subagentsEnabled ?? true) && depth === 0 && !params.readOnly;
   const includePhaseB =
@@ -202,6 +284,18 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
     workspaceConfig.verify,
   );
   const meta = (await host.gatherMeta?.(signal)) ?? {};
+
+  /** Live checklist — same source of truth as UI / disk. */
+  let liveTodos: AgentTodo[] = [];
+  if (host.loadTodos) {
+    try {
+      liveTodos = (await host.loadTodos()) ?? [];
+    } catch {
+      liveTodos = [];
+    }
+  }
+  let didTodoWrite = liveTodos.length > 0;
+
   const system = assembleSystemBlocks({
     walkcroachMd,
     skillsCatalog: includePhaseB ? skills.catalogText() : undefined,
@@ -219,7 +313,6 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
             'list_dir',
             'search',
             'glob',
-            'todo_write',
             'ask_user',
             'recall_project_memory',
           ].includes(t.toolSpec?.name ?? ''),
@@ -236,7 +329,7 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
     : [];
   const userText =
     params.followUp || prior.length > 0
-      ? buildFollowUpTurn(prompt)
+      ? buildFollowUpTurn(prompt, liveTodos)
       : buildUserTurn({
           prompt,
           gitStatus: meta.gitStatus,
@@ -246,6 +339,8 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
           linkedProjectId: params.projectMemory?.projectId,
           linkedProjectName: params.projectMemory?.projectName,
           verifyCommands: policy.verify.commands,
+          todos: liveTodos,
+          actionBias,
         });
 
   const messages: Message[] =
@@ -260,20 +355,28 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
 
   // Action-task heuristic uses the latest user prompt (not only the first turn).
   const actionPrompt = prompt;
+  const isAction = () => shouldTreatAsActionTask(actionPrompt, actionBias);
 
   host.emit({ type: 'phase', phase: 'act' });
 
   const MUTATING_TOOLS = new Set([
     'write_file',
     'edit_file',
+    'apply_patch',
     'run_terminal',
+    'terminal_session',
     'update_walkcroach_md',
   ]);
   let didMutatingWork = false;
   let actNudgeUsed = false;
   let verifyNudgesUsed = 0;
+  let todoWriteNudgesUsed = 0;
+  let todoProgressNudgesUsed = 0;
+  let verifyReviewsUsed = 0;
+  let stopHookNudgesUsed = 0;
 
   async function streamOneTurn(): Promise<ConverseTurnResult> {
+    prepareMessagesInPlace(messages);
     const gen = streamConverseTurn({
       system,
       messages,
@@ -297,6 +400,130 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
       turn = await gen.next();
     }
     return turn.value;
+  }
+
+  async function runOneTool(tool: ParsedToolUse): Promise<ToolResultBlock> {
+    if (tool.name === 'spawn_subagent') {
+      if (!subagentsEnabled) {
+        return {
+          toolResult: {
+            toolUseId: tool.toolUseId,
+            content: [{ text: 'Sub-agents are disabled.' }],
+            status: 'error',
+          },
+        };
+      }
+      if (subagentCount >= maxSubagents) {
+        return {
+          toolResult: {
+            toolUseId: tool.toolUseId,
+            content: [
+              {
+                text: `Sub-agent limit reached (max ${maxSubagents}).`,
+              },
+            ],
+            status: 'error',
+          },
+        };
+      }
+      subagentCount += 1;
+    }
+
+    const exec: ToolExecResult = await executeTool({
+      host,
+      tool,
+      signal,
+      readOnly: params.readOnly,
+      mcp,
+      skills,
+      telemetry,
+      ccloudApiKey: params.ccloudApiKey,
+      projectMemory: params.projectMemory,
+      policy,
+      spawnSubagent: subagentsEnabled
+        ? async ({ name, prompt: subPrompt, signal: subSignal }) => {
+            return runSubagent({
+              host,
+              name,
+              prompt: subPrompt,
+              signal: subSignal ?? signal,
+              depth: depth + 1,
+            });
+          }
+        : undefined,
+    });
+
+    if (MUTATING_TOOLS.has(tool.name) && exec.status === 'success') {
+      didMutatingWork = true;
+    }
+
+    if (tool.name === 'todo_write' && exec.status === 'success') {
+      try {
+        liveTodos = normalizeTodos(tool.input?.todos);
+        didTodoWrite = true;
+      } catch {
+        /* normalize already failed inside executeTool */
+      }
+    }
+
+    if (
+      depth === 0 &&
+      workspaceConfig.settings.hooks.PostToolUse.length > 0
+    ) {
+      const root = host.getWorkspaceRoot();
+      if (root) {
+        const warnings = await runPostToolUseHooks({
+          workspaceRoot: root,
+          hooks: workspaceConfig.settings.hooks.PostToolUse,
+          toolName: tool.name,
+          toolInput: tool.input ?? {},
+          toolStatus: exec.status,
+          toolContent: exec.content,
+          signal,
+        });
+        for (const message of warnings) {
+          host.emit({ type: 'warning', message });
+        }
+      }
+    }
+
+    return {
+      toolResult: {
+        toolUseId: exec.toolUseId,
+        content: [{ text: exec.content }],
+        status: exec.status === 'success' ? 'success' : 'error',
+      },
+    };
+  }
+
+  /** Parallelize consecutive parallel-safe tools; keep writes/shell serial. */
+  async function executeToolBatch(
+    toolUses: ParsedToolUse[],
+  ): Promise<ToolResultBlock[]> {
+    const out: ToolResultBlock[] = [];
+    let i = 0;
+    while (i < toolUses.length) {
+      const tool = toolUses[i]!;
+      if (PARALLEL_SAFE_TOOLS.has(tool.name)) {
+        const batch: ParsedToolUse[] = [];
+        while (
+          i < toolUses.length &&
+          PARALLEL_SAFE_TOOLS.has(toolUses[i]!.name)
+        ) {
+          batch.push(toolUses[i]!);
+          i += 1;
+        }
+        if (batch.length === 1) {
+          out.push(await runOneTool(batch[0]!));
+        } else {
+          out.push(...(await Promise.all(batch.map((t) => runOneTool(t)))));
+        }
+      } else {
+        out.push(await runOneTool(tool));
+        i += 1;
+      }
+    }
+    return out;
   }
 
   try {
@@ -336,7 +563,7 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
       if (!result.toolUses.length) {
         const stalledAction =
           !params.readOnly &&
-          looksLikeActionTask(actionPrompt) &&
+          isAction() &&
           !didMutatingWork &&
           actionPrompt !== CONTINUE_PROMPT;
         if (stalledAction && !actNudgeUsed && i < maxIterations - 1) {
@@ -353,23 +580,69 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
           continue;
         }
 
-        const needsVerify =
+        const actionMutating =
           !params.readOnly &&
           !stalledAction &&
           didMutatingWork &&
-          looksLikeActionTask(actionPrompt) &&
-          policy.verifyRequired &&
-          !policy.didVerify;
+          isAction();
+
+        // Soft todo gates (mirror verify nudge pattern).
         if (
-          needsVerify &&
-          verifyNudgesUsed < policy.maxVerifyNudges &&
+          actionMutating &&
+          needsTodoWriteNudge({ didTodoWrite, didMutatingWork }) &&
+          todoWriteNudgesUsed < MAX_TODO_WRITE_NUDGES &&
           i < maxIterations - 1
         ) {
-          verifyNudgesUsed += 1;
+          todoWriteNudgesUsed += 1;
           host.emit({
             type: 'warning',
             message:
-              'Changes made but not verified — nudging the agent to run verify…',
+              'Changes made without a checklist — nudging the agent to call todo_write…',
+          });
+          messages.push({
+            role: 'user',
+            content: [{ text: buildTodoWriteNudgePrompt() }],
+          });
+          continue;
+        }
+
+        if (
+          actionMutating &&
+          needsTodoProgressNudge({
+            todos: liveTodos,
+            didTodoWrite,
+            didMutatingWork,
+          }) &&
+          todoProgressNudgesUsed < MAX_TODO_PROGRESS_NUDGES &&
+          i < maxIterations - 1
+        ) {
+          todoProgressNudgesUsed += 1;
+          host.emit({
+            type: 'warning',
+            message:
+              'Checklist stalled (open items, none in_progress) — nudging update…',
+          });
+          messages.push({
+            role: 'user',
+            content: [{ text: buildTodoProgressNudgePrompt(liveTodos) }],
+          });
+          continue;
+        }
+
+        const needsVerify =
+          actionMutating && policy.verifyRequired && !policy.didVerify;
+        if (
+          needsVerify &&
+          verifyNudgesUsed < policy.verifyPromptCap &&
+          i < maxIterations - 1
+        ) {
+          verifyNudgesUsed += 1;
+          const hard = verifyNudgesUsed > policy.maxVerifyNudges;
+          host.emit({
+            type: 'warning',
+            message: hard
+              ? `Verify still required — hard gate (${verifyNudgesUsed}/${policy.verifyPromptCap})…`
+              : 'Changes made but not verified — nudging the agent to run verify…',
           });
           host.emit({ type: 'phase', phase: 'verify' });
           messages.push({
@@ -381,17 +654,101 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
           continue;
         }
 
+        // Adversarial read-only review before declaring success after mutations.
+        if (
+          actionMutating &&
+          !needsVerify &&
+          depth === 0 &&
+          verifyReviewsUsed < MAX_VERIFY_REVIEWS &&
+          i < maxIterations - 1
+        ) {
+          verifyReviewsUsed += 1;
+          host.emit({
+            type: 'warning',
+            message: 'Running read-only verify review…',
+          });
+          host.emit({ type: 'phase', phase: 'verify' });
+          const review = await runSubagent({
+            host,
+            name: 'verify-review',
+            prompt: buildVerifyReviewPrompt(actionPrompt),
+            signal,
+            depth: depth + 1,
+          });
+          if (!isReviewOk(review)) {
+            messages.push({
+              role: 'user',
+              content: [
+                {
+                  text: [
+                    'Verify review found issues before marking the task done:',
+                    review,
+                    '',
+                    'Fix the issues (write_file / edit_file / apply_patch / run_terminal), update todos, then continue.',
+                  ].join('\n'),
+                },
+              ],
+            });
+            continue;
+          }
+        }
+
+        // Blocking Stop hooks (settings.hooks.Stop) — must exit 0 before clean done.
+        const wantsCleanDone = !stalledAction && !needsVerify;
+        const stopHooks = workspaceConfig.settings.hooks.Stop;
+        if (
+          wantsCleanDone &&
+          depth === 0 &&
+          stopHooks.length > 0 &&
+          stopHookNudgesUsed < MAX_STOP_HOOK_NUDGES &&
+          i < maxIterations - 1
+        ) {
+          const root = host.getWorkspaceRoot();
+          if (root) {
+            host.emit({
+              type: 'warning',
+              message: 'Running Stop hooks…',
+            });
+            const stopResult = await runStopHooks({
+              workspaceRoot: root,
+              hooks: stopHooks,
+              reason: result.stopReason || 'end_turn',
+              didMutatingWork,
+              signal,
+            });
+            if (!stopResult.ok) {
+              stopHookNudgesUsed += 1;
+              host.emit({
+                type: 'warning',
+                message: `Stop hook blocked completion (${stopHookNudgesUsed}/${MAX_STOP_HOOK_NUDGES})…`,
+              });
+              messages.push({
+                role: 'user',
+                content: [
+                  { text: buildStopHookNudgePrompt(stopResult.failures) },
+                ],
+              });
+              continue;
+            }
+          }
+        }
+
         host.emit({ type: 'phase', phase: 'verify' });
         host.emit({
           type: 'telemetry',
           name: 'session_complete',
           counters: telemetry.counters,
         });
+        // Never report a clean end_turn while verify.required is unmet.
         const reason = stalledAction
           ? 'incomplete'
           : needsVerify
             ? 'unverified'
-            : result.stopReason || 'end_turn';
+            : stopHookNudgesUsed >= MAX_STOP_HOOK_NUDGES &&
+                workspaceConfig.settings.hooks.Stop.length > 0 &&
+                wantsCleanDone
+              ? 'stop_hook_failed'
+              : result.stopReason || 'end_turn';
         persistSession(params, messages);
         host.emit({
           type: 'done',
@@ -400,110 +757,13 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
             reason === 'max_tokens' ||
             stalledAction ||
             reason === 'incomplete' ||
-            reason === 'unverified',
+            reason === 'unverified' ||
+            reason === 'stop_hook_failed',
         });
         return;
       }
 
-      const toolResults: Array<{
-        toolResult: {
-          toolUseId: string;
-          content: Array<{ text: string }>;
-          status: 'success' | 'error';
-        };
-      }> = [];
-
-      for (const tool of result.toolUses) {
-        if (tool.name === 'spawn_subagent') {
-          if (!subagentsEnabled) {
-            toolResults.push({
-              toolResult: {
-                toolUseId: tool.toolUseId,
-                content: [{ text: 'Sub-agents are disabled.' }],
-                status: 'error',
-              },
-            });
-            continue;
-          }
-          if (subagentCount >= maxSubagents) {
-            toolResults.push({
-              toolResult: {
-                toolUseId: tool.toolUseId,
-                content: [
-                  {
-                    text: `Sub-agent limit reached (max ${maxSubagents}).`,
-                  },
-                ],
-                status: 'error',
-              },
-            });
-            continue;
-          }
-          subagentCount += 1;
-        }
-
-        const exec = await executeTool({
-          host,
-          tool,
-          signal,
-          readOnly: params.readOnly,
-          mcp,
-          skills,
-          telemetry,
-          ccloudApiKey: params.ccloudApiKey,
-          projectMemory: params.projectMemory,
-          policy,
-          spawnSubagent: subagentsEnabled
-            ? async ({ name, prompt: subPrompt, signal: subSignal }) => {
-                return runSubagent({
-                  host,
-                  name,
-                  prompt: subPrompt,
-                  signal: subSignal ?? signal,
-                  depth: depth + 1,
-                });
-              }
-            : undefined,
-        });
-
-        if (
-          MUTATING_TOOLS.has(tool.name) &&
-          exec.status === 'success'
-        ) {
-          didMutatingWork = true;
-        }
-
-        // P2 — optional PostToolUse hooks (non-blocking).
-        if (
-          depth === 0 &&
-          workspaceConfig.settings.hooks.PostToolUse.length > 0
-        ) {
-          const root = host.getWorkspaceRoot();
-          if (root) {
-            const warnings = await runPostToolUseHooks({
-              workspaceRoot: root,
-              hooks: workspaceConfig.settings.hooks.PostToolUse,
-              toolName: tool.name,
-              toolInput: tool.input ?? {},
-              toolStatus: exec.status,
-              toolContent: exec.content,
-              signal,
-            });
-            for (const message of warnings) {
-              host.emit({ type: 'warning', message });
-            }
-          }
-        }
-
-        toolResults.push({
-          toolResult: {
-            toolUseId: exec.toolUseId,
-            content: [{ text: exec.content }],
-            status: exec.status === 'success' ? 'success' : 'error',
-          },
-        });
-      }
-
+      const toolResults = await executeToolBatch(result.toolUses);
       messages.push({
         role: 'user',
         content: toolResults,
@@ -519,7 +779,7 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
     const unverifiedAtCap =
       !params.readOnly &&
       didMutatingWork &&
-      looksLikeActionTask(actionPrompt) &&
+      isAction() &&
       policy.verifyRequired &&
       !policy.didVerify;
     persistSession(params, messages);
@@ -546,7 +806,9 @@ async function runSubagent(params: {
     if (
       event.type === 'tool_card' ||
       event.type === 'approval_request' ||
-      event.type === 'error'
+      event.type === 'error' ||
+      event.type === 'todos' ||
+      event.type === 'warning'
     ) {
       params.host.emit(event);
     }
@@ -558,6 +820,7 @@ async function runSubagent(params: {
     signal: params.signal,
     mode: 'full',
     readOnly: true,
+    actionBias: 'never',
     subagentsEnabled: false,
     includePhaseB: false,
     depth: params.depth,
@@ -584,6 +847,33 @@ function wrapHost(
       ? (p, d) => host.applyDiff!(p, d)
       : undefined,
     runTerminal: (c, o) => host.runTerminal(c, o),
+    startBackgroundTerminal: host.startBackgroundTerminal
+      ? (c, o) => host.startBackgroundTerminal!(c, o)
+      : undefined,
+    pollBackgroundTerminal: host.pollBackgroundTerminal
+      ? (id) => host.pollBackgroundTerminal!(id)
+      : undefined,
+    killBackgroundTerminal: host.killBackgroundTerminal
+      ? (id) => host.killBackgroundTerminal!(id)
+      : undefined,
+    killAllTerminals: host.killAllTerminals
+      ? () => host.killAllTerminals!()
+      : undefined,
+    startTerminalSession: host.startTerminalSession
+      ? (p) => host.startTerminalSession!(p)
+      : undefined,
+    writeTerminalSession: host.writeTerminalSession
+      ? (id, input, o) => host.writeTerminalSession!(id, input, o)
+      : undefined,
+    readTerminalSession: host.readTerminalSession
+      ? (id, o) => host.readTerminalSession!(id, o)
+      : undefined,
+    closeTerminalSession: host.closeTerminalSession
+      ? (id) => host.closeTerminalSession!(id)
+      : undefined,
+    listTerminalSessions: host.listTerminalSessions
+      ? () => host.listTerminalSessions!()
+      : undefined,
     showDiffPreview: (p, b, a, m) => host.showDiffPreview(p, b, a, m),
     confirmCommand: (c, m) => host.confirmCommand(c, m),
     askUser: (p) => host.askUser(p),
@@ -597,6 +887,11 @@ function wrapHost(
     getWorkspaceRoot: () => host.getWorkspaceRoot(),
     isTrustedWorkspace: () => host.isTrustedWorkspace(),
     secrets: host.secrets,
+    persistTodos: host.persistTodos
+      ? (t) => host.persistTodos!(t)
+      : undefined,
+    loadTodos: host.loadTodos ? () => host.loadTodos!() : undefined,
+    clearTodos: host.clearTodos ? () => host.clearTodos!() : undefined,
     emit,
   };
 }

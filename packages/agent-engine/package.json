@@ -17,6 +17,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "eval": "vitest run src/eval",
     "smoke:ping": "node --import tsx src/smoke-ping.ts",
     "sync:cockroachdb-skills": "node scripts/sync-cockroachdb-skills.mjs"
   },
@@ -33,5 +34,8 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "optionalDependencies": {
+    "node-pty": "^1.0.0"
   }
 }

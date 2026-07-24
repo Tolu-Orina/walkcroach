@@ -14,6 +14,8 @@ import {
   hookMatches,
   parseHooksConfig,
   runPostToolUseHooks,
+  runStopHooks,
+  buildStopHookNudgePrompt,
 } from './hooks.js';
 import { parseSettingsJson } from './workspace-config.js';
 
@@ -174,5 +176,44 @@ describe('hooks config', () => {
       hooks: { PostToolUse: [{ command: 'echo hi', timeoutMs: 1000 }] },
     });
     expect(h.PostToolUse[0]?.timeoutMs).toBe(1000);
+    expect(h.Stop).toEqual([]);
+  });
+
+  it('parses Stop hooks and runs them as blocking', async () => {
+    const s = parseSettingsJson({
+      hooks: {
+        Stop: [{ command: 'node -e "process.exit(0)"', timeoutMs: 5000 }],
+      },
+    });
+    expect(s.hooks.Stop).toHaveLength(1);
+
+    const dir = await mkdtemp(join(tmpdir(), 'wc-stop-'));
+    try {
+      const ok = await runStopHooks({
+        workspaceRoot: dir,
+        hooks: s.hooks.Stop,
+        reason: 'end_turn',
+        didMutatingWork: true,
+      });
+      expect(ok).toEqual({ ok: true, failures: [] });
+
+      const bad = await runStopHooks({
+        workspaceRoot: dir,
+        hooks: [
+          {
+            matcher: '.*',
+            command: 'node -e "process.exit(3)"',
+            timeoutMs: 5000,
+          },
+        ],
+        reason: 'end_turn',
+        didMutatingWork: false,
+      });
+      expect(bad.ok).toBe(false);
+      expect(bad.failures[0]).toContain('exit 3');
+      expect(buildStopHookNudgePrompt(bad.failures)).toMatch(/Stop hook/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

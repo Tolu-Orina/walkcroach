@@ -14,6 +14,7 @@ import type {
 import {
   ApprovalController,
   BackgroundTerminalRegistry,
+  InteractiveSessionRegistry,
   bindApprovals,
   clearPersistedTodos,
   clearActiveAgentSession,
@@ -24,8 +25,10 @@ import {
   persistAgentSession,
   persistTodos,
   streamShellCommand,
+  applyDiffString,
 } from '@walkcroach/agent-engine';
 import type { BedrockMessage } from '@walkcroach/agent-engine';
+import { WalkCroachShellView } from './shell-view.js';
 
 /**
  * Phase A host: workspace fs, terminal, search, approvals, trust.
@@ -39,6 +42,12 @@ export class VsCodeHostAdapter implements HostAdapter {
   private readonly bgTerminals = new BackgroundTerminalRegistry(() =>
     this.getWorkspaceRoot(),
   );
+  private readonly shellView = new WalkCroachShellView();
+  private readonly sessions = new InteractiveSessionRegistry({
+    onOutput: (_sessionId, chunk) => {
+      this.shellView.write(chunk);
+    },
+  });
 
   constructor(
     private readonly emitFn: HostAdapter['emit'],
@@ -80,6 +89,7 @@ export class VsCodeHostAdapter implements HostAdapter {
     }
     this.activePids.clear();
     this.bgTerminals.killAll();
+    this.sessions.killAll();
   }
 
   showDiffPreview(
@@ -164,6 +174,13 @@ export class VsCodeHostAdapter implements HostAdapter {
     await fs.writeFile(abs, content, 'utf8');
   }
 
+  async applyDiff(rel: string, diff: string): Promise<void> {
+    this.assertTrustedTools();
+    const before = await this.readFile(rel);
+    const after = applyDiffString(before, diff);
+    await this.writeFile(rel, after);
+  }
+
   async listDir(rel: string): Promise<string[]> {
     this.assertTrustedTools();
     const abs = this.resolvePath(rel || '.');
@@ -207,16 +224,54 @@ export class VsCodeHostAdapter implements HostAdapter {
 
   async *runTerminal(
     cmd: string,
-    opts: { cwd: string; signal?: AbortSignal; timeoutMs?: number },
+    opts: {
+      cwd: string;
+      signal?: AbortSignal;
+      timeoutMs?: number;
+      stdin?: string;
+      replies?: string[];
+      onConfirmPrompt?: import('@walkcroach/agent-engine').RunTerminalOpts['onConfirmPrompt'];
+    },
   ): AsyncIterable<TerminalChunk> {
     this.assertTrustedTools();
-    yield* streamShellCommand(cmd, {
-      cwd: opts.cwd,
-      signal: opts.signal,
-      timeoutMs: opts.timeoutMs,
-      onSpawn: (pid) => this.activePids.add(pid),
-      onExit: (pid) => this.activePids.delete(pid),
-    });
+    // Reliable agent I/O via child_process; mirror into one reusable PTY tab.
+    const preloadBits: string[] = [];
+    if (opts.stdin) preloadBits.push('stdin');
+    if (opts.replies?.length) preloadBits.push(`${opts.replies.length} replies`);
+    if (opts.onConfirmPrompt) preloadBits.push('interactive');
+    this.shellView.startCommand(
+      preloadBits.length
+        ? `${cmd}  (${preloadBits.join(', ')})`
+        : cmd,
+      opts.cwd,
+    );
+    let lastExit: number | null = null;
+    try {
+      for await (const chunk of streamShellCommand(cmd, {
+        cwd: opts.cwd,
+        signal: opts.signal,
+        timeoutMs: opts.timeoutMs,
+        stdin: opts.stdin,
+        replies: opts.replies,
+        onConfirmPrompt: opts.onConfirmPrompt,
+        onSpawn: (pid) => this.activePids.add(pid),
+        onExit: (pid) => this.activePids.delete(pid),
+      })) {
+        if (chunk.text) {
+          this.shellView.write(chunk.text);
+        }
+        if (chunk.exitCode !== undefined) {
+          lastExit = chunk.exitCode;
+        }
+        yield chunk;
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.shellView.write(`\n[error] ${message}\n`);
+      throw err;
+    } finally {
+      this.shellView.endCommand(lastExit);
+    }
   }
 
   async startBackgroundTerminal(
@@ -224,10 +279,14 @@ export class VsCodeHostAdapter implements HostAdapter {
     opts: { cwd: string },
   ): Promise<BackgroundTerminalStart> {
     this.assertTrustedTools();
+    // Hidden process tree (reliable poll/kill); announce in the shared shell view.
     const info = await this.bgTerminals.start({
       cmd,
       cwd: opts.cwd,
     });
+    this.shellView.note(
+      `Background task ${info.taskId} started (pid ${info.pid})\n$ ${cmd}\nlog: ${info.logPath}`,
+    );
     return {
       taskId: info.taskId,
       pid: info.pid,
@@ -250,7 +309,67 @@ export class VsCodeHostAdapter implements HostAdapter {
   }
 
   async killBackgroundTerminal(taskId: string): Promise<boolean> {
-    return this.bgTerminals.kill(taskId);
+    const killed = this.bgTerminals.kill(taskId);
+    if (killed) {
+      this.shellView.note(`Background task ${taskId} killed`);
+    }
+    return killed;
+  }
+
+  async startTerminalSession(params: {
+    cmd: string;
+    cwd: string;
+    cols?: number;
+    rows?: number;
+  }) {
+    this.assertTrustedTools();
+    const info = await this.sessions.start(params);
+    this.shellView.startSession(
+      info.sessionId,
+      info.cmd,
+      info.cwd,
+      info.backend,
+    );
+    return info;
+  }
+
+  async writeTerminalSession(
+    sessionId: string,
+    input: string,
+    opts?: { appendNewline?: boolean },
+  ): Promise<void> {
+    this.assertTrustedTools();
+    this.sessions.write(sessionId, input, opts);
+    const shown =
+      opts?.appendNewline === false || input.endsWith('\n')
+        ? input
+        : `${input}\n`;
+    this.shellView.write(`\x1b[36m‹ ${shown.replace(/\r?\n/g, '\\n')}\x1b[0m\r\n`);
+  }
+
+  async readTerminalSession(
+    sessionId: string,
+    opts?: {
+      timeoutMs?: number;
+      settleMs?: number;
+      maxChars?: number;
+    },
+  ) {
+    this.assertTrustedTools();
+    return this.sessions.read(sessionId, opts);
+  }
+
+  async closeTerminalSession(sessionId: string): Promise<boolean> {
+    this.assertTrustedTools();
+    const closed = this.sessions.close(sessionId);
+    if (closed) {
+      this.shellView.endSession(sessionId, 'closed');
+    }
+    return closed;
+  }
+
+  async listTerminalSessions() {
+    return this.sessions.list();
   }
 
   async persistTodos(todos: AgentTodo[]): Promise<void> {
@@ -306,10 +425,14 @@ export class VsCodeHostAdapter implements HostAdapter {
     const root = this.getWorkspaceRoot();
     if (!root) return {};
     try {
+      // Quiet: do not open/spam the WalkCroach shell tab for meta gather.
       let out = '';
-      for await (const chunk of this.runTerminal('git status -sb', {
+      for await (const chunk of streamShellCommand('git status -sb', {
         cwd: root,
         signal,
+        timeoutMs: 15_000,
+        onSpawn: (pid) => this.activePids.add(pid),
+        onExit: (pid) => this.activePids.delete(pid),
       })) {
         out += chunk.text;
       }

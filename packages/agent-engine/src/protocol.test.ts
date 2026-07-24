@@ -122,11 +122,42 @@ describe('TokenDeltaCoalescer', () => {
 });
 
 describe('approvals', () => {
-  it('never auto-approves terminal or infra', () => {
+  it('never auto-approves critical/infra shell even in low_friction', () => {
     expect(isInfraCommand('ccloud cluster create')).toBe(true);
     expect(
       shouldAutoApprove({
         autonomy: 'low_friction',
+        toolName: 'run_terminal',
+        input: { cmd: 'ccloud cluster create' },
+      }),
+    ).toBe(false);
+    expect(
+      shouldAutoApprove({
+        autonomy: 'low_friction',
+        toolName: 'run_terminal',
+        input: { cmd: 'sudo rm -rf /' },
+      }),
+    ).toBe(false);
+  });
+
+  it('auto-approves routine shell and writes in low_friction', () => {
+    expect(
+      shouldAutoApprove({
+        autonomy: 'low_friction',
+        toolName: 'run_terminal',
+        input: { cmd: 'npm run lint' },
+      }),
+    ).toBe(true);
+    expect(
+      shouldAutoApprove({
+        autonomy: 'low_friction',
+        toolName: 'write_file',
+        input: { path: 'src/a.ts', content: 'x' },
+      }),
+    ).toBe(true);
+    expect(
+      shouldAutoApprove({
+        autonomy: 'strict',
         toolName: 'run_terminal',
         input: { cmd: 'npm test' },
       }),
@@ -159,7 +190,7 @@ describe('approvals', () => {
       shouldAutoApprove({
         autonomy: 'low_friction',
         toolName: 'write_file',
-        input: { path: 'src/a.ts', content: 'x' },
+        input: { path: '.env', content: 'x' },
       }),
     ).toBe(false);
   });

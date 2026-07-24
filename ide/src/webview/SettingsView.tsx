@@ -1,8 +1,9 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { getVsCodeApi } from './vscodeApi';
 
 type Props = {
   bedrockConfigured: boolean;
+  bedrockModelId: string;
   mcpConfigured: boolean;
   ccloudConfigured: boolean;
   onBack: () => void;
@@ -14,16 +15,22 @@ type Props = {
  */
 export function SettingsView({
   bedrockConfigured,
+  bedrockModelId,
   mcpConfigured,
   ccloudConfigured,
   onBack,
 }: Props) {
   const [bedrockKey, setBedrockKey] = useState('');
+  const [modelId, setModelId] = useState(bedrockModelId);
   const [mcpSnippet, setMcpSnippet] = useState('');
   const [clusterId, setClusterId] = useState('');
   const [mcpApiKey, setMcpApiKey] = useState('');
   const [ccloudKey, setCcloudKey] = useState('');
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setModelId(bedrockModelId);
+  }, [bedrockModelId]);
 
   const saveBedrock = useCallback(() => {
     const token = bedrockKey.trim();
@@ -46,6 +53,16 @@ export function SettingsView({
     setBedrockKey('');
     setBusy(false);
   }, []);
+
+  const saveModelId = useCallback(() => {
+    setBusy(true);
+    const trimmed = modelId.trim();
+    getVsCodeApi().postMessage({
+      type: 'SAVE_SETTINGS',
+      bedrockModelId: trimmed || null,
+    });
+    setBusy(false);
+  }, [modelId]);
 
   const saveMcpSnippet = useCallback(() => {
     if (!mcpSnippet.trim()) return;
@@ -140,6 +157,50 @@ export function SettingsView({
               onClick={clearBedrock}
             >
               Clear
+            </button>
+          ) : null}
+        </div>
+
+        <label className="label" htmlFor="bedrock-model">
+          Model ID (optional override)
+        </label>
+        <p className="settings-hint">
+          Default is Nova 2 Lite (
+          <code>global.amazon.nova-2-lite-v1:0</code>). Leave empty to keep the
+          default.
+        </p>
+        <input
+          id="bedrock-model"
+          className="field"
+          autoComplete="off"
+          spellCheck={false}
+          placeholder="global.amazon.nova-2-lite-v1:0"
+          value={modelId}
+          onChange={(e) => setModelId(e.target.value)}
+        />
+        <div className="row">
+          <button
+            type="button"
+            className="btn primary"
+            disabled={busy || modelId.trim() === bedrockModelId.trim()}
+            onClick={saveModelId}
+          >
+            Save model
+          </button>
+          {bedrockModelId ? (
+            <button
+              type="button"
+              className="btn ghost"
+              disabled={busy}
+              onClick={() => {
+                setModelId('');
+                getVsCodeApi().postMessage({
+                  type: 'SAVE_SETTINGS',
+                  bedrockModelId: null,
+                });
+              }}
+            >
+              Reset default
             </button>
           ) : null}
         </div>

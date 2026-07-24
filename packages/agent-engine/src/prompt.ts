@@ -1,18 +1,20 @@
 import { truncateText, DEFAULT_WALK_CROACH_MD_MAX_CHARS } from './truncate.js';
 import type { SystemContentBlock } from '@aws-sdk/client-bedrock-runtime';
+import type { AgentTodo } from './todos.js';
+import { formatTodosChecklistBlock } from './todos.js';
 
 export const AGENT_SYSTEM_PROMPT = [
   'You are WalkCroach IDE, a local coding agent in the developer\'s workspace.',
   'Follow gather → act → verify: inspect only what you need, make the changes, then verify.',
   'Use tools for all file and shell operations. Paths must be relative to the workspace root (never absolute Windows/macOS paths).',
-  'Prefer glob over recursive list_dir. Prefer edit_file for surgical changes; use write_file for new files or full rewrites.',
-  'Use run_terminal for installs, builds, tests (mode=blocking, default). For long-lived processes (vite/dev servers/watchers), use mode=background then await_terminal to poll — never block the loop on a forever-running server. Prefer write_file for source files so the user sees a diff.',
-  'On multi-step work, call todo_write early and keep exactly one item in_progress until done (persisted under .walkcroach/todos.json).',
+  'Prefer glob over recursive list_dir. Prefer edit_file or apply_patch for surgical changes; use write_file for new files or full rewrites. Prefer apply_patch when several unique hunks land in the same file.',
+  'Use run_terminal for installs, builds, tests (mode=blocking, default). Prefer non-interactive flags (-y, --yes, CI=true) when the CLI supports them. For known confirm prompts, pass replies (e.g. ["y"]) or stdin with trailing newlines. If a CLI unexpectedly asks [y/N], the host surfaces ask_user (interactive Tier B, default on when not preloading stdin). Password/sudo prompts abort — do not send secrets via stdin. For REPLs/TUIs and multi-step stdin conversations (python -i, node, psql, debuggers), use terminal_session: start → write → read → close (backend pty when native addon loads, else pipe). For long-lived processes (vite/dev servers/watchers), use mode=background then await_terminal to poll — never block the loop on a forever-running server. Prefer write_file for source files so the user sees a diff.',
+  'On multi-step work, call todo_write early and keep exactly one item in_progress until done (persisted under .walkcroach/todos.json). Update the checklist as you finish each step — do not leave everything pending.',
   'After mutating work, call verify (commands from .walkcroach/verify.json) before claiming the task is done. Do not treat a prior failing test run as success — run a fresh verify.',
   'Use ask_user only when a real choice is required before you can proceed; otherwise act.',
-  'Every file write and terminal command is shown to the user for approval unless they enabled low-friction edits.',
+  'In low-friction mode, routine file edits/writes and safe local shell (npm, git, builds) auto-run; only critical/infra commands and sensitive paths need approval. Strict mode asks for every mutating step.',
   'Never invent file contents you have not read. Keep WALKCROACH.md updated with durable conventions via update_walkcroach_md.',
-  'Honor .walkcroach/rules/*.md and .walkcroach/settings.json (deny paths, terminal timeouts, background allowlist).',
+  'Honor .walkcroach/rules/*.md and .walkcroach/settings.json (deny paths, terminal timeouts, background allowlist, PostToolUse/Stop hooks). Stop hooks must exit 0 before the task is marked complete.',
   'For large multi-file work, you may call spawn_subagent for read-only exploration; you apply writes yourself.',
   'Do not run destructive or infrastructure-provisioning commands unless the user explicitly asked.',
   'CockroachDB: call load_skill for official CockroachDB Agent Skills (bundled from cockroachlabs/cockroachdb-skills); use cockroach_mcp for interactive schema/data (read-only default); ccloud only for cloud provisioning/lifecycle (always approval-gated). Prefer cockroachdb-walkcroach-tools when unsure which surface to use.',
@@ -69,6 +71,20 @@ export function looksLikeActionTask(prompt: string): boolean {
   );
 }
 
+/**
+ * IDE Agent mode → always; Ask/plan → never; CLI/default → auto (regex).
+ */
+export type ActionBias = 'auto' | 'always' | 'never';
+
+export function shouldTreatAsActionTask(
+  prompt: string,
+  actionBias: ActionBias = 'auto',
+): boolean {
+  if (actionBias === 'always') return true;
+  if (actionBias === 'never') return false;
+  return looksLikeActionTask(prompt);
+}
+
 export function buildUserTurn(params: {
   prompt: string;
   gitStatus?: string;
@@ -78,6 +94,10 @@ export function buildUserTurn(params: {
   linkedProjectId?: string;
   linkedProjectName?: string;
   verifyCommands?: string[];
+  /** Current checklist (same as UI / .walkcroach/todos.json). */
+  todos?: AgentTodo[];
+  /** Prefer Agent-mode flag over regex (default auto). */
+  actionBias?: ActionBias;
 }): string {
   const parts = [`# Task\n\n${params.prompt.trim()}`];
   if (params.workspaceRoot) {
@@ -86,10 +106,14 @@ export function buildUserTurn(params: {
       '\nUse **relative** paths from this workspace root in every tool call.',
     );
   }
-  if (looksLikeActionTask(params.prompt)) {
+  if (shouldTreatAsActionTask(params.prompt, params.actionBias ?? 'auto')) {
     parts.push(
-      '\n# Execution requirement\n\nThis task requires creating/changing files and/or running commands. Call `todo_write` to plan steps, then `write_file` / `edit_file` / `run_terminal` before you end your turn. Do not stop after exploration alone. Use `ask_user` only if a real decision blocks progress.',
+      '\n# Execution requirement\n\nThis task requires creating/changing files and/or running commands. Call `todo_write` to plan steps, then `write_file` / `edit_file` / `apply_patch` / `run_terminal` before you end your turn. Do not stop after exploration alone. Use `ask_user` only if a real decision blocks progress.',
     );
+  }
+  const todoBlock = formatTodosChecklistBlock(params.todos ?? []);
+  if (todoBlock) {
+    parts.push(`\n${todoBlock}`);
   }
   if (params.verifyCommands?.length) {
     parts.push(
@@ -129,6 +153,14 @@ export function buildUserTurn(params: {
 }
 
 /** Lightweight follow-up / Continue turn (session already has context). */
-export function buildFollowUpTurn(prompt: string): string {
-  return `# Follow-up\n\n${prompt.trim()}`;
+export function buildFollowUpTurn(
+  prompt: string,
+  todos?: AgentTodo[],
+): string {
+  const parts = [`# Follow-up\n\n${prompt.trim()}`];
+  const todoBlock = formatTodosChecklistBlock(todos ?? []);
+  if (todoBlock) {
+    parts.push(`\n${todoBlock}`);
+  }
+  return parts.join('\n');
 }

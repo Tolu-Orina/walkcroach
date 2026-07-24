@@ -7,6 +7,7 @@ import type {
 } from './host.js';
 import { ApprovalController, bindApprovals } from './approval-controller.js';
 import type { AutonomyLevel } from './approvals.js';
+import { InteractiveSessionRegistry } from './pty-session.js';
 
 export type FakeHostOptions = {
   files?: Record<string, string>;
@@ -29,6 +30,7 @@ export function createFakeHost(opts: FakeHostOptions = {}): HostAdapter & {
   const events: import('./host.js').AgentEvent[] = [];
   const workspaceRoot = opts.workspaceRoot ?? '/workspace';
   let currentSignal: AbortSignal | undefined;
+  const sessions = new InteractiveSessionRegistry({ forcePipe: true });
 
   const gate = new ApprovalController((req) => {
     events.push({ type: 'approval_request', request: req });
@@ -79,6 +81,13 @@ export function createFakeHost(opts: FakeHostOptions = {}): HostAdapter & {
     writeFile: async (path, content) => {
       files.set(norm(path), content);
     },
+    applyDiff: async (path, diff) => {
+      const { applyDiffString } = await import('./patch.js');
+      const key = norm(path);
+      const before = files.get(key);
+      if (before === undefined) throw new Error(`ENOENT: ${path}`);
+      files.set(key, applyDiffString(before, diff));
+    },
     listDir: async (path) => {
       const prefix = norm(path) === '.' ? '' : `${norm(path)}/`;
       const names = new Set<string>();
@@ -118,14 +127,52 @@ export function createFakeHost(opts: FakeHostOptions = {}): HostAdapter & {
     },
     runTerminal: async function* (
       cmd: string,
-      termOpts: { cwd: string; signal?: AbortSignal; timeoutMs?: number },
+      termOpts: {
+        cwd: string;
+        signal?: AbortSignal;
+        timeoutMs?: number;
+        stdin?: string;
+        replies?: string[];
+        onConfirmPrompt?: import('./host.js').RunTerminalOpts['onConfirmPrompt'];
+      },
     ): AsyncIterable<TerminalChunk> {
+      // Real interactive path for Tier B unit tests.
+      if (cmd.includes('__WALKCROACH_CONFIRM_STREAM__')) {
+        const { streamShellCommand } = await import('./stream-shell.js');
+        yield* streamShellCommand(
+          'node -e "const rl=require(\'readline\').createInterface({input:process.stdin,output:process.stdout});process.stdout.write(\'Continue? [y/N] \');rl.question(\'\',(a)=>{process.stdout.write(\'got:\'+a+\'\\n\');rl.close();process.exit(a.trim().toLowerCase()===\'y\'?0:2);})"',
+          {
+            // Fake host workspace is virtual (/workspace) — use real cwd for spawn.
+            cwd: process.cwd(),
+            signal: termOpts.signal,
+            timeoutMs: termOpts.timeoutMs ?? 15_000,
+            onConfirmPrompt: termOpts.onConfirmPrompt,
+            confirmIdleMs: 200,
+          },
+        );
+        return;
+      }
       if (cmd.startsWith('echo ')) {
         yield { stream: 'stdout', text: `${cmd.slice(5)}\n`, exitCode: 0 };
         return;
       }
       if (cmd.includes('git status')) {
         yield { stream: 'stdout', text: '## main\n', exitCode: 0 };
+        return;
+      }
+      // Test helper: echo back preloaded stdin/replies.
+      if (cmd.includes('__WALKCROACH_ECHO_STDIN__')) {
+        const { buildStdinPayload } = await import('./stream-shell.js');
+        const payload =
+          buildStdinPayload({
+            stdin: termOpts.stdin,
+            replies: termOpts.replies,
+          }) ?? '';
+        yield {
+          stream: 'stdout',
+          text: payload || '(empty stdin)\n',
+          exitCode: 0,
+        };
         return;
       }
       yield {
@@ -149,7 +196,21 @@ export function createFakeHost(opts: FakeHostOptions = {}): HostAdapter & {
       logTail: '(fake)',
     }),
     killBackgroundTerminal: async () => true,
-    killAllTerminals: () => undefined,
+    killAllTerminals: () => {
+      sessions.killAll();
+    },
+    startTerminalSession: async (params) =>
+      sessions.start({
+        ...params,
+        // Fake workspace is virtual — spawn from real cwd.
+        cwd: process.cwd(),
+      }),
+    writeTerminalSession: async (sessionId, input, o) => {
+      sessions.write(sessionId, input, o);
+    },
+    readTerminalSession: async (sessionId, o) => sessions.read(sessionId, o),
+    closeTerminalSession: async (sessionId) => sessions.close(sessionId),
+    listTerminalSessions: async () => sessions.list(),
     persistTodos: async (todos) => {
       files.set('.walkcroach/todos.json', JSON.stringify({ todos }));
     },

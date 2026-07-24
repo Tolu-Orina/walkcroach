@@ -17,6 +17,11 @@ import type { TelemetrySink } from '../telemetry.js';
 import type { ProjectMemoryBridge } from '../project-memory.js';
 import type { WorkspacePolicy } from '../workspace-policy.js';
 import { isVerifyCommand } from '../workspace-config.js';
+import { applyPatchEdits, normalizePatchEdits } from '../patch.js';
+import {
+  buildStdinPayload,
+  MAX_STDIN_REPLIES,
+} from '../stream-shell.js';
 
 export type ToolExecResult = {
   toolUseId: string;
@@ -157,6 +162,183 @@ export async function executeTool(
         ].join('\n');
         break;
       }
+      case 'terminal_session': {
+        const action = str(input.action).trim().toLowerCase();
+        if (!action) throw new Error('terminal_session requires action');
+        if (
+          !host.startTerminalSession ||
+          !host.writeTerminalSession ||
+          !host.readTerminalSession ||
+          !host.closeTerminalSession ||
+          !host.listTerminalSessions
+        ) {
+          throw new Error(
+            'Interactive terminal sessions are not supported on this host',
+          );
+        }
+
+        if (action === 'list') {
+          host.emit({ type: 'tool_card', id, name, status: 'running' });
+          const sessions = await host.listTerminalSessions();
+          content =
+            sessions.length === 0
+              ? 'No interactive sessions.'
+              : sessions
+                  .map(
+                    (s) =>
+                      `${s.sessionId}  ${s.status}  backend=${s.backend}  ${s.cmd}`,
+                  )
+                  .join('\n');
+          break;
+        }
+
+        if (action === 'start') {
+          const cmd = str(input.cmd).trim();
+          if (!cmd) throw new Error('terminal_session start requires cmd');
+          const relCwd = str(input.cwd || '.').trim() || '.';
+          host.emit({
+            type: 'tool_card',
+            id,
+            name,
+            status: 'pending',
+            detail: `start: ${cmd}`,
+          });
+          const decision = await host.confirmCommand(
+            relCwd !== '.' ? `${cmd}  # cwd=${relCwd} (session)` : `${cmd}  # session`,
+            { toolName: 'terminal_session', stepId: id },
+          );
+          if (decision !== 'approve') {
+            host.emit({
+              type: 'tool_card',
+              id,
+              name,
+              status: 'done',
+              detail: 'rejected by user',
+            });
+            return {
+              toolUseId: id,
+              content: 'User rejected the terminal session.',
+              status: 'rejected',
+            };
+          }
+          host.emit({
+            type: 'tool_card',
+            id,
+            name,
+            status: 'running',
+            detail: `start: ${cmd}`,
+          });
+          const root = host.getWorkspaceRoot();
+          if (!root) throw new Error('No workspace root');
+          const pathMod = await import('node:path');
+          const cwd = pathMod.resolve(root, relCwd);
+          const rootRes = pathMod.resolve(root);
+          const relCheck = pathMod.relative(rootRes, cwd);
+          if (relCheck.startsWith('..') || pathMod.isAbsolute(relCheck)) {
+            throw new Error(`cwd escapes workspace: ${relCwd}`);
+          }
+          const cols =
+            typeof input.cols === 'number' && Number.isFinite(input.cols)
+              ? Math.max(20, Math.min(300, Math.floor(input.cols)))
+              : undefined;
+          const rows =
+            typeof input.rows === 'number' && Number.isFinite(input.rows)
+              ? Math.max(5, Math.min(120, Math.floor(input.rows)))
+              : undefined;
+          const info = await host.startTerminalSession({
+            cmd,
+            cwd,
+            cols,
+            rows,
+          });
+          content = [
+            `session_id: ${info.sessionId}`,
+            `backend: ${info.backend}`,
+            `status: ${info.status}`,
+            `cmd: ${info.cmd}`,
+            `cwd: ${info.cwd}`,
+            'Next: terminal_session action=write then action=read. Close when done.',
+            info.backend === 'pipe'
+              ? 'Note: pipe backend (no native PTY). Line REPLs work; full-screen TUIs may be limited. Install optional node-pty for true PTY when available.'
+              : 'Native PTY backend active.',
+          ].join('\n');
+          break;
+        }
+
+        const sessionId = str(input.session_id).trim();
+        if (!sessionId) {
+          throw new Error(`terminal_session ${action} requires session_id`);
+        }
+
+        if (action === 'write') {
+          const payload = str(input.input ?? '');
+          host.emit({
+            type: 'tool_card',
+            id,
+            name,
+            status: 'running',
+            detail: `write → ${sessionId}`,
+          });
+          await host.writeTerminalSession(sessionId, payload, {
+            appendNewline: input.append_newline !== false,
+          });
+          content = `Wrote ${payload.length} chars to session ${sessionId}. Call read to collect output.`;
+          break;
+        }
+
+        if (action === 'read') {
+          host.emit({
+            type: 'tool_card',
+            id,
+            name,
+            status: 'running',
+            detail: `read ← ${sessionId}`,
+          });
+          const timeoutRaw = input.timeout_ms;
+          const settleRaw = input.settle_ms;
+          const timeoutMs =
+            typeof timeoutRaw === 'number' && Number.isFinite(timeoutRaw)
+              ? Math.max(200, Math.min(120_000, Math.floor(timeoutRaw)))
+              : undefined;
+          const settleMs =
+            typeof settleRaw === 'number' && Number.isFinite(settleRaw)
+              ? Math.max(50, Math.min(5_000, Math.floor(settleRaw)))
+              : undefined;
+          const result = await host.readTerminalSession(sessionId, {
+            timeoutMs,
+            settleMs,
+          });
+          content = [
+            `session_id: ${result.sessionId}`,
+            `status: ${result.status}`,
+            `exit_code: ${result.exitCode ?? 'n/a'}`,
+            `backend: ${result.backend}`,
+            `settled: ${result.settled}`,
+            '--- output ---',
+            truncateText(result.output || '(no new output)').text,
+          ].join('\n');
+          break;
+        }
+
+        if (action === 'close') {
+          host.emit({
+            type: 'tool_card',
+            id,
+            name,
+            status: 'running',
+            detail: `close ${sessionId}`,
+          });
+          const closed = await host.closeTerminalSession(sessionId);
+          content = closed
+            ? `Closed session ${sessionId}.`
+            : `Session ${sessionId} not found (already closed).`;
+          break;
+        }
+
+        throw new Error(
+          `Unknown terminal_session action: ${action} (use start|write|read|close|list)`,
+        );
+      }
       case 'ask_user': {
         const question = str(input.question).trim();
         if (!question) throw new Error('ask_user requires question');
@@ -276,6 +458,43 @@ export async function executeTool(
         content = `Edited ${path}`;
         break;
       }
+      case 'apply_patch': {
+        const path = str(input.path);
+        assertPathAllowed(opts.policy, path);
+        const edits = normalizePatchEdits(input.edits);
+        const before = await host.readFile(path);
+        const after = applyPatchEdits(before, edits);
+        if (before === after) {
+          throw new Error('apply_patch produced no changes');
+        }
+        const decision = await host.showDiffPreview(path, before, after, {
+          toolName: 'apply_patch',
+          stepId: id,
+          input: { path, edits },
+        });
+        if (decision !== 'approve') {
+          host.emit({
+            type: 'tool_card',
+            id,
+            name,
+            status: 'done',
+            detail: 'rejected by user',
+          });
+          return {
+            toolUseId: id,
+            content: 'User rejected the patch.',
+            status: 'rejected',
+          };
+        }
+        host.emit({ type: 'tool_card', id, name, status: 'running' });
+        if (host.applyDiff) {
+          await host.applyDiff(path, JSON.stringify(edits));
+        } else {
+          await host.writeFile(path, after);
+        }
+        content = `Patched ${path} (${edits.length} edit${edits.length === 1 ? '' : 's'})`;
+        break;
+      }
       case 'run_terminal': {
         const cmd = str(input.cmd);
         const relCwd = str(input.cwd || '.').trim() || '.';
@@ -320,6 +539,11 @@ export async function executeTool(
         }
         const mode = str(input.mode || 'blocking').toLowerCase();
         if (mode === 'background') {
+          if (input.stdin != null || input.replies != null) {
+            throw new Error(
+              'stdin/replies are only supported in blocking mode (not background)',
+            );
+          }
           if (!host.startBackgroundTerminal) {
             throw new Error(
               'Background terminals are not supported on this host',
@@ -342,6 +566,24 @@ export async function executeTool(
         if (mode !== 'blocking') {
           throw new Error(`Unknown run_terminal mode: ${mode}`);
         }
+        let replies: string[] | undefined;
+        if (input.replies !== undefined) {
+          if (!Array.isArray(input.replies)) {
+            throw new Error('replies must be an array of strings');
+          }
+          if (input.replies.length > MAX_STDIN_REPLIES) {
+            throw new Error(
+              `replies allows at most ${MAX_STDIN_REPLIES} entries`,
+            );
+          }
+          replies = input.replies.map((r) => String(r ?? ''));
+        }
+        const stdinRaw =
+          input.stdin !== undefined && input.stdin !== null
+            ? str(input.stdin)
+            : undefined;
+        // Validate payload size early (same rules as stream-shell).
+        buildStdinPayload({ stdin: stdinRaw, replies });
         const timeoutRaw = input.timeout_ms;
         const defaultTimeout =
           opts.policy?.defaultTimeoutMs ?? 120_000;
@@ -349,12 +591,58 @@ export async function executeTool(
           typeof timeoutRaw === 'number' && Number.isFinite(timeoutRaw)
             ? Math.max(1_000, Math.min(600_000, Math.floor(timeoutRaw)))
             : defaultTimeout;
+        const hasPreload = Boolean(
+          (stdinRaw && stdinRaw.length > 0) || (replies && replies.length > 0),
+        );
+        // Tier B on by default; off when stdin/replies preload (EOF) unless
+        // interactive:true is set explicitly. interactive:false always disables.
+        const interactive =
+          input.interactive === false
+            ? false
+            : input.interactive === true
+              ? true
+              : !hasPreload;
+
         let out = '';
         let exitCode: number | null | undefined;
         for await (const chunk of host.runTerminal(cmd, {
           cwd,
           signal,
           timeoutMs,
+          stdin: stdinRaw,
+          replies,
+          onConfirmPrompt: interactive
+            ? async (req) => {
+                const options = [
+                  ...req.options.filter((o) => o !== 'abort'),
+                  'abort',
+                ].slice(0, 6);
+                // Ensure at least 2 options for askUser.
+                while (options.length < 2) options.push('abort');
+                const answer = await host.askUser({
+                  question: [
+                    `Terminal is waiting for input (${req.promptIndex}/${req.maxPrompts}):`,
+                    '',
+                    req.promptText.slice(0, 600),
+                    '',
+                    `Matched: ${req.matched}`,
+                  ].join('\n'),
+                  options,
+                  allowFreeText: true,
+                  stepId: `${id}-confirm-${req.promptIndex}`,
+                });
+                if (
+                  answer.selected === 'abort' ||
+                  answer.selected === '(skipped)'
+                ) {
+                  return 'abort';
+                }
+                const free = answer.freeText?.trim();
+                if (free) return free;
+                if (answer.selected === '(Enter)') return '(Enter)';
+                return answer.selected;
+              }
+            : undefined,
         })) {
           out += chunk.text;
           if (chunk.exitCode !== undefined) exitCode = chunk.exitCode;
@@ -834,7 +1122,25 @@ function summarizeInput(
     const cwd = input.cwd ? ` (cwd=${str(input.cwd)})` : '';
     const mode =
       str(input.mode || '').toLowerCase() === 'background' ? ' [bg]' : '';
-    return `${cmd}${cwd}${mode}`;
+    const replies = Array.isArray(input.replies)
+      ? ` [${input.replies.length} replies]`
+      : '';
+    const hasStdin =
+      input.stdin !== undefined && String(input.stdin).length > 0
+        ? ' [stdin]'
+        : '';
+    return `${cmd}${cwd}${mode}${hasStdin}${replies}`;
+  }
+  if (name === 'terminal_session') {
+    const action = str(input.action || '?');
+    if (action === 'start') return `start ${str(input.cmd)}`;
+    if (action === 'write') {
+      return `write ${str(input.session_id)} (${str(input.input).length} chars)`;
+    }
+    if (action === 'read' || action === 'close') {
+      return `${action} ${str(input.session_id)}`;
+    }
+    return action;
   }
   if (name === 'await_terminal') return str(input.task_id);
   if (name === 'verify') return str(input.command) || 'verify';
@@ -844,6 +1150,9 @@ function summarizeInput(
   if (name === 'glob') return str(input.pattern);
   if (name === 'todo_write' && Array.isArray(input.todos)) {
     return `${input.todos.length} items`;
+  }
+  if (name === 'apply_patch' && Array.isArray(input.edits)) {
+    return `${str(input.path)} (${input.edits.length} edits)`;
   }
   if (name === 'ask_user') return str(input.question).slice(0, 80);
   if (name === 'ccloud' && Array.isArray(input.args)) {

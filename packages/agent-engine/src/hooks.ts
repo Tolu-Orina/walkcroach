@@ -1,22 +1,28 @@
 /**
- * Optional PostToolUse hooks from `.walkcroach/settings.json` (Claude hooks pattern).
- * Non-blocking: hook failure emits a warning, never fails the agent tool.
+ * Optional hooks from `.walkcroach/settings.json` (Claude hooks pattern).
+ * - PostToolUse: non-blocking warnings on failure
+ * - Stop: blocking — agent cannot clean-end until every matching hook exits 0
  */
 
 import { spawn } from 'node:child_process';
 import { resolve, relative, isAbsolute } from 'node:path';
 import { killProcessTree } from './process-kill.js';
 
-export type PostToolUseHook = {
-  /** Regex matched against tool name; default ".*" */
+export type HookDef = {
+  /** Regex matched against tool name (PostToolUse) or "stop" (Stop); default ".*" */
   matcher: string;
   /** Shell command or relative script path under the workspace. */
   command: string;
   timeoutMs: number;
 };
 
+/** @deprecated Prefer HookDef — kept for call-site clarity. */
+export type PostToolUseHook = HookDef;
+export type StopHook = HookDef;
+
 export type HooksConfig = {
   PostToolUse: PostToolUseHook[];
+  Stop: StopHook[];
 };
 
 export type PostToolUsePayload = {
@@ -30,8 +36,15 @@ export type PostToolUsePayload = {
   cwd: string;
 };
 
+export type StopHookPayload = {
+  hook_event_name: 'Stop';
+  reason: string;
+  did_mutating_work: boolean;
+  cwd: string;
+};
+
 export function defaultHooksConfig(): HooksConfig {
-  return { PostToolUse: [] };
+  return { PostToolUse: [], Stop: [] };
 }
 
 export function parseHooksConfig(raw: unknown): HooksConfig {
@@ -39,22 +52,31 @@ export function parseHooksConfig(raw: unknown): HooksConfig {
   if (!raw || typeof raw !== 'object') return out;
   const hooks = (raw as Record<string, unknown>).hooks;
   if (!hooks || typeof hooks !== 'object') {
-    // Also accept top-level PostToolUse for convenience in tests.
+    // Also accept top-level PostToolUse / Stop for convenience in tests.
     const top = raw as Record<string, unknown>;
     if (Array.isArray(top.PostToolUse)) {
-      out.PostToolUse = normalizeHookList(top.PostToolUse);
+      out.PostToolUse = normalizeHookList(top.PostToolUse, 30_000);
+    }
+    if (Array.isArray(top.Stop)) {
+      out.Stop = normalizeHookList(top.Stop, 120_000);
     }
     return out;
   }
   const h = hooks as Record<string, unknown>;
   if (Array.isArray(h.PostToolUse)) {
-    out.PostToolUse = normalizeHookList(h.PostToolUse);
+    out.PostToolUse = normalizeHookList(h.PostToolUse, 30_000);
+  }
+  if (Array.isArray(h.Stop)) {
+    out.Stop = normalizeHookList(h.Stop, 120_000);
   }
   return out;
 }
 
-function normalizeHookList(list: unknown[]): PostToolUseHook[] {
-  const out: PostToolUseHook[] = [];
+function normalizeHookList(
+  list: unknown[],
+  maxTimeoutMs: number,
+): HookDef[] {
+  const out: HookDef[] = [];
   for (const item of list.slice(0, 20)) {
     if (!item || typeof item !== 'object') continue;
     const row = item as Record<string, unknown>;
@@ -67,8 +89,8 @@ function normalizeHookList(list: unknown[]): PostToolUseHook[] {
     const timeoutRaw = row.timeoutMs;
     const timeoutMs =
       typeof timeoutRaw === 'number' && Number.isFinite(timeoutRaw)
-        ? Math.max(500, Math.min(30_000, Math.floor(timeoutRaw)))
-        : 5_000;
+        ? Math.max(500, Math.min(maxTimeoutMs, Math.floor(timeoutRaw)))
+        : Math.min(5_000, maxTimeoutMs);
     out.push({ matcher, command, timeoutMs });
   }
   return out;
@@ -93,8 +115,15 @@ export function assertHookCommandSafe(
   const token = command.trim().split(/\s+/)[0] ?? '';
   if (!token || token.startsWith('-')) return command;
   // Absolute paths must be under workspace.
-  if (isAbsolute(token) || token.includes('/') || token.includes('\\') || token.includes('.')) {
-    const abs = isAbsolute(token) ? resolve(token) : resolve(workspaceRoot, token);
+  if (
+    isAbsolute(token) ||
+    token.includes('/') ||
+    token.includes('\\') ||
+    token.includes('.')
+  ) {
+    const abs = isAbsolute(token)
+      ? resolve(token)
+      : resolve(workspaceRoot, token);
     const rel = relative(resolve(workspaceRoot), abs);
     if (rel.startsWith('..') || isAbsolute(rel)) {
       throw new Error(`Hook command escapes workspace: ${token}`);
@@ -150,6 +179,69 @@ export async function runPostToolUseHooks(params: {
     }
   }
   return warnings;
+}
+
+export type StopHookResult = {
+  ok: boolean;
+  failures: string[];
+};
+
+/**
+ * Blocking Stop hooks (Claude Code pattern). Every matching hook must exit 0
+ * before the agent may report a clean end_turn.
+ */
+export async function runStopHooks(params: {
+  workspaceRoot: string;
+  hooks: StopHook[];
+  reason: string;
+  didMutatingWork: boolean;
+  signal?: AbortSignal;
+}): Promise<StopHookResult> {
+  const failures: string[] = [];
+  const matching = params.hooks.filter((h) => hookMatches(h.matcher, 'stop'));
+  if (!matching.length) return { ok: true, failures };
+
+  const payload: StopHookPayload = {
+    hook_event_name: 'Stop',
+    reason: params.reason,
+    did_mutating_work: params.didMutatingWork,
+    cwd: params.workspaceRoot,
+  };
+  const stdin = `${JSON.stringify(payload)}\n`;
+
+  for (const hook of matching) {
+    if (params.signal?.aborted) {
+      failures.push('Stop hook aborted');
+      break;
+    }
+    try {
+      const command = assertHookCommandSafe(
+        params.workspaceRoot,
+        hook.command,
+      );
+      await runHookCommand({
+        command,
+        cwd: params.workspaceRoot,
+        stdin,
+        timeoutMs: hook.timeoutMs,
+        signal: params.signal,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      failures.push(`Stop hook failed (${hook.command}): ${message}`);
+    }
+  }
+  return { ok: failures.length === 0, failures };
+}
+
+export function buildStopHookNudgePrompt(failures: string[]): string {
+  return [
+    'A Stop hook blocked completion (exit ≠ 0). Fix the issues, then continue.',
+    '',
+    ...failures.map((f) => `- ${f}`),
+    '',
+    'After fixing, you may end your turn again. Do not claim done until Stop hooks pass.',
+  ].join('\n');
 }
 
 function runHookCommand(params: {

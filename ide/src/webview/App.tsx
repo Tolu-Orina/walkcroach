@@ -4,6 +4,15 @@ import { SettingsView } from './SettingsView';
 import { MarkdownBody } from './MarkdownBody';
 import { formatStopReason } from './formatStopReason';
 
+declare global {
+  interface Window {
+    __WALKCROACH_MARK__?: string;
+  }
+}
+
+const brandMarkSrc =
+  typeof window !== 'undefined' ? (window.__WALKCROACH_MARK__ ?? '') : '';
+
 type Phase = 'gather' | 'act' | 'verify' | null;
 type Autonomy = 'strict' | 'low_friction';
 type ChatMode = 'agent' | 'ask';
@@ -67,6 +76,7 @@ type HostMessage =
       pendingApproval: Approval | null;
       mcpConfigured?: boolean;
       bedrockConfigured?: boolean;
+      bedrockModelId?: string;
       ccloudConfigured?: boolean;
       telemetry?: Record<string, number>;
       signedIn?: boolean;
@@ -126,12 +136,13 @@ export function App() {
   const [draft, setDraft] = useState('');
   const [mode, setMode] = useState<ChatMode>('agent');
   const [modeOpen, setModeOpen] = useState(false);
-  const [autonomy, setAutonomy] = useState<Autonomy>('strict');
+  const [autonomy, setAutonomy] = useState<Autonomy>('low_friction');
   const [approval, setApproval] = useState<Approval | null>(null);
   const [tools, setTools] = useState<ToolCard[]>([]);
   const [subagents, setSubagents] = useState<Subagent[]>([]);
   const [mcpConfigured, setMcpConfigured] = useState(false);
   const [bedrockConfigured, setBedrockConfigured] = useState(false);
+  const [bedrockModelId, setBedrockModelId] = useState('');
   const [ccloudConfigured, setCcloudConfigured] = useState(false);
   const [signedIn, setSignedIn] = useState(false);
   const [linkedProjectId, setLinkedProjectId] = useState<string | null>(null);
@@ -204,6 +215,9 @@ export function App() {
           setApproval(msg.pendingApproval);
           setMcpConfigured(Boolean(msg.mcpConfigured));
           setBedrockConfigured(Boolean(msg.bedrockConfigured));
+          setBedrockModelId(
+            typeof msg.bedrockModelId === 'string' ? msg.bedrockModelId : '',
+          );
           setCcloudConfigured(Boolean(msg.ccloudConfigured));
           setSignedIn(Boolean(msg.signedIn));
           setLinkedProjectId(msg.linkedProjectId ?? null);
@@ -439,6 +453,7 @@ export function App() {
     return (
       <SettingsView
         bedrockConfigured={bedrockConfigured}
+        bedrockModelId={bedrockModelId}
         mcpConfigured={mcpConfigured}
         ccloudConfigured={ccloudConfigured}
         onBack={() => setView('chat')}
@@ -449,7 +464,18 @@ export function App() {
   return (
     <div className="chat">
       <header className="chat-top">
-        <span className="brand">WalkCroach</span>
+        <span className="brand-lockup">
+          {brandMarkSrc ? (
+            <img
+              className="brand-mark"
+              src={brandMarkSrc}
+              alt=""
+              width={18}
+              height={18}
+            />
+          ) : null}
+          <span className="brand">WalkCroach</span>
+        </span>
         <div className="chat-top-meta">
           {bedrockConfigured ? (
             <span className="pill on">Bedrock</span>
@@ -527,7 +553,18 @@ export function App() {
       <div className="thread" ref={threadRef} aria-label="Conversation">
         {empty ? (
           <div className="empty">
-            <p className="empty-brand">WalkCroach</p>
+            <div className="empty-brand-row">
+              {brandMarkSrc ? (
+                <img
+                  className="empty-brand-mark"
+                  src={brandMarkSrc}
+                  alt=""
+                  width={28}
+                  height={28}
+                />
+              ) : null}
+              <p className="empty-brand">WalkCroach</p>
+            </div>
             <p className="empty-copy">
               Chat with an agent in this workspace. Agent can edit; Ask only
               explores.
@@ -803,9 +840,9 @@ export function App() {
               type="button"
               className="linkish autonomy"
               onClick={toggleAutonomy}
-              title="Strict asks before edits. Guided auto-approves narrow file edits."
+              title="Strict asks before every edit/command. Critical only auto-runs routine work; prompts for infra, destructive shell, and sensitive paths."
             >
-              {autonomy === 'strict' ? 'Strict' : 'Guided'}
+              {autonomy === 'strict' ? 'Strict' : 'Critical only'}
             </button>
           ) : null}
 

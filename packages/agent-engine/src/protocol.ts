@@ -55,6 +55,8 @@ export type WebviewToHostMessage =
       type: 'SAVE_SETTINGS';
       /** Set to store; empty string ignored; null clears. */
       bedrockApiKey?: string | null;
+      /** Optional Bedrock model ID override; null clears to default. */
+      bedrockModelId?: string | null;
       mcpClusterId?: string;
       mcpApiKey?: string;
       mcpUrl?: string;
@@ -137,6 +139,7 @@ export type HostToWebviewMessage =
       } | null;
       mcpConfigured?: boolean;
       bedrockConfigured?: boolean;
+      bedrockModelId?: string;
       ccloudConfigured?: boolean;
       telemetry?: Record<string, number>;
       signedIn?: boolean;
@@ -211,6 +214,10 @@ export function parseWebviewToHostMessage(
       if (msg.bedrockApiKey === null) out.bedrockApiKey = null;
       else if (typeof msg.bedrockApiKey === 'string') {
         out.bedrockApiKey = msg.bedrockApiKey;
+      }
+      if (msg.bedrockModelId === null) out.bedrockModelId = null;
+      else if (typeof msg.bedrockModelId === 'string') {
+        out.bedrockModelId = msg.bedrockModelId;
       }
       if (typeof msg.mcpClusterId === 'string') {
         out.mcpClusterId = msg.mcpClusterId;

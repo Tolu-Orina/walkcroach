@@ -131,6 +131,11 @@
           "type": "string",
           "default": "eu-west-2_iKk1NYkcQ",
           "description": "Cognito user pool ID."
+        },
+        "walkcroach.ide.bedrockModelId": {
+          "type": "string",
+          "default": "",
+          "description": "Optional Bedrock model ID override (e.g. global.amazon.nova-pro-v1:0). Empty uses Nova 2 Lite (global.amazon.nova-2-lite-v1:0) or BEDROCK_NOVA_MODEL_ID."
         }
       }
     }

@@ -34,7 +34,18 @@ import { MessageBridge } from './messageBridge';
 const execFileAsync = promisify(execFile);
 
 const TRANSCRIPT_KEY = 'walkcroach.session.transcript';
-const AUTONOMY_KEY = 'walkcroach.session.autonomy';
+const AUTONOMY_KEY = 'walkcroach.session.autonomy.v2';
+
+/** Round/token caps — auto-resume with backoff instead of waiting for Continue. */
+const AUTO_CONTINUE_REASONS = new Set([
+  'max_iterations',
+  'max_tokens',
+  'incomplete',
+  'unverified',
+]);
+const AUTO_CONTINUE_BASE_MS = 5_000;
+const AUTO_CONTINUE_MAX_MS = 40_000;
+const AUTO_CONTINUE_MAX_ATTEMPTS = 8;
 
 type PendingApproval = Extract<
   HostToWebviewMessage,
@@ -65,6 +76,9 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
   /** Disk session id under .walkcroach/sessions/<id>/ */
   private sessionId: string | undefined;
   private sessionCreatedAt: string | undefined;
+  /** Auto-continue after round/token limits (exponential backoff from 5s). */
+  private autoContinueAttempt = 0;
+  private autoContinueTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly auth: AuthService;
   private readonly output: vscode.OutputChannel;
   private readonly host: VsCodeHostAdapter;
@@ -76,7 +90,7 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
       context.workspaceState.get<string>(TRANSCRIPT_KEY) ?? '';
     const autonomy =
       context.workspaceState.get<'strict' | 'low_friction'>(AUTONOMY_KEY) ??
-      'strict';
+      'low_friction';
 
     this.host = new VsCodeHostAdapter((event) => {
       if (event.type === 'token_delta') {
@@ -124,6 +138,15 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
         this.host.setRunSignal(undefined);
         void this.persistTranscript();
         this.snapshot();
+        if (
+          event.type === 'done' &&
+          event.canContinue &&
+          AUTO_CONTINUE_REASONS.has(event.reason)
+        ) {
+          this.scheduleAutoContinue(event.reason);
+        } else if (event.type === 'done' && !event.canContinue) {
+          this.clearAutoContinue(true);
+        }
       }
     }, this.output);
 
@@ -514,23 +537,39 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
     this.ccloudConfigured = Boolean(ccloud?.trim() || cfg?.apiKey);
   }
 
-  /** Prefer SecretStorage Bedrock key for this run; restore env afterward. */
+  /** Prefer SecretStorage Bedrock key + optional model override for this run. */
   private async withBedrockSecretEnv<T>(fn: () => Promise<T>): Promise<T> {
     const fromSecret = (
       await this.context.secrets.get(SECRET_KEYS.bedrockApiKey)
     )?.trim();
-    const prev = process.env.AWS_BEARER_TOKEN_BEDROCK;
+    const prevToken = process.env.AWS_BEARER_TOKEN_BEDROCK;
+    const prevModel = process.env.BEDROCK_NOVA_MODEL_ID;
+    const modelOverride = this.getBedrockModelIdOverride();
     if (fromSecret) {
       process.env.AWS_BEARER_TOKEN_BEDROCK = fromSecret;
+    }
+    if (modelOverride) {
+      process.env.BEDROCK_NOVA_MODEL_ID = modelOverride;
     }
     try {
       return await fn();
     } finally {
       if (fromSecret) {
-        if (prev === undefined) delete process.env.AWS_BEARER_TOKEN_BEDROCK;
-        else process.env.AWS_BEARER_TOKEN_BEDROCK = prev;
+        if (prevToken === undefined) delete process.env.AWS_BEARER_TOKEN_BEDROCK;
+        else process.env.AWS_BEARER_TOKEN_BEDROCK = prevToken;
+      }
+      if (modelOverride) {
+        if (prevModel === undefined) delete process.env.BEDROCK_NOVA_MODEL_ID;
+        else process.env.BEDROCK_NOVA_MODEL_ID = prevModel;
       }
     }
+  }
+
+  private getBedrockModelIdOverride(): string {
+    const raw = vscode.workspace
+      .getConfiguration('walkcroach.ide')
+      .get<string>('bedrockModelId');
+    return typeof raw === 'string' ? raw.trim() : '';
   }
 
   private async applySaveSettings(
@@ -547,6 +586,20 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
           SECRET_KEYS.bedrockApiKey,
           msg.bedrockApiKey.trim(),
         );
+      }
+
+      if (msg.bedrockModelId === null) {
+        await vscode.workspace
+          .getConfiguration('walkcroach.ide')
+          .update('bedrockModelId', '', vscode.ConfigurationTarget.Global);
+      } else if (typeof msg.bedrockModelId === 'string') {
+        await vscode.workspace
+          .getConfiguration('walkcroach.ide')
+          .update(
+            'bedrockModelId',
+            msg.bedrockModelId.trim(),
+            vscode.ConfigurationTarget.Global,
+          );
       }
 
       if (msg.clearMcp) {
@@ -702,6 +755,7 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
       pendingApproval: this.pendingApproval,
       mcpConfigured: this.mcpConfigured,
       bedrockConfigured: this.bedrockConfigured,
+      bedrockModelId: this.getBedrockModelIdOverride(),
       ccloudConfigured: this.ccloudConfigured,
       telemetry: this.telemetry,
       signedIn: this.signedIn,
@@ -770,9 +824,15 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
         this.snapshot();
         return;
       case 'SUBMIT_TASK':
+        this.clearAutoContinue(true);
+        // Fresh user task → reset checklist (Continue keeps prior todos).
+        await this.host.clearTodos?.();
+        this.sessionTodos = [];
+        this.bridge?.onAgentEvent({ type: 'todos', todos: [] });
         await this.startTask(msg.text, msg.mode === 'plan' ? 'plan' : 'full');
         return;
       case 'CANCEL':
+        this.clearAutoContinue(true);
         this.abort?.abort();
         this.host.killAllTerminals?.();
         if (this.pendingApproval?.kind === 'question') {
@@ -828,6 +888,7 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
         this.snapshot();
         return;
       case 'CONTINUE_TASK':
+        this.clearAutoContinue(false);
         await this.startTask(CONTINUE_PROMPT, this.lastLoopMode, {
           followUp: true,
         });
@@ -921,6 +982,8 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
           prompt: text,
           signal: this.abort!.signal,
           mode: loopMode,
+          // Agent (full) always treats as action; Ask (plan) never.
+          actionBias: loopMode === 'plan' ? 'never' : 'always',
           subagentsEnabled: true,
           includePhaseB: true,
           mcpConfig,
@@ -964,12 +1027,49 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  private clearAutoContinue(resetAttempts: boolean): void {
+    if (this.autoContinueTimer) {
+      clearTimeout(this.autoContinueTimer);
+      this.autoContinueTimer = undefined;
+    }
+    if (resetAttempts) this.autoContinueAttempt = 0;
+  }
+
+  private scheduleAutoContinue(reason: string): void {
+    if (this.autoContinueAttempt >= AUTO_CONTINUE_MAX_ATTEMPTS) {
+      this.bridge?.postWarning(
+        `Stopped auto-continue after ${AUTO_CONTINUE_MAX_ATTEMPTS} rounds (${reason}). Click Continue if work remains.`,
+      );
+      this.clearAutoContinue(true);
+      return;
+    }
+    const delay = Math.min(
+      AUTO_CONTINUE_BASE_MS * 2 ** this.autoContinueAttempt,
+      AUTO_CONTINUE_MAX_MS,
+    );
+    this.autoContinueAttempt += 1;
+    const attempt = this.autoContinueAttempt;
+    this.bridge?.postWarning(
+      `Round limit (${reason}) — continuing in ${Math.round(delay / 1000)}s (attempt ${attempt}/${AUTO_CONTINUE_MAX_ATTEMPTS})…`,
+    );
+    this.clearAutoContinue(false);
+    this.autoContinueTimer = setTimeout(() => {
+      this.autoContinueTimer = undefined;
+      void this.startTask(CONTINUE_PROMPT, this.lastLoopMode, {
+        followUp: true,
+      });
+    }, delay);
+  }
+
   private getHtml(webview: vscode.Webview): string {
     const scriptUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this.context.extensionUri, 'media', 'webview.js'),
     );
     const styleUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this.context.extensionUri, 'media', 'webview.css'),
+    );
+    const markUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.context.extensionUri, 'media', 'walkcroach-mark.png'),
     );
     const nonce = getNonce();
 
@@ -978,7 +1078,7 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
 <head>
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline' https://fonts.googleapis.com; font-src ${webview.cspSource} https://fonts.gstatic.com; script-src 'nonce-${nonce}';" />
+    content="default-src 'none'; img-src ${webview.cspSource} data:; style-src ${webview.cspSource} 'unsafe-inline' https://fonts.googleapis.com; font-src ${webview.cspSource} https://fonts.gstatic.com; script-src 'nonce-${nonce}';" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -989,6 +1089,7 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
 <body>
   <div id="root"></div>
   <script nonce="${nonce}">
+    window.__WALKCROACH_MARK__ = ${JSON.stringify(markUri.toString())};
     window.addEventListener('error', function (e) {
       var el = document.getElementById('root');
       if (el) el.textContent = 'WalkCroach UI failed to load: ' + (e.message || e);
@@ -1000,6 +1101,7 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
   }
 
   dispose(): void {
+    this.clearAutoContinue(true);
     this.abort?.abort();
     this.bridge?.dispose();
     this.output.dispose();
