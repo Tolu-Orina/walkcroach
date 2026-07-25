@@ -324,6 +324,29 @@ Resources:
                   - ssm:ListTagsForResource
                   - ssm:RemoveTagsFromResource
                 Resource: !Sub 'arn:aws:ssm:*:${AWS::AccountId}:parameter/walkcroach/*'
+              # module.bedrock_guardrails — CreateGuardrail tags the resource on create
+              - Sid: BedrockGuardrailsCreate
+                Effect: Allow
+                Action:
+                  - bedrock:CreateGuardrail
+                  - bedrock:ListGuardrails
+                  - bedrock:TagResource
+                Resource: '*'
+              - Sid: BedrockGuardrailsManage
+                Effect: Allow
+                Action:
+                  - bedrock:UpdateGuardrail
+                  - bedrock:DeleteGuardrail
+                  - bedrock:GetGuardrail
+                  - bedrock:CreateGuardrailVersion
+                  - bedrock:DeleteGuardrailVersion
+                  - bedrock:ListGuardrailVersions
+                  - bedrock:TagResource
+                  - bedrock:UntagResource
+                  - bedrock:ListTagsForResource
+                Resource:
+                  - !Sub 'arn:aws:bedrock:*:${AWS::AccountId}:guardrail/*'
+                  - !Sub 'arn:aws:bedrock:*:${AWS::AccountId}:guardrail-profile/*'
 
   # CloudWatch Log Groups
   TerraformValidateLogGroup:
