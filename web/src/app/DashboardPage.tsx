@@ -230,7 +230,7 @@ export function DashboardPage() {
       <ConfirmDialog
         open={deleteTarget !== null}
         title="Delete project?"
-        message="This permanently removes the project and cannot be undone."
+        message="This removes the project from your account. Access is revoked immediately; data is soft-deleted and cannot be recovered from the UI."
         confirmLabel="Delete"
         destructive
         busy={deleteBusy}

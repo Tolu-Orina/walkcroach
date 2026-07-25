@@ -348,6 +348,7 @@ export type ToolResultBody = {
   stdout?: string;
   stderr?: string;
   output?: string;
+  cancelRemaining?: boolean;
 };
 
 async function* readNdjson(
@@ -396,6 +397,7 @@ export async function* streamPrompt(
     message: string;
     projectId: string;
     mode: AgentMode;
+    webSearchEnabled?: boolean;
     attachments?: Array<{
       name: string;
       mime: string;
@@ -627,6 +629,23 @@ export async function pushGithub(
     body: JSON.stringify(body),
   });
   await parseJson(res);
+}
+
+export async function pullGithub(
+  projectId: string,
+): Promise<{
+  ok: boolean;
+  repo: string;
+  fileCount: number;
+  files: Array<{ path: string; content: string }>;
+  truncated?: boolean;
+  omittedCount?: number;
+}> {
+  const res = await fetch(`${API_URL}/projects/${projectId}/github/pull`, {
+    method: 'POST',
+    headers: authHeaders(),
+  });
+  return parseJson(res);
 }
 
 /* —— Phase E: Code library + Apps hub —— */

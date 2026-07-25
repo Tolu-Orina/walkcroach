@@ -36,6 +36,7 @@ export function ProjectHomePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [saveOk, setSaveOk] = useState(false);
   const [description, setDescription] = useState('');
   const [instructions, setInstructions] = useState('');
   const [docName, setDocName] = useState('');
@@ -44,9 +45,11 @@ export function ProjectHomePage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const loadGen = useRef(0);
 
   const load = useCallback(async () => {
     if (!projectId) return;
+    const gen = ++loadGen.current;
     setLoading(true);
     setError(null);
     try {
@@ -56,6 +59,7 @@ export function ProjectHomePage() {
         listProjectSessions(projectId),
         listProjectMemory(projectId),
       ]);
+      if (gen !== loadGen.current) return;
       setProject(p);
       setDescription(p.description ?? '');
       setInstructions(p.instructions ?? '');
@@ -64,26 +68,35 @@ export function ProjectHomePage() {
       setMemorySummary(mem.summary);
       setMemoryEntries(mem.entries ?? []);
     } catch (err) {
+      if (gen !== loadGen.current) return;
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setLoading(false);
+      if (gen === loadGen.current) setLoading(false);
     }
   }, [projectId]);
 
   useEffect(() => {
     void load();
+    return () => {
+      loadGen.current += 1;
+    };
   }, [load]);
 
   const saveKnowledge = async () => {
     if (!projectId || saving) return;
     setSaving(true);
     setError(null);
+    setSaveOk(false);
     try {
       const updated = await patchProject(projectId, {
         description: description.trim() || null,
         instructions: instructions.trim() || null,
       });
       setProject(updated);
+      setDescription(updated.description ?? '');
+      setInstructions(updated.instructions ?? '');
+      setSaveOk(true);
+      window.setTimeout(() => setSaveOk(false), 2500);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -96,7 +109,7 @@ export function ProjectHomePage() {
     setAddingDoc(true);
     setError(null);
     try {
-      await createProjectDocument(projectId, {
+      const created = await createProjectDocument(projectId, {
         name: docName.trim(),
         mime: 'text/plain',
         textContent: docText,
@@ -105,6 +118,11 @@ export function ProjectHomePage() {
       setDocText('');
       const docs = await listProjectDocuments(projectId);
       setDocuments(docs);
+      if (created.ingestStatus === 'failed') {
+        setError(
+          'Document saved, but RAG indexing failed. It may not appear in semantic search until re-uploaded.',
+        );
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -118,13 +136,18 @@ export function ProjectHomePage() {
     setError(null);
     try {
       const text = await file.text();
-      await createProjectDocument(projectId, {
+      const created = await createProjectDocument(projectId, {
         name: file.name,
         mime: file.type || 'text/plain',
         textContent: text.slice(0, 200_000),
       });
       const docs = await listProjectDocuments(projectId);
       setDocuments(docs);
+      if (created.ingestStatus === 'failed') {
+        setError(
+          'Document saved, but RAG indexing failed. It may not appear in semantic search until re-uploaded.',
+        );
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -286,7 +309,10 @@ export function ProjectHomePage() {
             </span>
             <textarea
               value={description}
-              onChange={(e) => setDescription(e.target.value)}
+              onChange={(e) => {
+                setDescription(e.target.value);
+                setSaveOk(false);
+              }}
               rows={2}
               placeholder="What is this project about?"
               className="mt-1 w-full rounded-sm border border-line bg-panel/40 px-3 py-2 text-sm text-paper placeholder:text-mist/50 focus:border-signal/50 focus:outline-none"
@@ -298,7 +324,10 @@ export function ProjectHomePage() {
             </span>
             <textarea
               value={instructions}
-              onChange={(e) => setInstructions(e.target.value)}
+              onChange={(e) => {
+                setInstructions(e.target.value);
+                setSaveOk(false);
+              }}
               rows={5}
               placeholder="Tone, stack, constraints the agent should always follow…"
               className="mt-1 w-full rounded-sm border border-line bg-panel/40 px-3 py-2 text-sm text-paper placeholder:text-mist/50 focus:border-signal/50 focus:outline-none"
@@ -310,8 +339,13 @@ export function ProjectHomePage() {
             disabled={saving}
             className="btn-primary text-xs"
           >
-            {saving ? 'Saving…' : 'Save knowledge'}
+            {saving ? 'Saving…' : saveOk ? 'Saved' : 'Save knowledge'}
           </button>
+          {saveOk && (
+            <p className="text-sm text-teal" role="status">
+              Knowledge saved — applies to every chat in this project.
+            </p>
+          )}
         </section>
 
         <section className="mt-10 space-y-4">
@@ -347,8 +381,12 @@ export function ProjectHomePage() {
                   <div className="min-w-0">
                     <p className="truncate text-paper">{d.name}</p>
                     <p className="text-[10px] text-mist">
-                      {d.hasText ? 'Text indexed' : 'No text'} ·{' '}
-                      {new Date(d.createdAt).toLocaleString()}
+                      {d.ingestStatus === 'ok' || (d.chunkCount ?? 0) > 0
+                        ? `RAG indexed${d.chunkCount ? ` (${d.chunkCount} chunks)` : ''}`
+                        : d.hasText
+                          ? 'Saved — indexing failed'
+                          : 'No text'}{' '}
+                      · {new Date(d.createdAt).toLocaleString()}
                     </p>
                   </div>
                   <button
@@ -441,7 +479,7 @@ export function ProjectHomePage() {
       <ConfirmDialog
         open={deleteOpen}
         title="Delete project?"
-        message="This permanently removes the project and cannot be undone."
+        message="This removes the project from your account. Access is revoked immediately; data is soft-deleted and cannot be recovered from the UI."
         confirmLabel="Delete"
         destructive
         busy={deleteBusy}

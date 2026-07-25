@@ -26,6 +26,7 @@ export async function runToolResultStream(
           stdout: body.stdout,
           stderr: body.stderr,
           output: body.output,
+          cancelRemaining: body.cancelRemaining,
         },
       }),
     );

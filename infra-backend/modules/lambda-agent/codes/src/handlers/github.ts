@@ -122,6 +122,107 @@ async function pushFilesToRepo(
   if (!updateRef.ok) throw new Error(await updateRef.text());
 }
 
+const SKIP_PULL_PATH =
+  /(^|\/)(node_modules|\.git|dist|build|\.next)(\/|$)/i;
+const SKIP_PULL_EXT =
+  /\.(png|jpe?g|gif|webp|ico|woff2?|ttf|eot|mp4|mp3|zip|gz|wasm|pdf)$/i;
+const MAX_PULL_FILES = 120;
+const MAX_PULL_BLOB_BYTES = 400_000;
+
+async function resolveDefaultBranchSha(
+  token: string,
+  owner: string,
+  name: string,
+): Promise<{ branch: string; sha: string }> {
+  const mainRes = await githubRequest(
+    token,
+    `/repos/${owner}/${name}/git/ref/heads/main`,
+  );
+  if (mainRes.ok) {
+    const sha = ((await mainRes.json()) as { object: { sha: string } }).object
+      .sha;
+    return { branch: 'main', sha };
+  }
+  const masterRes = await githubRequest(
+    token,
+    `/repos/${owner}/${name}/git/ref/heads/master`,
+  );
+  if (!masterRes.ok) {
+    throw new Error('repository needs an initial main or master branch');
+  }
+  const sha = ((await masterRes.json()) as { object: { sha: string } }).object
+    .sha;
+  return { branch: 'master', sha };
+}
+
+async function pullFilesFromRepo(
+  token: string,
+  repo: string,
+): Promise<{
+  files: SnapshotFile[];
+  truncated: boolean;
+  omittedCount: number;
+}> {
+  const [owner, name] = repo.split('/');
+  if (!owner || !name) throw new Error('repo must be owner/name');
+
+  const { sha } = await resolveDefaultBranchSha(token, owner, name);
+  const treeRes = await githubRequest(
+    token,
+    `/repos/${owner}/${name}/git/trees/${sha}?recursive=1`,
+  );
+  if (!treeRes.ok) throw new Error(await treeRes.text());
+  const tree = (await treeRes.json()) as {
+    truncated?: boolean;
+    tree: Array<{ path: string; type: string; sha: string; size?: number }>;
+  };
+
+  const blobs = tree.tree.filter(
+    (e) =>
+      e.type === 'blob' &&
+      e.path &&
+      !SKIP_PULL_PATH.test(e.path) &&
+      !SKIP_PULL_EXT.test(e.path) &&
+      (e.size ?? 0) <= MAX_PULL_BLOB_BYTES,
+  );
+
+  const selected = blobs.slice(0, MAX_PULL_FILES);
+  const omittedCount =
+    Math.max(0, blobs.length - selected.length) +
+    (tree.truncated ? 1 : 0); // +1 signal when GitHub truncated the tree listing
+  const truncated = Boolean(tree.truncated) || blobs.length > MAX_PULL_FILES;
+  const files: SnapshotFile[] = [];
+
+  for (const entry of selected) {
+    const blobRes = await githubRequest(
+      token,
+      `/repos/${owner}/${name}/git/blobs/${entry.sha}`,
+    );
+    if (!blobRes.ok) continue;
+    const blob = (await blobRes.json()) as {
+      content?: string;
+      encoding?: string;
+    };
+    if (!blob.content || blob.encoding !== 'base64') continue;
+    let content: string;
+    try {
+      content = Buffer.from(blob.content.replace(/\n/g, ''), 'base64').toString(
+        'utf8',
+      );
+    } catch {
+      continue;
+    }
+    // Skip likely binary (NUL)
+    if (content.includes('\0')) continue;
+    files.push({ path: entry.path, content });
+  }
+
+  if (files.length === 0) {
+    throw new Error('no text files found to pull');
+  }
+  return { files, truncated, omittedCount };
+}
+
 async function loadProjectGithub(
   db: DbClient,
   projectId: string,
@@ -297,6 +398,46 @@ export async function handleGithubPush(
   }
 
   return jsonResponse(200, { ok: true, repo, fileCount: files.length });
+}
+
+export async function handleGithubPull(
+  db: DbClient,
+  projectId: string,
+  auth: AuthContext,
+): Promise<RestResult> {
+  const project = await assertProjectOwner(db, projectId, auth);
+  if (!project) return jsonResponse(404, { error: 'project not found' });
+
+  const gh = await loadProjectGithub(db, projectId);
+  if (!gh?.github_repo) {
+    return jsonResponse(400, { error: 'connect GitHub repo first' });
+  }
+  const repo = gh.github_repo;
+
+  let token: string;
+  try {
+    token = await resolveGithubPushToken(db, projectId, gh);
+  } catch (err) {
+    return jsonResponse(400, {
+      error: err instanceof Error ? err.message : 'GitHub not connected',
+    });
+  }
+
+  try {
+    const result = await pullFilesFromRepo(token, repo);
+    return jsonResponse(200, {
+      ok: true,
+      repo,
+      fileCount: result.files.length,
+      files: result.files,
+      truncated: result.truncated,
+      omittedCount: result.omittedCount,
+    });
+  } catch (err) {
+    return jsonResponse(502, {
+      error: err instanceof Error ? err.message : 'GitHub pull failed',
+    });
+  }
 }
 
 export async function handleGithubStatus(

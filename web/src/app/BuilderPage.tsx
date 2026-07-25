@@ -10,6 +10,7 @@ import { BuilderHeader } from '../features/builder/BuilderHeader';
 import { BuilderStatusBar } from '../features/builder/BuilderStatusBar';
 import { BuilderWorkspaceTabs } from '../features/builder/BuilderWorkspaceTabs';
 import { CodeDrawer } from '../features/builder/CodeDrawer';
+import { OpenInIdeChecklist } from '../features/builder/OpenInIdeChecklist';
 import { PreviewBootOverlay } from '../features/builder/PreviewBootOverlay';
 import { ResizableSplitPane } from '../features/builder/ResizableSplitPane';
 import { TerminalDrawer } from '../features/builder/TerminalDrawer';
@@ -18,6 +19,7 @@ import { MessageRow, StreamingSkeleton } from '../features/chat/MessageRow';
 import { DeployPanel } from '../features/deploy/DeployPanel';
 import { useDeploy } from '../features/deploy/useDeploy';
 import { GithubPanel } from '../features/github/GithubPanel';
+import { BuilderMemoryStrip } from '../features/memory/BuilderMemoryStrip';
 import { CoachMarkTour } from '../features/onboarding/CoachMarkTour';
 import { TemplateGallery } from '../features/onboarding/TemplateGallery';
 import { PlanReviewCard } from '../features/plan/PlanReviewCard';
@@ -69,6 +71,7 @@ export function BuilderPage({ projectId, projectName, templateId }: BuilderPageP
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [applyingTemplate, setApplyingTemplate] = useState(false);
   const [templateError, setTemplateError] = useState<string | null>(null);
+  const [ideChecklistOpen, setIdeChecklistOpen] = useState(false);
   const initialPromptRef = useRef(consumePendingPrompt());
   const sentInitialRef = useRef(false);
   const lastLogLenRef = useRef(0);
@@ -110,9 +113,10 @@ export function BuilderPage({ projectId, projectName, templateId }: BuilderPageP
 
   const deployState = useDeploy(projectId, projectName, sandbox.listFiles, syncNow);
   const deployDisabled = sandbox.status !== 'ready';
+  const applyTerminal = sandbox.applyTerminal;
 
   const handleAfterFileTurn = useCallback(
-    async (sessionId: string) => {
+    async (sessionId: string): Promise<string | void> => {
       const files = await syncNow();
       if (files.length === 0) return;
       await createCheckpoint(projectId, {
@@ -121,8 +125,21 @@ export function BuilderPage({ projectId, projectName, templateId }: BuilderPageP
         files,
         summary: 'Auto checkpoint after build turn',
       });
+      // Soft IDE-style verify (recipes in .walkcroach/verify.json).
+      try {
+        const result = await applyTerminal('npm run build');
+        if (result.ok) {
+          return 'Verify passed · npm run build';
+        }
+        const detail = (result.stderr || result.stdout || '').trim().slice(0, 180);
+        return `Verify failed · npm run build (exit ${result.exitCode})${
+          detail ? ` — ${detail}` : ''
+        }. Open Terminal for full output.`;
+      } catch (err) {
+        return `Verify skipped: ${err instanceof Error ? err.message : String(err)}`;
+      }
     },
-    [projectId, syncNow],
+    [projectId, syncNow, applyTerminal],
   );
 
   const actions = useMemo(
@@ -165,19 +182,36 @@ export function BuilderPage({ projectId, projectName, templateId }: BuilderPageP
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
     const text = draft.trim();
-    if (!text || session.streaming) return;
+    if (
+      !text ||
+      session.status !== 'ready' ||
+      session.pendingPlan ||
+      sandbox.status !== 'ready'
+    ) {
+      return;
+    }
     setDraft('');
     void session.sendPrompt(text);
   };
 
   const applyChip = (text: string) => {
-    if (session.streaming || session.status !== 'ready') return;
+    if (
+      session.status !== 'ready' ||
+      session.pendingPlan ||
+      sandbox.status !== 'ready'
+    ) {
+      return;
+    }
+    if (session.streaming) {
+      void session.sendPrompt(text);
+      return;
+    }
     setDraft(text);
   };
 
   const applyScopedPrompt = (text: string) => {
-    if (session.streaming || session.status !== 'ready') return;
-    setDraft(text);
+    if (session.status !== 'ready' || sandbox.status !== 'ready') return;
+    void session.sendPrompt(text);
   };
 
   const scaffoldFiles = useCallback(
@@ -219,6 +253,7 @@ export function BuilderPage({ projectId, projectName, templateId }: BuilderPageP
       try {
         await patchProject(projectId, { templateId: nextTemplateId });
         markStarterDismissed(nextTemplateId);
+        // Changing templateId remounts the E2B scaffold (server force/mismatch).
         setActiveTemplateId(nextTemplateId);
         setGalleryOpen(false);
       } catch (err) {
@@ -249,6 +284,11 @@ export function BuilderPage({ projectId, projectName, templateId }: BuilderPageP
             : session.status}
         </span>
       </div>
+
+      <BuilderMemoryStrip
+        projectId={projectId}
+        refreshKey={session.activityRefresh}
+      />
 
       <div
         className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4"
@@ -297,10 +337,14 @@ export function BuilderPage({ projectId, projectName, templateId }: BuilderPageP
             plan={session.pendingPlan}
             disabled={session.streaming}
             onApprove={() => void session.submitPlanDecision('approve')}
+            onApproveEdited={(edited) => void session.approveEditedPlan(edited)}
             onAdjust={(feedback) =>
               void session.submitPlanDecision('adjust', feedback)
             }
             onCancel={() => void session.submitPlanDecision('cancel')}
+            onPlanEdited={(edited) =>
+              session.persistPlanMarkdown(session.pendingPlan!.planId, edited)
+            }
           />
         )}
         {session.streaming &&
@@ -317,7 +361,11 @@ export function BuilderPage({ projectId, projectName, templateId }: BuilderPageP
                 key={chip}
                 type="button"
                 onClick={() => applyChip(chip)}
-                disabled={session.status !== 'ready' || session.streaming}
+                disabled={
+                  session.status !== 'ready' ||
+                  !!session.pendingPlan ||
+                  sandbox.status !== 'ready'
+                }
                 className="interactive rounded-[var(--radius-control)] border border-line px-2 py-0.5 text-[10px] text-mist hover:border-signal/40 hover:text-paper disabled:opacity-40"
               >
                 {chip.length > 48 ? `${chip.slice(0, 45)}…` : chip}
@@ -334,28 +382,52 @@ export function BuilderPage({ projectId, projectName, templateId }: BuilderPageP
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           placeholder={
-            mode === 'plan'
-              ? 'Plan the app — no file writes yet…'
-              : 'Build a muted landing page with a contact CTA…'
+            session.streaming
+              ? 'Agent is working — send to queue another prompt…'
+              : mode === 'plan'
+                ? 'Plan the app — no file writes yet…'
+                : 'Build a muted landing page with a contact CTA…'
           }
           className="field resize-none"
-          disabled={session.status !== 'ready' || session.streaming}
+          disabled={
+            session.status !== 'ready' ||
+            !!session.pendingPlan ||
+            sandbox.status !== 'ready'
+          }
         />
         <div className="mt-2 flex items-center justify-between gap-2">
           <p className="text-[11px] text-mist">
-            {mode === 'build' ? 'Build mode' : 'Plan mode'}
+            {sandbox.status !== 'ready'
+              ? 'Waiting for sandbox…'
+              : session.promptQueue.length > 0
+                ? `Queued ${session.promptQueue.length}`
+                : mode === 'build'
+                  ? 'Build mode'
+                  : 'Plan mode'}
+            {session.promptQueue.length > 0 && (
+              <>
+                {' · '}
+                <button
+                  type="button"
+                  className="text-ember hover:underline"
+                  onClick={() => session.clearPromptQueue()}
+                >
+                  Clear queue
+                </button>
+              </>
+            )}
           </p>
           <button
             type="submit"
             disabled={
               session.status !== 'ready' ||
-              session.streaming ||
               !!session.pendingPlan ||
+              sandbox.status !== 'ready' ||
               !draft.trim()
             }
             className="btn-primary px-4 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-40"
           >
-            Send
+            {session.streaming ? 'Queue' : 'Send'}
           </button>
         </div>
       </form>
@@ -406,10 +478,12 @@ export function BuilderPage({ projectId, projectName, templateId }: BuilderPageP
 
       {canvasMode === 'preview' ? (
         <div className="relative min-h-0 flex-1 bg-black/40">
-          <PreviewBootOverlay
-            phase={sandbox.bootPhase}
-            runtime={sandbox.runtime}
-          />
+          {sandbox.status === 'booting' && (
+            <PreviewBootOverlay
+              phase={sandbox.bootPhase}
+              runtime={sandbox.runtime}
+            />
+          )}
           {sandbox.error && (
             <div className="absolute inset-0 z-10 grid place-items-center p-6 text-center">
               <div className="max-w-sm rounded-[var(--radius-surface)] border border-ember/30 bg-ink/90 px-4 py-5">
@@ -419,12 +493,52 @@ export function BuilderPage({ projectId, projectName, templateId }: BuilderPageP
                 <p className="mt-2 text-sm leading-relaxed text-mist">
                   {humanizeBuilderError(sandbox.error)}
                 </p>
+                <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                  <button
+                    type="button"
+                    className="interactive rounded-[var(--radius-control)] bg-signal px-3 py-1.5 text-xs font-semibold text-ink"
+                    onClick={() => sandbox.retryBoot()}
+                  >
+                    Retry preview
+                  </button>
+                  {sandbox.runtime === 'e2b' && (
+                    <button
+                      type="button"
+                      className="interactive rounded-[var(--radius-control)] border border-line px-3 py-1.5 text-xs text-paper"
+                      onClick={() => void sandbox.refreshPreview()}
+                    >
+                      Refresh URL
+                    </button>
+                  )}
+                </div>
                 <p className="mt-3 text-[11px] text-mist/80">
                   Open Terminal for technical details.
                 </p>
               </div>
             </div>
           )}
+          {!sandbox.error &&
+            !sandbox.previewUrl &&
+            sandbox.status !== 'booting' &&
+            sandbox.status !== 'idle' && (
+              <div className="absolute inset-0 z-10 grid place-items-center p-6 text-center">
+                <div className="max-w-sm rounded-[var(--radius-surface)] border border-line bg-ink/90 px-4 py-5">
+                  <p className="font-display text-sm font-bold text-paper">
+                    Preview not ready
+                  </p>
+                  <p className="mt-2 text-sm leading-relaxed text-mist">
+                    The sandbox is up but no preview URL is available yet.
+                  </p>
+                  <button
+                    type="button"
+                    className="interactive mt-4 rounded-[var(--radius-control)] bg-signal px-3 py-1.5 text-xs font-semibold text-ink"
+                    onClick={() => sandbox.retryBoot()}
+                  >
+                    Retry preview
+                  </button>
+                </div>
+              </div>
+            )}
           {sandbox.previewUrl && (
             <PreviewBridge
               projectId={projectId}
@@ -473,6 +587,9 @@ export function BuilderPage({ projectId, projectName, templateId }: BuilderPageP
               projectId={projectId}
               listFiles={sandbox.listFiles}
               syncNow={syncNow}
+              applySnapshot={(files) => sandbox.applySnapshot(files)}
+              applyTerminal={sandbox.applyTerminal}
+              refreshPreview={() => sandbox.refreshPreview()}
               embedded
             />
           </div>
@@ -550,6 +667,7 @@ export function BuilderPage({ projectId, projectName, templateId }: BuilderPageP
           focusMode={focusMode}
           onToggleFocus={() => setFocusMode((v) => !v)}
           onChooseStarter={() => setGalleryOpen(true)}
+          onOpenInIde={() => setIdeChecklistOpen(true)}
         />
         <ResizableSplitPane
           left={agentPane}
@@ -563,6 +681,14 @@ export function BuilderPage({ projectId, projectName, templateId }: BuilderPageP
           onSelect={(id) => void applyStarter(id)}
           title="Choose a starter"
           description="App Builder templates mount in the sandbox. Projects stay a chat + knowledge container — starters live here."
+        />
+        <OpenInIdeChecklist
+          open={ideChecklistOpen}
+          onClose={() => setIdeChecklistOpen(false)}
+          projectId={projectId}
+          projectName={projectName}
+          listFiles={sandbox.listFiles}
+          syncNow={syncNow}
         />
       </div>
     </AppShell>

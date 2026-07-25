@@ -27,6 +27,69 @@ export function getTitanEmbedModelId(): string {
   );
 }
 
+/** Optional Bedrock Guardrail (PROMPT_ATTACK / leakage). Empty = disabled. */
+export function getGuardrailConfig():
+  | { guardrailIdentifier: string; guardrailVersion: string; trace?: 'enabled' | 'disabled' | 'enabled_full' }
+  | undefined {
+  const id =
+    process.env.BEDROCK_GUARDRAIL_ID?.trim() ||
+    process.env.BEDROCK_GUARDRAIL_IDENTIFIER?.trim();
+  const version =
+    process.env.BEDROCK_GUARDRAIL_VERSION?.trim() || 'DRAFT';
+  if (!id) return undefined;
+  return {
+    guardrailIdentifier: id,
+    guardrailVersion: version,
+    trace:
+      process.env.BEDROCK_GUARDRAIL_TRACE === '1' ||
+      process.env.BEDROCK_GUARDRAIL_TRACE === 'true'
+        ? 'enabled'
+        : 'disabled',
+  };
+}
+
+/**
+ * Wrap plain text ContentBlocks as guardContent so PROMPT_ATTACK evaluates
+ * only user text (not system prompt / RAG / images).
+ * @see https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails-use-converse-api.html
+ */
+export function wrapUserTextForGuardrail(
+  content: ContentBlock[],
+): ContentBlock[] {
+  return content.map((block) => {
+    if ('text' in block && typeof block.text === 'string') {
+      return {
+        guardContent: {
+          text: { text: block.text },
+        },
+      } as ContentBlock;
+    }
+    return block;
+  });
+}
+
+/** Apply guardContent wrapping to the latest user message only. */
+export function tagLatestUserMessageForGuardrail(
+  messages: Message[],
+): Message[] {
+  if (messages.length === 0) return messages;
+  let lastUser = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]?.role === 'user') {
+      lastUser = i;
+      break;
+    }
+  }
+  if (lastUser < 0) return messages;
+  return messages.map((m, i) => {
+    if (i !== lastUser || !m.content) return m;
+    return {
+      ...m,
+      content: wrapUserTextForGuardrail(m.content),
+    };
+  });
+}
+
 /** Embed text with Titan Text Embeddings V2 (1024-dim). */
 export async function embedText(text: string): Promise<number[]> {
   const client = getClient();
@@ -63,6 +126,8 @@ export type ConverseTurnResult = {
   assistantContent: ContentBlock[];
   toolUses: ParsedToolUse[];
   text: string;
+  /** True when Bedrock Guardrails blocked the turn. */
+  guardrailIntervened?: boolean;
 };
 
 type OpenToolBlock = {
@@ -81,13 +146,28 @@ export async function* streamConverseTurn(params: {
   tools?: ReturnType<typeof toBedrockTools>;
 }): AsyncGenerator<AgentEvent, ConverseTurnResult> {
   const client = getClient();
+  const guardrail = getGuardrailConfig();
+  const messages = guardrail
+    ? tagLatestUserMessageForGuardrail(params.messages)
+    : params.messages;
+
   const command = new ConverseStreamCommand({
     modelId: getNovaModelId(),
     system: params.system ? [{ text: params.system }] : undefined,
-    messages: params.messages,
+    messages,
     toolConfig: params.tools?.length
       ? { tools: params.tools as never }
       : undefined,
+    ...(guardrail
+      ? {
+          guardrailConfig: {
+            guardrailIdentifier: guardrail.guardrailIdentifier,
+            guardrailVersion: guardrail.guardrailVersion,
+            trace: guardrail.trace,
+            streamProcessingMode: 'sync',
+          },
+        }
+      : {}),
   });
 
   const response = await client.send(command);
@@ -105,6 +185,7 @@ export async function* streamConverseTurn(params: {
   const toolUses: ParsedToolUse[] = [];
   let text = '';
   let stopReason = 'end_turn';
+  let guardrailIntervened = false;
 
   let currentText = '';
   let openTool: OpenToolBlock | null = null;
@@ -175,12 +256,36 @@ export async function* streamConverseTurn(params: {
 
     if (event.messageStop?.stopReason) {
       stopReason = event.messageStop.stopReason;
+      if (stopReason === 'guardrail_intervened') {
+        guardrailIntervened = true;
+      }
     }
   }
 
   flushText();
 
-  return { stopReason, assistantContent, toolUses, text };
+  if (guardrailIntervened) {
+    const blocked =
+      text.trim() ||
+      'That request was blocked by safety filters. Try rephrasing without asking for internal instructions or system details.';
+    if (!text.trim()) {
+      yield { type: 'token', text: blocked };
+      text = blocked;
+      assistantContent.push({ text: blocked });
+    }
+    yield {
+      type: 'warning',
+      message: 'Request blocked by Bedrock Guardrails (prompt attack / leakage filter).',
+    };
+  }
+
+  return {
+    stopReason,
+    assistantContent,
+    toolUses: guardrailIntervened ? [] : toolUses,
+    text,
+    guardrailIntervened,
+  };
 }
 
 /** @deprecated use streamConverseTurn — kept for simple text-only callers */

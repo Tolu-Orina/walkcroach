@@ -1,6 +1,16 @@
 export type AgentEvent =
   | { type: 'token'; text: string }
-  | { type: 'memory_recalled'; count: number; kinds?: string[] }
+  | {
+      type: 'memory_recalled';
+      count: number;
+      kinds?: string[];
+      /** Surfaced hits for Builder UI (truncated). */
+      hits?: Array<{
+        kind: string;
+        text: string;
+        sourceSurface?: string;
+      }>;
+    }
   | {
       type: 'tool_call';
       id: string;
@@ -11,7 +21,7 @@ export type AgentEvent =
   | {
       type: 'plan_preview';
       planId: string;
-      files: Array<{ path: string; reason: string }>;
+      files: Array<{ path: string; reason: string; preview?: string }>;
     }
   | { type: 'plan_awaiting_approval'; planId: string }
   | { type: 'warning'; message: string }
@@ -40,6 +50,11 @@ export type ToolResultInput = {
   stdout?: string;
   stderr?: string;
   output?: string;
+  /**
+   * When true with ok:false (Stop), close any remaining queued client tools,
+   * mark the session active, and do not continue the agent loop.
+   */
+  cancelRemaining?: boolean;
 };
 
 export type MemoryKind =

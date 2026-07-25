@@ -33,6 +33,8 @@ export type ProjectDocument = {
   byteSize: number;
   createdAt: string;
   hasText: boolean;
+  chunkCount?: number;
+  ingestStatus?: 'ok' | 'failed' | 'skipped';
 };
 
 export type ProjectMemoryEntry = {
@@ -52,7 +54,12 @@ export type ProjectSession = {
 
 export type AgentMode = 'plan' | 'build' | 'chat' | 'project_chat';
 
-export type PlanFile = { path: string; reason: string };
+export type PlanFile = {
+  path: string;
+  reason: string;
+  /** Truncated proposed content or edit diff from the deferred tool. */
+  preview?: string;
+};
 
 export type PendingPlan = {
   planId: string;
@@ -61,7 +68,16 @@ export type PendingPlan = {
 
 export type AgentEvent =
   | { type: 'token'; text: string }
-  | { type: 'memory_recalled'; count: number; kinds?: string[] }
+  | {
+      type: 'memory_recalled';
+      count: number;
+      kinds?: string[];
+      hits?: Array<{
+        kind: string;
+        text: string;
+        sourceSurface?: string;
+      }>;
+    }
   | {
       type: 'tool_call';
       id: string;
@@ -103,5 +119,11 @@ export type ChatMessage = {
     mime: string;
     textPreview: string;
     byteSize?: number;
+  }>;
+  /** Enriched memory hits for Builder recall cards. */
+  memoryHits?: Array<{
+    kind: string;
+    text: string;
+    sourceSurface?: string;
   }>;
 };

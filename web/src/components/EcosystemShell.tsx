@@ -208,6 +208,16 @@ function EcosystemRail() {
     void refreshSideData();
   }, [refreshSideData, location.pathname]);
 
+  useEffect(() => {
+    const onSessionsChanged = () => {
+      void refreshSideData();
+    };
+    window.addEventListener('wc:sessions-changed', onSessionsChanged);
+    return () => {
+      window.removeEventListener('wc:sessions-changed', onSessionsChanged);
+    };
+  }, [refreshSideData]);
+
   const onNewChat = () => {
     navigate('/app/chat', { state: { newChat: true } });
   };

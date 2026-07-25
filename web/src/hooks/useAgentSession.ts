@@ -7,7 +7,11 @@ import {
   streamPrompt,
   streamToolResult,
 } from '../api/client';
-import type { AgentEvent, AgentMode, ChatMessage, PendingPlan } from '../api/types';
+import type { AgentEvent, AgentMode, ChatMessage, PendingPlan, PlanFile } from '../api/types';
+import {
+  formatEditedPlanAdjustment,
+  formatPlanMarkdown,
+} from '../features/plan/planMarkdown';
 
 function storageKey(projectId: string): string {
   return `walkcroach.session.v1.${projectId}`;
@@ -91,7 +95,7 @@ export function useAgentSession(
   mode: AgentMode,
   actions: FileActions,
   workspaceReady: boolean,
-  onAfterFileTurn?: (sessionId: string) => Promise<void>,
+  onAfterFileTurn?: (sessionId: string) => Promise<string | void>,
 ) {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -101,6 +105,7 @@ export function useAgentSession(
   const [pendingPlan, setPendingPlan] = useState<PendingPlan | null>(null);
   const [activityRefresh, setActivityRefresh] = useState(0);
   const [checkpointRefresh, setCheckpointRefresh] = useState(0);
+  const [promptQueue, setPromptQueue] = useState<string[]>([]);
   const assistantBuf = useRef('');
   const hadFileWrites = useRef(false);
   const modeRef = useRef(mode);
@@ -111,6 +116,18 @@ export function useAgentSession(
   const actionsRef = useRef(actions);
   actionsRef.current = actions;
   const abortRef = useRef<AbortController | null>(null);
+  const promptQueueRef = useRef<string[]>([]);
+  promptQueueRef.current = promptQueue;
+  const streamingRef = useRef(false);
+  const awaitingPlanRef = useRef(false);
+  /** Bumped on Stop so in-flight tool handlers defer to cancelGeneration's tool-result. */
+  const cancelEpochRef = useRef(0);
+  /** Client tool currently awaiting POST /tool-result (clear on Stop). */
+  const inflightToolRef = useRef<{
+    sessionId: string;
+    projectId: string;
+    toolCallId: string;
+  } | null>(null);
 
   const handleEvents = useCallback(
     async (
@@ -140,11 +157,25 @@ export function useAgentSession(
             {
               id: uid(),
               role: 'system',
-              content: `Recalled ${event.count} memor${event.count === 1 ? 'y' : 'ies'} from CockroachDB`,
+              content:
+                event.count === 0
+                  ? 'No project memories recalled'
+                  : `Recalled ${event.count} memor${event.count === 1 ? 'y' : 'ies'} from CockroachDB`,
+              memoryHits: event.hits,
             },
           ]);
         } else if (event.type === 'plan_preview') {
+          awaitingPlanRef.current = true;
           setPendingPlan({ planId: event.planId, files: event.files });
+          // Persist durable plan.md into the sandbox (Metaphor A / Lovable parity).
+          void actionsRef.current
+            .applyWriteFile(
+              'plan.md',
+              formatPlanMarkdown(event.planId, event.files),
+            )
+            .catch(() => {
+              /* best-effort — approval UI still works */
+            });
         } else if (event.type === 'plan_awaiting_approval') {
           setPendingPlan((prev) =>
             prev?.planId === event.planId ? prev : { planId: event.planId, files: [] },
@@ -169,6 +200,12 @@ export function useAgentSession(
             (event.tool === 'write_file' || event.tool === 'edit_file') &&
             event.awaitResult !== false
           ) {
+            const epochAtStart = cancelEpochRef.current;
+            inflightToolRef.current = {
+              sessionId: sid,
+              projectId: pid,
+              toolCallId: event.id,
+            };
             let ok = true;
             let stderr = '';
             try {
@@ -188,45 +225,70 @@ export function useAgentSession(
               ok = false;
               stderr = err instanceof Error ? err.message : String(err);
             }
+            // Stop owns the tool-result when cancelEpoch advanced.
+            if (cancelEpochRef.current !== epochAtStart) {
+              return;
+            }
             assistantBuf.current = '';
-            await handleEvents(
-              streamToolResult(
+            try {
+              await handleEvents(
+                streamToolResult(
+                  sid,
+                  {
+                    projectId: pid,
+                    toolCallId: event.id,
+                    ok,
+                    stdout: ok
+                      ? `Applied ${event.tool} on ${String(event.args.path ?? 'file')}`
+                      : '',
+                    stderr,
+                  },
+                  signal,
+                ),
                 sid,
-                {
-                  projectId: pid,
-                  toolCallId: event.id,
-                  ok,
-                  stdout: ok
-                    ? `Applied ${event.tool} on ${String(event.args.path ?? 'file')}`
-                    : '',
-                  stderr,
-                },
+                pid,
                 signal,
-              ),
-              sid,
-              pid,
-              signal,
-            );
+              );
+            } finally {
+              if (inflightToolRef.current?.toolCallId === event.id) {
+                inflightToolRef.current = null;
+              }
+            }
           } else if (
             event.tool === 'run_terminal' &&
             event.awaitResult !== false
           ) {
+            const epochAtStart = cancelEpochRef.current;
+            inflightToolRef.current = {
+              sessionId: sid,
+              projectId: pid,
+              toolCallId: event.id,
+            };
             const cmd = String(event.args.cmd ?? '');
             const result = await act.applyTerminal(cmd);
+            if (cancelEpochRef.current !== epochAtStart) {
+              return;
+            }
             assistantBuf.current = '';
-            await handleEvents(
-              streamToolResult(sid, {
-                projectId: pid,
-                toolCallId: event.id,
-                ok: result.ok,
-                exitCode: result.exitCode,
-                stdout: result.stdout,
-                stderr: result.stderr,
-              }, signal),
-              sid,
-              pid,
-              signal,
-            );
+            try {
+              await handleEvents(
+                streamToolResult(sid, {
+                  projectId: pid,
+                  toolCallId: event.id,
+                  ok: result.ok,
+                  exitCode: result.exitCode,
+                  stdout: result.stdout,
+                  stderr: result.stderr,
+                }, signal),
+                sid,
+                pid,
+                signal,
+              );
+            } finally {
+              if (inflightToolRef.current?.toolCallId === event.id) {
+                inflightToolRef.current = null;
+              }
+            }
           }
         } else if (event.type === 'warning') {
           setMessages((prev) => [
@@ -241,7 +303,10 @@ export function useAgentSession(
         } else if (event.type === 'done') {
           assistantBuf.current = '';
           if (event.reason !== 'awaiting_plan_approval') {
+            awaitingPlanRef.current = false;
             setPendingPlan(null);
+          } else {
+            awaitingPlanRef.current = true;
           }
           setActivityRefresh((n) => n + 1);
           if (event.reason === 'stuck_tool_loop') {
@@ -261,8 +326,14 @@ export function useAgentSession(
             modeRef.current === 'build'
           ) {
             hadFileWrites.current = false;
-            void onAfterFileTurnRef.current?.(sid).then(() => {
+            void onAfterFileTurnRef.current?.(sid).then((note) => {
               setCheckpointRefresh((n) => n + 1);
+              if (note) {
+                setMessages((prev) => [
+                  ...prev,
+                  { id: uid(), role: 'system', content: note },
+                ]);
+              }
             });
           }
         }
@@ -383,6 +454,11 @@ export function useAgentSession(
 
         const act = actionsRef.current;
         const args = detail.pendingTool.args;
+        inflightToolRef.current = {
+          sessionId,
+          projectId,
+          toolCallId: detail.pendingTool.toolCallId,
+        };
         let ok = true;
         let exitCode: number | undefined;
         let stdout = '';
@@ -413,18 +489,27 @@ export function useAgentSession(
           stderr = err instanceof Error ? err.message : String(err);
         }
 
-        await handleEvents(
-          streamToolResult(sessionId, {
+        try {
+          await handleEvents(
+            streamToolResult(sessionId, {
+              projectId,
+              toolCallId: detail.pendingTool.toolCallId,
+              ok,
+              exitCode,
+              stdout,
+              stderr,
+            }),
+            sessionId,
             projectId,
-            toolCallId: detail.pendingTool.toolCallId,
-            ok,
-            exitCode,
-            stdout,
-            stderr,
-          }),
-          sessionId,
-          projectId,
-        );
+          );
+        } finally {
+          if (
+            inflightToolRef.current?.toolCallId ===
+            detail.pendingTool.toolCallId
+          ) {
+            inflightToolRef.current = null;
+          }
+        }
       } catch (err) {
         pendingResumed.current = false;
         if (!cancelled) {
@@ -446,12 +531,13 @@ export function useAgentSession(
     };
   }, [workspaceReady, sessionId, projectId, handleEvents]);
 
-  const sendPrompt = useCallback(
+  const runPromptTurn = useCallback(
     async (message: string) => {
-      if (!sessionId || !projectId || streaming || pendingPlan) return;
+      if (!sessionId || !projectId) return;
       abortRef.current?.abort();
       const ac = new AbortController();
       abortRef.current = ac;
+      streamingRef.current = true;
       setStreaming(true);
       assistantBuf.current = '';
       hadFileWrites.current = false;
@@ -461,7 +547,11 @@ export function useAgentSession(
       ]);
       try {
         await handleEvents(
-          streamPrompt(sessionId, { message, projectId, mode }, ac.signal),
+          streamPrompt(
+            sessionId,
+            { message, projectId, mode: modeRef.current },
+            ac.signal,
+          ),
           sessionId,
           projectId,
           ac.signal,
@@ -478,23 +568,106 @@ export function useAgentSession(
         ]);
       } finally {
         if (abortRef.current === ac) abortRef.current = null;
+        streamingRef.current = false;
         setStreaming(false);
+        // Drain prompt queue after a completed (non-aborted) turn.
+        // Never drain while a multi-file plan is awaiting approval.
+        if (!ac.signal.aborted && !awaitingPlanRef.current) {
+          const next = promptQueueRef.current[0];
+          if (next) {
+            const rest = promptQueueRef.current.slice(1);
+            promptQueueRef.current = rest;
+            setPromptQueue(rest);
+            queueMicrotask(() => {
+              void runPromptTurn(next);
+            });
+          }
+        }
       }
     },
-    [sessionId, projectId, streaming, pendingPlan, mode, handleEvents],
+    [sessionId, projectId, handleEvents],
+  );
+
+  const sendPrompt = useCallback(
+    async (message: string) => {
+      if (!sessionId || !projectId || pendingPlan) return;
+      const trimmed = message.trim();
+      if (!trimmed) return;
+
+      // Queue while a turn is in flight (Lovable-style prompt queue).
+      if (streamingRef.current || streaming) {
+        const next = [...promptQueueRef.current, trimmed];
+        promptQueueRef.current = next;
+        setPromptQueue(next);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: uid(),
+            role: 'system',
+            content: `Queued (${next.length}): ${trimmed.length > 72 ? `${trimmed.slice(0, 72)}…` : trimmed}`,
+          },
+        ]);
+        return;
+      }
+
+      await runPromptTurn(trimmed);
+    },
+    [sessionId, projectId, pendingPlan, streaming, runPromptTurn],
+  );
+
+  const clearPromptQueue = useCallback(() => {
+    promptQueueRef.current = [];
+    setPromptQueue([]);
+  }, []);
+
+  const persistPlanMarkdown = useCallback(
+    (planId: string, files: PlanFile[]) => {
+      void actionsRef.current
+        .applyWriteFile('plan.md', formatPlanMarkdown(planId, files))
+        .catch(() => undefined);
+    },
+    [],
   );
 
   const cancelGeneration = useCallback(() => {
+    const pendingTool = inflightToolRef.current;
+    cancelEpochRef.current += 1;
     abortRef.current?.abort();
     abortRef.current = null;
     assistantBuf.current = '';
-    // Allow pending-tool resume to retry after an aborted mid-tool stream.
     pendingResumed.current = false;
+    inflightToolRef.current = null;
+    streamingRef.current = false;
+    promptQueueRef.current = [];
+    setPromptQueue([]);
     setStreaming(false);
     setMessages((prev) => [
       ...prev,
       { id: uid(), role: 'system', content: 'Generation stopped.' },
     ]);
+    // Clear harness awaiting_tool (and any queued siblings) so the next prompt works.
+    if (pendingTool) {
+      void (async () => {
+        try {
+          for await (const event of streamToolResult(pendingTool.sessionId, {
+            projectId: pendingTool.projectId,
+            toolCallId: pendingTool.toolCallId,
+            ok: false,
+            stderr: 'cancelled by user',
+            cancelRemaining: true,
+          })) {
+            if (event.type === 'warning') {
+              setMessages((prev) => [
+                ...prev,
+                { id: uid(), role: 'system', content: event.message },
+              ]);
+            }
+          }
+        } catch {
+          /* best-effort clear */
+        }
+      })();
+    }
   }, []);
 
   const submitPlanDecision = useCallback(
@@ -506,6 +679,7 @@ export function useAgentSession(
       abortRef.current?.abort();
       const ac = new AbortController();
       abortRef.current = ac;
+      streamingRef.current = true;
       setStreaming(true);
       assistantBuf.current = '';
       try {
@@ -532,13 +706,42 @@ export function useAgentSession(
         ]);
       } finally {
         if (abortRef.current === ac) abortRef.current = null;
+        streamingRef.current = false;
         setStreaming(false);
-        if (decision !== 'approve') {
+        // Adjust may emit a new plan_preview — do not wipe it.
+        // Cancel always clears. Approve is cleared by the done handler.
+        if (decision === 'cancel') {
+          awaitingPlanRef.current = false;
           setPendingPlan(null);
+        } else if (decision === 'adjust' && !awaitingPlanRef.current) {
+          setPendingPlan(null);
+        }
+        if (!ac.signal.aborted && !awaitingPlanRef.current) {
+          const next = promptQueueRef.current[0];
+          if (next) {
+            const rest = promptQueueRef.current.slice(1);
+            promptQueueRef.current = rest;
+            setPromptQueue(rest);
+            queueMicrotask(() => {
+              void runPromptTurn(next);
+            });
+          }
         }
       }
     },
-    [sessionId, projectId, pendingPlan, streaming, handleEvents],
+    [sessionId, projectId, pendingPlan, streaming, handleEvents, runPromptTurn],
+  );
+
+  const approveEditedPlan = useCallback(
+    async (edited: PlanFile[]) => {
+      if (!pendingPlan) return;
+      persistPlanMarkdown(pendingPlan.planId, edited);
+      await submitPlanDecision(
+        'adjust',
+        formatEditedPlanAdjustment(pendingPlan.files, edited),
+      );
+    },
+    [pendingPlan, persistPlanMarkdown, submitPlanDecision],
   );
 
   const newSession = useCallback(async () => {
@@ -556,8 +759,12 @@ export function useAgentSession(
     pendingPlan,
     activityRefresh,
     checkpointRefresh,
+    promptQueue,
     sendPrompt,
+    clearPromptQueue,
     submitPlanDecision,
+    approveEditedPlan,
+    persistPlanMarkdown,
     cancelGeneration,
     newSession,
   };

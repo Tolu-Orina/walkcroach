@@ -1,4 +1,5 @@
 import type { ChatMessage } from '../../api/types';
+import { MemoryRecallCard } from '../memory/MemoryRecallCard';
 import { MarkdownContent } from './markdown';
 
 type MessageRowProps = {
@@ -63,6 +64,9 @@ export function MessageRow({ msg, streaming, saveContext }: MessageRowProps) {
   }
 
   if (msg.role === 'system') {
+    if (msg.memoryHits && msg.memoryHits.length > 0) {
+      return <MemoryRecallCard hits={msg.memoryHits} />;
+    }
     return (
       <p className="text-center text-[12px] text-mist/90" role="status">
         {msg.content}

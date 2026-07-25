@@ -10,20 +10,27 @@ export function useFileSync(
   enabled: boolean,
 ) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const syncingRef = useRef(false);
+  /** Shared in-flight sync — callers await this instead of getting []. */
+  const inflightRef = useRef<Promise<ProjectFile[]> | null>(null);
 
   const syncNow = useCallback(async (): Promise<ProjectFile[]> => {
-    if (!enabled || syncingRef.current) return [];
-    syncingRef.current = true;
-    try {
-      const files = await listFiles();
-      if (files.length > 0) {
-        await syncProjectFiles(projectId, files);
+    if (!enabled) return [];
+    if (inflightRef.current) return inflightRef.current;
+
+    const run = (async (): Promise<ProjectFile[]> => {
+      try {
+        const files = await listFiles();
+        if (files.length > 0) {
+          await syncProjectFiles(projectId, files);
+        }
+        return files;
+      } finally {
+        inflightRef.current = null;
       }
-      return files;
-    } finally {
-      syncingRef.current = false;
-    }
+    })();
+
+    inflightRef.current = run;
+    return run;
   }, [projectId, listFiles, enabled]);
 
   const scheduleSync = useCallback(() => {

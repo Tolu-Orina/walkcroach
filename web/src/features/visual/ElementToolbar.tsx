@@ -6,6 +6,8 @@ type ElementToolbarProps = {
   remainingEdits: number;
   busy: boolean;
   onSaveText: (newText: string) => void;
+  /** When inline quota is exhausted — send edit intent to the agent. */
+  onAgentEdit: (prompt: string) => void;
   onAskAbout: (prompt: string) => void;
   onClose: () => void;
 };
@@ -15,6 +17,7 @@ export function ElementToolbar({
   remainingEdits,
   busy,
   onSaveText,
+  onAgentEdit,
   onAskAbout,
   onClose,
 }: ElementToolbarProps) {
@@ -26,12 +29,20 @@ export function ElementToolbar({
 
   if (!selection) return null;
 
+  const hasPath = Boolean(selection.path.trim());
+  const canInlineSave =
+    hasPath && remainingEdits > 0 && Boolean(draft.trim()) && draft.trim() !== selection.text;
+
   return (
-    <div className="absolute left-3 right-3 top-3 z-20 rounded-sm border border-signal/40 bg-ink/95 p-3 shadow-lg backdrop-blur">
+    <div className="absolute left-3 right-3 top-12 z-20 rounded-sm border border-signal/40 bg-ink/95 p-3 shadow-lg backdrop-blur">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="text-[10px] uppercase tracking-wider text-signal">Visual edit</p>
-          <p className="truncate font-mono text-[10px] text-mist">{selection.path}</p>
+          <p className="text-[10px] uppercase tracking-wider text-signal">
+            Inline text
+          </p>
+          <p className="truncate font-mono text-[10px] text-mist">
+            {hasPath ? selection.path : `<${selection.tagName}> (no source map — ask agent)`}
+          </p>
         </div>
         <button
           type="button"
@@ -52,27 +63,48 @@ export function ElementToolbar({
       />
 
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          disabled={busy || !draft.trim() || remainingEdits <= 0}
-          onClick={() => onSaveText(draft.trim())}
-          className="rounded-sm bg-signal px-3 py-1 text-[11px] font-medium text-ink disabled:opacity-40"
-        >
-          Save text
-        </button>
+        {canInlineSave ? (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => onSaveText(draft.trim())}
+            className="rounded-sm bg-signal px-3 py-1 text-[11px] font-medium text-ink disabled:opacity-40"
+          >
+            Save text
+          </button>
+        ) : (
+          <button
+            type="button"
+            disabled={busy || !draft.trim() || draft.trim() === selection.text}
+            onClick={() =>
+              onAgentEdit(
+                hasPath
+                  ? `Update the text at ${selection.path} (${selection.tagName}) from "${selection.text}" to "${draft.trim()}".`
+                  : `Update the <${selection.tagName}> that currently says "${selection.text}" to "${draft.trim()}". Preserve nearby layout.`,
+              )
+            }
+            className="rounded-sm bg-signal px-3 py-1 text-[11px] font-medium text-ink disabled:opacity-40"
+          >
+            {remainingEdits <= 0 && hasPath ? 'Send edit to agent' : 'Ask agent to edit'}
+          </button>
+        )}
         <button
           type="button"
           disabled={busy}
           onClick={() =>
             onAskAbout(
-              `Update the element at ${selection.path} (${selection.tagName}). Current text: "${selection.text}".`,
+              hasPath
+                ? `Update the element at ${selection.path} (${selection.tagName}). Current text: "${selection.text}".`
+                : `Look at the <${selection.tagName}> that says "${selection.text}" and improve it.`,
             )
           }
           className="rounded-sm border border-line px-3 py-1 text-[11px] text-mist hover:border-signal/40 hover:text-paper disabled:opacity-40"
         >
           Ask about element
         </button>
-        <span className="text-[10px] text-mist">{remainingEdits} inline edits left today</span>
+        <span className="text-[10px] text-mist">
+          {remainingEdits} inline edits left today
+        </span>
       </div>
     </div>
   );

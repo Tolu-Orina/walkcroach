@@ -1,6 +1,7 @@
 import { createDbClient } from '@walkcroach/db';
 import {
   countProjectsForOwner,
+  embedProjectDocument,
   getLatestSessionForProject,
   getSession,
   listBuildEvents,
@@ -24,6 +25,7 @@ import {
 import {
   handleGithubConnect,
   handleGithubInstallCallback,
+  handleGithubPull,
   handleGithubPush,
   handleGithubStatus,
 } from './github.js';
@@ -92,16 +94,18 @@ type ProjectRow = {
   kind?: string | null;
   description?: string | null;
   instructions?: string | null;
+  archived_at?: Date | null;
 };
 
 async function assertProjectOwner(
   db: ReturnType<typeof createDbClient>,
   projectId: string,
   auth: AuthContext,
+  opts?: { allowArchived?: boolean },
 ): Promise<ProjectRow | null> {
   const { rows } = await db.query<ProjectRow>(
     `SELECT id, owner_id, name, status, updated_at, created_at, template_id,
-            memory_summary, kind, description, instructions
+            memory_summary, kind, description, instructions, archived_at
      FROM projects
      WHERE id = $1::uuid AND deleted_at IS NULL`,
     [projectId],
@@ -109,6 +113,7 @@ async function assertProjectOwner(
   const row = rows[0];
   if (!row) return null;
   if (row.owner_id !== auth.ownerId) return null;
+  if (!opts?.allowArchived && row.archived_at) return null;
   return row;
 }
 
@@ -348,7 +353,9 @@ export async function handleRest(
     }
     const db = createDbClient();
     try {
-      const row = await assertProjectOwner(db, projectIdParam, authResult);
+      const row = await assertProjectOwner(db, projectIdParam, authResult, {
+        allowArchived: true,
+      });
       if (!row) {
         return jsonResponse(404, { error: 'project not found' });
       }
@@ -571,7 +578,7 @@ export async function handleRest(
         `SELECT id, title, mode, started_at
          FROM sessions
          WHERE project_id = $1::uuid${modeSql}
-         ORDER BY started_at DESC
+         ORDER BY updated_at DESC
          LIMIT $${params.length}`,
         params,
       );
@@ -621,8 +628,11 @@ export async function handleRest(
         byte_size: string | number;
         created_at: Date;
         text_content: string | null;
+        chunk_count: string | number;
       }>(
-        `SELECT id, name, mime, byte_size, created_at, text_content
+        `SELECT id, name, mime, byte_size, created_at, text_content,
+                (SELECT count(*)::int FROM project_document_chunks c
+                 WHERE c.document_id = project_documents.id) AS chunk_count
          FROM project_documents
          WHERE project_id = $1::uuid
          ORDER BY created_at DESC
@@ -637,6 +647,13 @@ export async function handleRest(
           byteSize: Number(r.byte_size) || 0,
           createdAt: r.created_at.toISOString(),
           hasText: Boolean(r.text_content?.trim()),
+          chunkCount: Number(r.chunk_count) || 0,
+          ingestStatus:
+            Number(r.chunk_count) > 0
+              ? 'ok'
+              : r.text_content?.trim()
+                ? 'failed'
+                : 'skipped',
         })),
       });
     } finally {
@@ -694,6 +711,24 @@ export async function handleRest(
         [documentsProjectId],
       );
       const row = rows[0]!;
+      let chunkCount = 0;
+      let ingestStatus: 'ok' | 'failed' | 'skipped' = textContent.trim()
+        ? 'failed'
+        : 'skipped';
+      if (textContent.trim()) {
+        try {
+          const ingested = await embedProjectDocument({
+            db,
+            documentId: row.id,
+            projectId: documentsProjectId,
+            text: textContent,
+          });
+          chunkCount = ingested.chunkCount;
+          ingestStatus = chunkCount > 0 ? 'ok' : 'failed';
+        } catch {
+          ingestStatus = 'failed';
+        }
+      }
       return jsonResponse(201, {
         id: row.id,
         name: row.name,
@@ -701,6 +736,8 @@ export async function handleRest(
         byteSize: Number(row.byte_size) || 0,
         createdAt: row.created_at.toISOString(),
         hasText: Boolean(textContent.trim()),
+        chunkCount,
+        ingestStatus,
       });
     } finally {
       await db.close();
@@ -1030,6 +1067,21 @@ export async function handleRest(
     const db = createDbClient();
     try {
       return await handleGithubPush(db, githubPushProjectId, rawBody, authResult);
+    } finally {
+      await db.close();
+    }
+  }
+
+  const githubPullMatch = path.match(/\/projects\/([^/]+)\/github\/pull\/?$/);
+  const githubPullProjectId = githubPullMatch?.[1];
+  if (method === 'POST' && githubPullProjectId) {
+    const authResult = await requireAuth(headers);
+    if ('error' in authResult) {
+      return jsonResponse(authResult.status, { error: authResult.error });
+    }
+    const db = createDbClient();
+    try {
+      return await handleGithubPull(db, githubPullProjectId, authResult);
     } finally {
       await db.close();
     }

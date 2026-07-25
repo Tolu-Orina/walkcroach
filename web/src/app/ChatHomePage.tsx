@@ -59,8 +59,13 @@ export function ChatHomePage() {
   useEffect(() => {
     if (status !== 'ready' || !chatId || streaming) return;
     if (chatId === sessionId) return;
-    void openSession(chatId);
-  }, [chatId, sessionId, status, streaming, openSession]);
+    void (async () => {
+      const ok = await openSession(chatId);
+      if (!ok && sessionId) {
+        navigate(`/app/chat/${sessionId}`, { replace: true });
+      }
+    })();
+  }, [chatId, sessionId, status, streaming, openSession, navigate]);
 
   useEffect(() => {
     const creatingNew = Boolean(
@@ -114,11 +119,15 @@ export function ChatHomePage() {
               <button
                 key={s.id}
                 type="button"
+                disabled={streaming}
                 onClick={() => {
-                  void openSession(s.id);
-                  navigate(`/app/chat/${s.id}`);
+                  if (streaming) return;
+                  void (async () => {
+                    const ok = await openSession(s.id);
+                    if (ok) navigate(`/app/chat/${s.id}`);
+                  })();
                 }}
-                className={`interactive shrink-0 rounded-[var(--radius-control)] border px-3 py-1.5 text-[12px] ${
+                className={`interactive shrink-0 rounded-[var(--radius-control)] border px-3 py-1.5 text-[12px] disabled:opacity-50 ${
                   s.id === sessionId
                     ? 'border-signal/45 bg-raised text-paper'
                     : 'border-line text-mist hover:border-signal/30 hover:text-paper'
@@ -132,33 +141,33 @@ export function ChatHomePage() {
       )}
 
       {showEmpty ? (
-        <div className="flex min-h-0 flex-1 flex-col">
-          <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-6 pb-5 pt-12 sm:px-10">
-            <div className="wc-enter">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div className="mx-auto flex w-full max-w-3xl min-h-0 flex-1 flex-col overflow-y-auto px-5 pb-3 pt-6 sm:px-10 sm:pt-10">
+            <div className="wc-enter shrink-0">
               <p className="eyebrow">Chat</p>
-              <h1 className="mt-3 font-display text-[2.35rem] font-extrabold tracking-tight text-paper sm:text-4xl">
+              <h1 className="mt-2 font-display text-[1.85rem] font-extrabold tracking-tight text-paper sm:mt-3 sm:text-4xl">
                 Welcome, {displayName}
               </h1>
-              <p className="mt-2 max-w-md text-sm text-mist">
-                Ask anything — search the web, attach context, or start from a
+              <p className="mt-1.5 max-w-md text-sm text-mist sm:mt-2">
+                Ask anything — search the web, attach a file, or start from a
                 template.
               </p>
             </div>
 
-            <div className="wc-enter-delay mx-auto mt-10 grid w-full max-w-xl grid-cols-2 gap-3 sm:gap-4">
+            <div className="wc-enter-delay mx-auto mt-5 grid w-full max-w-xl shrink-0 grid-cols-2 gap-2.5 sm:mt-8 sm:gap-4">
               {CHAT_TEMPLATES.map((t) => (
                 <button
                   key={t.id}
                   type="button"
                   onClick={() => setDraft(t.prompt)}
-                  className="interactive flex min-h-[5.25rem] items-center justify-center rounded-[var(--radius-surface)] border border-line bg-panel/50 px-4 py-5 text-center text-sm font-semibold text-paper transition hover:border-signal/40 hover:bg-raised"
+                  className="interactive flex min-h-[3.75rem] items-center justify-center rounded-[var(--radius-surface)] border border-line bg-panel/50 px-3 py-3 text-center text-[13px] font-semibold text-paper transition hover:border-signal/40 hover:bg-raised sm:min-h-[5.25rem] sm:px-4 sm:py-5 sm:text-sm"
                 >
                   {t.title}
                 </button>
               ))}
             </div>
 
-            <div className="mt-auto w-full pt-14">
+            <div className="mt-auto w-full shrink-0 pt-5 sm:pt-10">
               <ChatComposer
                 webSearch={webSearch}
                 onWebSearchChange={setWebSearch}
@@ -168,7 +177,7 @@ export function ChatHomePage() {
                 draft={draft}
                 onDraftConsumed={onDraftConsumed}
               />
-              <p className="mt-3 text-center text-[12px] leading-relaxed text-mist/80">
+              <p className="mt-2 text-center text-[11px] leading-relaxed text-mist/80 sm:mt-3 sm:text-[12px]">
                 WalkCroach AI can make mistakes. Make sure you cross check its
                 responses.
               </p>

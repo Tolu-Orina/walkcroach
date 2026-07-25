@@ -158,6 +158,11 @@ export default defineConfig({
       null,
       2,
     ),
+    '.walkcroach/verify.json': `${JSON.stringify(
+      { commands: ['npm run build'], cwd: '.' },
+      null,
+      2,
+    )}\n`,
     'index.html': `<!doctype html>
 <html lang="en">
   <head>
@@ -175,12 +180,90 @@ export default defineConfig({
 import { createRoot } from 'react-dom/client'
 import App from './App'
 import './index.css'
+import { initWcBridge } from './wc-bridge'
+
+initWcBridge()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />
   </StrictMode>,
 )
+`,
+    'src/wc-bridge.ts': `declare global {
+  interface Window {
+    __wcBridgeInit?: boolean
+  }
+}
+
+let editMode = false
+let highlightEl: HTMLElement | null = null
+
+const HIGHLIGHT_STYLE =
+  'outline: 2px solid #38bdf8; outline-offset: 2px; cursor: crosshair;'
+
+function clearHighlight() {
+  if (!highlightEl) return
+  highlightEl.style.cssText = highlightEl.style.cssText.replace(HIGHLIGHT_STYLE, '')
+  highlightEl = null
+}
+
+/** Always-on bridge for WalkCroach visual edit (E2B + WC). Edit mode is parent-gated. */
+export function initWcBridge() {
+  if (typeof window === 'undefined') return
+  if (window.__wcBridgeInit) return
+  window.__wcBridgeInit = true
+
+  window.addEventListener('message', (ev) => {
+    const data = ev.data
+    if (!data || typeof data !== 'object') return
+    if (data.type === 'wc:set-edit-mode') {
+      editMode = Boolean(data.enabled)
+      if (!editMode) clearHighlight()
+      document.documentElement.style.cursor = editMode ? 'crosshair' : ''
+    }
+    if (data.type === 'wc:highlight' && typeof data.path === 'string') {
+      clearHighlight()
+      if (!data.path) return
+      const el = document.querySelector(\`[data-wc-path="\${CSS.escape(data.path)}"]\`)
+      if (el instanceof HTMLElement) {
+        highlightEl = el
+        el.style.cssText += HIGHLIGHT_STYLE
+      }
+    }
+  })
+
+  document.addEventListener(
+    'click',
+    (ev) => {
+      if (!editMode) return
+      const target = ev.target
+      if (!(target instanceof HTMLElement)) return
+      const tagged = target.closest('[data-wc-path]')
+      const el =
+        tagged instanceof HTMLElement
+          ? tagged
+          : target.closest('h1,h2,h3,h4,h5,h6,p,span,button,a,label,li')
+      if (!(el instanceof HTMLElement)) return
+      ev.preventDefault()
+      ev.stopPropagation()
+      const path = el.getAttribute('data-wc-path') ?? ''
+      clearHighlight()
+      highlightEl = el
+      el.style.cssText += HIGHLIGHT_STYLE
+      window.parent.postMessage(
+        {
+          type: 'wc:element-selected',
+          path,
+          text: (el.textContent ?? '').trim(),
+          tagName: el.tagName.toLowerCase(),
+        },
+        '*',
+      )
+    },
+    true,
+  )
+}
 `,
     'src/index.css': '@import "tailwindcss";\n',
     'src/App.tsx': appTsx,

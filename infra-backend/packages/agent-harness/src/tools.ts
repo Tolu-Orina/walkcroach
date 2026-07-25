@@ -169,9 +169,15 @@ export function resolveToolProfile(
 /** Bedrock Converse toolConfig.tools */
 export function toBedrockTools(
   modeOrProfile: 'plan' | 'build' | ToolProfile = 'builder',
+  opts?: { webSearchEnabled?: boolean },
 ) {
   const profile = resolveToolProfile(modeOrProfile);
-  const list = TOOLS.filter((t) => t.profiles.includes(profile));
+  let list = TOOLS.filter((t) => t.profiles.includes(profile));
+  if (opts?.webSearchEnabled === false) {
+    list = list.filter(
+      (t) => t.name !== 'web_search' && t.name !== 'web_extract',
+    );
+  }
 
   return list.map((t) => ({
     toolSpec: {

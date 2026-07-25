@@ -43,6 +43,17 @@ describe('viteScaffold', () => {
     expect(html.file.contents).toContain('<title>Test App</title>');
   });
 
+  it('creates .walkcroach/verify.json recipes', () => {
+    const dir = tree['.walkcroach'] as {
+      directory: Record<string, { file: { contents: string } }>;
+    };
+    expect(dir.directory['verify.json']).toBeDefined();
+    const parsed = JSON.parse(dir.directory['verify.json'].file.contents) as {
+      commands: string[];
+    };
+    expect(parsed.commands).toContain('npm run build');
+  });
+
   it('creates src directory with App.tsx, main.tsx, index.css, wc-bridge.ts', () => {
     const src = tree.src as { directory: Record<string, unknown> };
     expect(src.directory['App.tsx']).toBeDefined();

@@ -19,14 +19,20 @@ export async function assertSessionAccess(
       return { ok: false, status: 404, error: 'session not found' };
     }
 
-    const { rows } = await db.query<{ owner_id: string }>(
-      `SELECT owner_id FROM projects
+    const { rows } = await db.query<{
+      owner_id: string;
+      archived_at: Date | null;
+    }>(
+      `SELECT owner_id, archived_at FROM projects
        WHERE id = $1::uuid AND deleted_at IS NULL`,
       [session.project_id],
     );
     const project = rows[0];
     if (!project || project.owner_id !== authResult.ownerId) {
       return { ok: false, status: 404, error: 'session not found' };
+    }
+    if (project.archived_at) {
+      return { ok: false, status: 403, error: 'project is archived' };
     }
 
     return { ok: true, auth: authResult };

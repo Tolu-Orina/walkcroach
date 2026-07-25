@@ -4,6 +4,7 @@ export type SessionRow = {
   id: string;
   project_id: string;
   surface: string;
+  mode: string | null;
   model_config: Record<string, unknown>;
   pending_tool: PendingToolState | null;
   status: string;
@@ -74,7 +75,7 @@ export async function getSession(
   sessionId: string,
 ): Promise<SessionRow | null> {
   const { rows } = await db.query<SessionRow>(
-    `SELECT id, project_id, surface, model_config, pending_tool, status
+    `SELECT id, project_id, surface, mode, model_config, pending_tool, status
      FROM sessions WHERE id = $1::uuid`,
     [sessionId],
   );
@@ -82,6 +83,7 @@ export async function getSession(
   if (!row) return null;
   return {
     ...row,
+    mode: row.mode ?? null,
     pending_tool:
       typeof row.pending_tool === 'string'
         ? (JSON.parse(row.pending_tool) as PendingToolState)
@@ -91,6 +93,35 @@ export async function getSession(
         ? (JSON.parse(row.model_config) as Record<string, unknown>)
         : row.model_config ?? {},
   };
+}
+
+/** Atomically claim a session for a prompt turn. Returns false if busy. */
+export async function tryBeginPromptTurn(
+  db: DbClient,
+  sessionId: string,
+): Promise<boolean> {
+  const { rows } = await db.query<{ id: string }>(
+    `UPDATE sessions
+     SET status = 'running', updated_at = now()
+     WHERE id = $1::uuid
+       AND status = 'active'
+     RETURNING id`,
+    [sessionId],
+  );
+  return Boolean(rows[0]);
+}
+
+/** Release running → active only (does not clear awaiting_* states). */
+export async function releasePromptTurnIfRunning(
+  db: DbClient,
+  sessionId: string,
+): Promise<void> {
+  await db.query(
+    `UPDATE sessions
+     SET status = 'active', updated_at = now()
+     WHERE id = $1::uuid AND status = 'running'`,
+    [sessionId],
+  );
 }
 
 export async function setSessionStatus(
@@ -252,7 +283,10 @@ export async function countProjectsForOwner(
 ): Promise<number> {
   const { rows } = await db.query<{ count: string }>(
     `SELECT count(*)::string AS count FROM projects
-     WHERE owner_id = $1 AND deleted_at IS NULL`,
+     WHERE owner_id = $1
+       AND deleted_at IS NULL
+       AND archived_at IS NULL
+       AND COALESCE(kind, 'app') <> 'general'`,
     [ownerId],
   );
   return Number(rows[0]?.count ?? 0);

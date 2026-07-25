@@ -48,34 +48,44 @@ module "cognito" {
   tags        = local.tags
 }
 
+module "bedrock_guardrails" {
+  source = "./modules/bedrock-guardrails"
+
+  name_prefix = local.name_prefix
+  environment = var.environment
+  tags        = local.tags
+}
+
 module "lambda_agent" {
   source = "./modules/lambda-agent"
 
-  name_prefix           = local.name_prefix
-  environment           = var.environment
-  zip_path              = local.lambda_zip
-  handler               = var.lambda_handler
-  runtime               = var.lambda_runtime
-  timeout               = var.lambda_timeout
-  memory_mb             = var.lambda_memory_mb
-  bedrock_region        = var.bedrock_region
-  nova_model_id         = var.nova_model_id
-  titan_embed_model_id  = var.titan_embed_model_id
-  runtime_secret_arn    = module.secrets.runtime_secret_arn
-  artefacts_bucket_arn  = module.artefacts.bucket_arn
-  artefacts_bucket_name = module.artefacts.bucket_id
-  apps_bucket_arn       = module.apps_hosting.apps_bucket_arn
-  apps_bucket_name      = module.apps_hosting.apps_bucket_id
-  apps_wildcard_domain  = module.apps_hosting.apps_wildcard_domain
-  apps_cf_domain        = module.apps_hosting.cloudfront_domain_name
-  codebuild_project     = module.apps_hosting.codebuild_project_name
-  cognito_user_pool_id  = module.cognito.user_pool_id
-  cognito_client_id     = module.cognito.client_id
-  allow_dev_auth        = var.allow_dev_auth
-  cors_allow_origin     = var.web_app_url != "" ? var.web_app_url : "*"
-  allow_github_pat      = var.allow_github_pat
-  github_ssm_prefix     = var.github_ssm_prefix
-  tags                  = local.tags
+  name_prefix               = local.name_prefix
+  environment               = var.environment
+  zip_path                  = local.lambda_zip
+  handler                   = var.lambda_handler
+  runtime                   = var.lambda_runtime
+  timeout                   = var.lambda_timeout
+  memory_mb                 = var.lambda_memory_mb
+  bedrock_region            = var.bedrock_region
+  nova_model_id             = var.nova_model_id
+  titan_embed_model_id      = var.titan_embed_model_id
+  bedrock_guardrail_id      = module.bedrock_guardrails.guardrail_id
+  bedrock_guardrail_version = module.bedrock_guardrails.guardrail_version
+  runtime_secret_arn        = module.secrets.runtime_secret_arn
+  artefacts_bucket_arn      = module.artefacts.bucket_arn
+  artefacts_bucket_name     = module.artefacts.bucket_id
+  apps_bucket_arn           = module.apps_hosting.apps_bucket_arn
+  apps_bucket_name          = module.apps_hosting.apps_bucket_id
+  apps_wildcard_domain      = module.apps_hosting.apps_wildcard_domain
+  apps_cf_domain            = module.apps_hosting.cloudfront_domain_name
+  codebuild_project         = module.apps_hosting.codebuild_project_name
+  cognito_user_pool_id      = module.cognito.user_pool_id
+  cognito_client_id         = module.cognito.client_id
+  allow_dev_auth            = var.allow_dev_auth
+  cors_allow_origin         = var.web_app_url != "" ? var.web_app_url : "*"
+  allow_github_pat          = var.allow_github_pat
+  github_ssm_prefix         = var.github_ssm_prefix
+  tags                      = local.tags
 }
 
 module "lambda_chrome" {

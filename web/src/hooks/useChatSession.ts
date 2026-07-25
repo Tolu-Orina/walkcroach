@@ -35,6 +35,22 @@ function parseCitations(text: string): Array<{ title: string; url: string }> {
   return citations;
 }
 
+/** Hide Bedrock toolUse/toolResult plumbing from the Chat UI. */
+function isToolPlumbingContent(content: string): boolean {
+  const t = content.trim();
+  if (!t) return true;
+  if (/^\[tool_use\b/i.test(t)) return true;
+  if (/^\[tool_result\]/i.test(t)) return true;
+  // Entire body is only tool markers (multi-line)
+  const lines = t.split('\n').map((l) => l.trim()).filter(Boolean);
+  return (
+    lines.length > 0 &&
+    lines.every(
+      (l) => /^\[tool_use\b/i.test(l) || /^\[tool_result\]/i.test(l),
+    )
+  );
+}
+
 function storedToChat(
   messages: Array<{
     id: string;
@@ -49,69 +65,47 @@ function storedToChat(
     citations?: Array<{ title: string; url: string }> | null;
   }>,
 ): ChatMessage[] {
-  return messages.map((m) => ({
-    id: m.id,
-    role:
-      m.role === 'user' || m.role === 'assistant' || m.role === 'tool'
-        ? m.role
-        : 'system',
-    content: m.content || `(${m.role})`,
-    attachments: m.attachments?.length ? m.attachments : undefined,
-    citations:
-      m.citations?.length
-        ? m.citations
-        : m.role === 'assistant'
-          ? parseCitations(m.content || '')
-          : undefined,
-  }));
+  return messages
+    .filter((m) => {
+      if (m.role === 'tool') return false;
+      if (isToolPlumbingContent(m.content || '')) return false;
+      return true;
+    })
+    .map((m) => ({
+      id: m.id,
+      role:
+        m.role === 'user' || m.role === 'assistant' || m.role === 'tool'
+          ? m.role
+          : 'system',
+      content: m.content || `(${m.role})`,
+      attachments: m.attachments?.length ? m.attachments : undefined,
+      citations:
+        m.citations?.length
+          ? m.citations
+          : m.role === 'assistant'
+            ? parseCitations(m.content || '')
+            : undefined,
+    }));
 }
 
-function buildPrompt(
-  message: string,
-  attachments: ChatAttachment[],
-  webSearch: boolean,
-): string {
-  const parts = [message];
-  if (attachments.length) {
-    parts.push(
-      '',
-      'Attached context:',
-      ...attachments.map(
-        (a) => `--- ${a.name} (${a.mime}) ---\n${a.textPreview}`,
-      ),
-    );
-  }
-  if (webSearch) {
-    parts.push(
-      '',
-      '[System: Web search is ON. Use web_search (and web_extract when needed). Cite sources with title + URL.]',
-    );
-  } else {
-    parts.push(
-      '',
-      '[System: Web search is OFF for this message. Do not call web_search unless the user explicitly asks.]',
-    );
-  }
-  return parts.join('\n');
+/** User-visible message only — no system instructions (avoids prompt leakage). */
+function userMessageText(message: string): string {
+  return message.trim();
 }
 
 /**
  * Chat session against a project workspace.
  * Omit projectId → personal Chat workspace (`__walkcroach_chat__`).
- * Pass projectId (+ optional initialSessionId) for project-scoped chats.
+ * Pass projectId for project-scoped chats; switch threads via openSession(chatId).
  */
 export function useChatSession(opts?: {
   projectId?: string;
-  initialSessionId?: string;
 }) {
   const fixedProjectId = opts?.projectId;
-  const initialSessionId = opts?.initialSessionId;
   const [workspaceId, setWorkspaceId] = useState<string | null>(
     fixedProjectId ?? null,
   );
-  const [sessionId, setSessionId] = useState<string | null>(
-    initialSessionId ?? null,
-  );
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [status, setStatus] = useState<'booting' | 'ready' | 'error'>('booting');
@@ -133,8 +127,9 @@ export function useChatSession(opts?: {
   }, []);
 
   const handleEvents = useCallback(
-    async (events: AsyncIterable<AgentEvent>) => {
+    async (events: AsyncIterable<AgentEvent>, signal: AbortSignal) => {
       for await (const event of events) {
+        if (signal.aborted) break;
         if (event.type === 'token') {
           assistantBuf.current += event.text;
           const text = assistantBuf.current;
@@ -192,26 +187,12 @@ export function useChatSession(opts?: {
     (async () => {
       try {
         setStatus('booting');
+        setBootError(null);
         const id = fixedProjectId
           ? fixedProjectId
           : (await ensureChatWorkspace()).id;
         if (cancelled) return;
         setWorkspaceId(id);
-
-        if (initialSessionId) {
-          const detail = await getSession(initialSessionId);
-          if (!cancelled && detail.projectId === id) {
-            localStorage.setItem(
-              storageKey(id),
-              JSON.stringify({ sessionId: detail.id }),
-            );
-            setSessionId(detail.id);
-            setMessages(storedToChat(detail.messages));
-            setStatus('ready');
-            void refreshRecent(id);
-            return;
-          }
-        }
 
         if (!fixedProjectId) {
           const storedRaw = localStorage.getItem(storageKey(id));
@@ -252,13 +233,24 @@ export function useChatSession(opts?: {
           }
         }
 
-        const session = await createSession(id, 'chat');
-        if (cancelled) return;
-        localStorage.setItem(
-          storageKey(id),
-          JSON.stringify({ sessionId: session.id }),
-        );
-        setSessionId(session.id);
+        // Project chat: create a session only if none will be opened via URL yet.
+        // Personal chat: create when nothing to resume.
+        if (!fixedProjectId) {
+          const session = await createSession(id, 'chat');
+          if (cancelled) return;
+          localStorage.setItem(
+            storageKey(id),
+            JSON.stringify({ sessionId: session.id }),
+          );
+          setSessionId(session.id);
+          setMessages([]);
+          setStatus('ready');
+          void refreshRecent(id);
+          return;
+        }
+
+        // Project workspace ready — session bound by openSession(chatId) from the page.
+        setSessionId(null);
         setMessages([]);
         setStatus('ready');
         void refreshRecent(id);
@@ -272,12 +264,11 @@ export function useChatSession(opts?: {
     return () => {
       cancelled = true;
     };
-  }, [fixedProjectId, initialSessionId, refreshRecent]);
+  }, [fixedProjectId, refreshRecent]);
 
   const sendPrompt = useCallback(
     async (message: string, attachments: ChatAttachment[] = []) => {
       if (!sessionId || !workspaceId || streaming) return;
-      abortRef.current?.abort();
       const ac = new AbortController();
       abortRef.current = ac;
       setStreaming(true);
@@ -303,9 +294,10 @@ export function useChatSession(opts?: {
           streamPrompt(
             sessionId,
             {
-              message: buildPrompt(message, attachments, webSearch),
+              message: userMessageText(message),
               projectId: workspaceId,
               mode: fixedProjectId ? 'project_chat' : 'chat',
+              webSearchEnabled: webSearch,
               attachments: attachments.map((a) => ({
                 name: a.name,
                 mime: a.mime,
@@ -317,10 +309,17 @@ export function useChatSession(opts?: {
             },
             ac.signal,
           ),
+          ac.signal,
         );
-        void refreshRecent(workspaceId);
+        if (!ac.signal.aborted) {
+          void refreshRecent(workspaceId);
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('wc:sessions-changed'));
+          }
+        }
       } catch (err) {
         if (err instanceof DOMException && err.name === 'AbortError') return;
+        if (ac.signal.aborted) return;
         setMessages((prev) => [
           ...prev,
           {
@@ -330,8 +329,10 @@ export function useChatSession(opts?: {
           },
         ]);
       } finally {
-        if (abortRef.current === ac) abortRef.current = null;
-        setStreaming(false);
+        if (abortRef.current === ac) {
+          abortRef.current = null;
+          setStreaming(false);
+        }
       }
     },
     [
@@ -360,14 +361,25 @@ export function useChatSession(opts?: {
 
   const openSession = useCallback(
     async (id: string) => {
-      if (!workspaceId || streaming) return;
-      const detail = await getSession(id);
-      localStorage.setItem(
-        storageKey(workspaceId),
-        JSON.stringify({ sessionId: detail.id }),
-      );
-      setSessionId(detail.id);
-      setMessages(storedToChat(detail.messages));
+      if (!workspaceId || streaming) return false;
+      try {
+        const detail = await getSession(id);
+        if (detail.projectId !== workspaceId) {
+          setBootError('That chat belongs to a different project.');
+          return false;
+        }
+        localStorage.setItem(
+          storageKey(workspaceId),
+          JSON.stringify({ sessionId: detail.id }),
+        );
+        setSessionId(detail.id);
+        setMessages(storedToChat(detail.messages));
+        setBootError(null);
+        return true;
+      } catch (err) {
+        setBootError(err instanceof Error ? err.message : String(err));
+        return false;
+      }
     },
     [workspaceId, streaming],
   );

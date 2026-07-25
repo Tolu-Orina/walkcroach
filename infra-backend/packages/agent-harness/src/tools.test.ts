@@ -50,6 +50,14 @@ describe('tools', () => {
     expect(names).not.toContain('run_terminal');
   });
 
+  it('omits web tools when webSearchEnabled is false', () => {
+    const chat = toBedrockTools('chat', { webSearchEnabled: false });
+    const names = chat.map((t) => t.toolSpec.name);
+    expect(names).not.toContain('web_search');
+    expect(names).not.toContain('web_extract');
+    expect(names).toContain('recall_project_memory');
+  });
+
   it('includes write tools in build/builder mode', () => {
     const build = toBedrockTools('build');
     const names = build.map((t) => t.toolSpec.name);

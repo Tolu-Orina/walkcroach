@@ -19,6 +19,8 @@ type SandboxEntry = {
   lastUsedAt: number;
   bootPromise: Promise<void> | null;
   sandboxId: string | null;
+  /** Last scaffold template mounted into this sandbox. */
+  templateId: string | null;
 };
 
 type ProjectSandboxRow = {
@@ -31,6 +33,8 @@ type ProjectSandboxRow = {
 
 /** Warm cache only — DB is source of truth for identity. */
 const warm = new Map<string, SandboxEntry>();
+/** In-flight createFresh — concurrent POSTs share one boot. */
+const creating = new Map<string, Promise<SandboxEntry>>();
 const IDLE_MS = 30 * 60 * 1000;
 
 function pruneIdle(): void {
@@ -156,6 +160,7 @@ async function tryReconnect(
       lastUsedAt: Date.now(),
       bootPromise: null,
       sandboxId: runtime.getInfo().sandboxId ?? sandboxId,
+      templateId: null,
     };
     warm.set(projectId, entry);
     if (previewUrl && previewUrl !== storedPreview) {
@@ -199,23 +204,69 @@ async function createFresh(
     lastUsedAt: Date.now(),
     bootPromise: null,
     sandboxId,
+    templateId,
   };
   warm.set(projectId, entry);
   return entry;
 }
 
+/**
+ * Remount starter files into an existing sandbox and restart Vite.
+ * Used when the user picks a different template without killing E2B identity.
+ */
+async function remountTemplate(
+  entry: SandboxEntry,
+  projectId: string,
+  projectName: string,
+  templateId: string,
+): Promise<SandboxEntry> {
+  if (!(entry.runtime instanceof E2BSandboxRuntime)) {
+    throw new Error('remount requires E2B runtime');
+  }
+  const files = buildTemplateFiles(templateId, projectName);
+  await entry.runtime.mountFiles(files);
+  const install = await entry.runtime.runTerminal('npm install');
+  if (!install.ok) {
+    throw new Error(
+      `npm install failed after template remount: ${install.stderr || install.stdout || 'unknown'}`,
+    );
+  }
+  const previewUrl = await entry.runtime.startPreview();
+  entry.previewUrl = previewUrl;
+  entry.templateId = templateId;
+  entry.lastUsedAt = Date.now();
+  await persistSandbox(projectId, entry.sandboxId, previewUrl);
+  return entry;
+}
+
+async function disposeCached(projectId: string): Promise<void> {
+  const cached = warm.get(projectId);
+  if (cached) {
+    warm.delete(projectId);
+    await cached.runtime.dispose().catch(() => undefined);
+  } else {
+    const project = await loadProject(projectId);
+    if (project?.e2b_sandbox_id) {
+      try {
+        const runtime = await createSandboxRuntime({
+          prefer: 'e2b',
+          sandboxId: project.e2b_sandbox_id,
+        });
+        await runtime.dispose();
+      } catch {
+        /* already gone */
+      }
+    }
+  }
+  await clearSandbox(projectId);
+}
+
 async function getOrCreate(
   projectId: string,
   bodyTemplateId?: string | null,
+  opts?: { forceRemount?: boolean; reset?: boolean },
 ): Promise<SandboxEntry> {
   pruneIdle();
-
-  const cached = warm.get(projectId);
-  if (cached) {
-    cached.lastUsedAt = Date.now();
-    if (cached.bootPromise) await cached.bootPromise;
-    return cached;
-  }
 
   const project = await loadProject(projectId);
   if (!project) {
@@ -225,18 +276,71 @@ async function getOrCreate(
   const templateId =
     bodyTemplateId?.trim() || project.template_id || 'blank';
 
+  if (opts?.reset) {
+    await disposeCached(projectId);
+    return createFresh(projectId, project.name, templateId);
+  }
+
+  const cached = warm.get(projectId);
+  if (cached) {
+    cached.lastUsedAt = Date.now();
+    if (cached.bootPromise) await cached.bootPromise;
+    const needsRemount =
+      opts?.forceRemount ||
+      (Boolean(bodyTemplateId?.trim()) &&
+        cached.templateId !== null &&
+        cached.templateId !== templateId) ||
+      (Boolean(bodyTemplateId?.trim()) && cached.templateId === null);
+    if (needsRemount) {
+      return remountTemplate(cached, projectId, project.name, templateId);
+    }
+    // Ensure preview is alive even on cache hit
+    if (cached.runtime instanceof E2BSandboxRuntime) {
+      try {
+        const url = await cached.runtime.ensurePreview();
+        cached.previewUrl = url;
+        await persistSandbox(projectId, cached.sandboxId, url);
+      } catch {
+        /* keep prior URL */
+      }
+    }
+    return cached;
+  }
+
   if (project.e2b_sandbox_id) {
     const reconnected = await tryReconnect(
       projectId,
       project.e2b_sandbox_id,
       project.e2b_preview_url,
     );
-    if (reconnected) return reconnected;
+    if (reconnected) {
+      reconnected.templateId = project.template_id;
+      const needsRemount =
+        opts?.forceRemount ||
+        (Boolean(bodyTemplateId?.trim()) &&
+          (reconnected.templateId ?? 'blank') !== templateId);
+      if (needsRemount) {
+        return remountTemplate(
+          reconnected,
+          projectId,
+          project.name,
+          templateId,
+        );
+      }
+      return reconnected;
+    }
     // Stale id — clear and recreate
     await clearSandbox(projectId);
   }
 
-  return createFresh(projectId, project.name, templateId);
+  const inflight = creating.get(projectId);
+  if (inflight) return inflight;
+
+  const boot = createFresh(projectId, project.name, templateId).finally(() => {
+    creating.delete(projectId);
+  });
+  creating.set(projectId, boot);
+  return boot;
 }
 
 async function requireEntry(projectId: string): Promise<SandboxEntry> {
@@ -304,7 +408,12 @@ export async function handleSandboxRoutes(
     if (method === 'POST' && action === '') {
       const templateId =
         typeof body.templateId === 'string' ? body.templateId : null;
-      const entry = await getOrCreate(projectId, templateId);
+      const forceRemount = body.forceRemount === true;
+      const reset = body.reset === true;
+      const entry = await getOrCreate(projectId, templateId, {
+        forceRemount,
+        reset,
+      });
       return jsonResponse(200, toResponse(entry));
     }
 
@@ -330,25 +439,7 @@ export async function handleSandboxRoutes(
     }
 
     if (method === 'DELETE' && action === '') {
-      const cached = warm.get(projectId);
-      if (cached) {
-        warm.delete(projectId);
-        await cached.runtime.dispose().catch(() => undefined);
-      } else {
-        const project = await loadProject(projectId);
-        if (project?.e2b_sandbox_id) {
-          try {
-            const runtime = await createSandboxRuntime({
-              prefer: 'e2b',
-              sandboxId: project.e2b_sandbox_id,
-            });
-            await runtime.dispose();
-          } catch {
-            /* already gone */
-          }
-        }
-      }
-      await clearSandbox(projectId);
+      await disposeCached(projectId);
       return jsonResponse(204, {});
     }
 

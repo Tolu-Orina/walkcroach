@@ -9,7 +9,7 @@ export type ChatAttachment = {
   textPreview: string;
   /** Full UTF-8 body for text-like files (persisted server-side). */
   contentText?: string;
-  /** Base64 body for images / binary (persisted server-side). */
+  /** Base64 body for images / binary documents (persisted + Converse). */
   contentBase64?: string;
 };
 
@@ -24,8 +24,12 @@ type ChatComposerProps = {
   onDraftConsumed?: () => void;
 };
 
-const MAX_ATTACH_BYTES = 2 * 1024 * 1024;
+/** Matches Nova/API Gateway practical limit (binary before base64). */
+const MAX_ATTACH_BYTES = 5 * 1024 * 1024;
 const MAX_ATTACH_COUNT = 5;
+
+const ACCEPT =
+  '.png,.jpg,.jpeg,.gif,.webp,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.md,.html,.htm,.json';
 
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -44,18 +48,28 @@ function fileToBase64(file: File): Promise<string> {
   });
 }
 
+function isTextLike(mime: string, name: string): boolean {
+  return (
+    mime.startsWith('text/') ||
+    mime === 'application/json' ||
+    /\.(md|txt|csv|json|ts|tsx|js|jsx|css|html|htm)$/i.test(name)
+  );
+}
+
+function isSupportedBinary(mime: string, name: string): boolean {
+  if (mime.startsWith('image/')) return true;
+  if (mime === 'application/pdf') return true;
+  return /\.(png|jpe?g|gif|webp|pdf|docx?|xlsx?)$/i.test(name);
+}
+
 async function readAttachment(file: File): Promise<ChatAttachment> {
   const id = crypto.randomUUID();
   if (file.size > MAX_ATTACH_BYTES) {
-    throw new Error(`${file.name} is larger than 2 MB`);
+    throw new Error(`${file.name} is larger than 5 MB`);
   }
   const mime = file.type || 'application/octet-stream';
-  const isText =
-    mime.startsWith('text/') ||
-    mime === 'application/json' ||
-    /\.(md|txt|csv|json|ts|tsx|js|jsx|css|html)$/i.test(file.name);
 
-  if (isText) {
+  if (isTextLike(mime, file.name)) {
     const contentText = await file.text();
     return {
       id,
@@ -67,6 +81,12 @@ async function readAttachment(file: File): Promise<ChatAttachment> {
     };
   }
 
+  if (!isSupportedBinary(mime, file.name)) {
+    throw new Error(
+      `${file.name}: unsupported type. Use images, PDF, Word, Excel, or text.`,
+    );
+  }
+
   const contentBase64 = await fileToBase64(file);
   return {
     id,
@@ -74,8 +94,8 @@ async function readAttachment(file: File): Promise<ChatAttachment> {
     mime,
     size: file.size,
     textPreview: mime.startsWith('image/')
-      ? `[image attached: ${file.name}]`
-      : `[file attached: ${file.name}, ${mime}]`,
+      ? `[image: ${file.name}]`
+      : `[document: ${file.name}]`,
     contentBase64,
   };
 }
@@ -105,8 +125,8 @@ export function ChatComposer({
 
   const submit = useCallback(() => {
     const trimmed = value.trim();
-    if (!trimmed || disabled || streaming) return;
-    onSend(trimmed, attachments);
+    if ((!trimmed && attachments.length === 0) || disabled || streaming) return;
+    onSend(trimmed || 'Please review the attached file(s).', attachments);
     setValue('');
     setAttachments([]);
     setAttachError(null);
@@ -140,6 +160,9 @@ export function ChatComposer({
       setAttachError(err instanceof Error ? err.message : String(err));
     }
   };
+
+  const canSend =
+    Boolean(value.trim()) || attachments.length > 0;
 
   return (
     <form onSubmit={onSubmit} className="w-full">
@@ -176,17 +199,18 @@ export function ChatComposer({
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={onKeyDown}
           disabled={disabled || streaming}
-          rows={3}
+          rows={2}
           placeholder="Message WalkCroach…"
-          className="interactive max-h-48 min-h-[5.25rem] w-full resize-y border-0 bg-transparent px-5 py-4 font-sans text-[15px] leading-relaxed text-paper placeholder:text-mist/60 focus:outline-none focus:ring-0 disabled:opacity-60"
+          className="interactive max-h-36 min-h-[3.5rem] w-full resize-y border-0 bg-transparent px-5 py-3 font-sans text-[15px] leading-relaxed text-paper placeholder:text-mist/60 focus:outline-none focus:ring-0 disabled:opacity-60"
         />
-        <div className="flex items-center justify-between gap-2 border-t border-line/80 px-3 py-2.5">
+        <div className="flex items-center justify-between gap-2 border-t border-line/80 px-3 py-2">
           <div className="flex items-center gap-1">
             <input
               ref={fileRef}
               type="file"
               className="hidden"
               multiple
+              accept={ACCEPT}
               onChange={(e) => void onFiles(e)}
             />
             <button
@@ -194,6 +218,7 @@ export function ChatComposer({
               className="btn-ghost text-xs"
               disabled={disabled || streaming}
               onClick={() => fileRef.current?.click()}
+              title="Images, PDF, Word, Excel, or text (max 5 MB)"
             >
               Attach
             </button>
@@ -220,7 +245,7 @@ export function ChatComposer({
             <button
               type="submit"
               className="btn-primary text-xs"
-              disabled={disabled || !value.trim()}
+              disabled={disabled || !canSend}
             >
               Send
             </button>

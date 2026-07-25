@@ -38,6 +38,18 @@ variable "titan_embed_model_id" {
   type = string
 }
 
+variable "bedrock_guardrail_id" {
+  type        = string
+  description = "Bedrock Guardrail ID for prompt-attack / leakage filtering (empty to disable)"
+  default     = ""
+}
+
+variable "bedrock_guardrail_version" {
+  type        = string
+  description = "Bedrock Guardrail version (e.g. 1 or DRAFT)"
+  default     = "DRAFT"
+}
+
 variable "runtime_secret_arn" {
   type = string
 }
@@ -161,6 +173,7 @@ data "aws_iam_policy_document" "lambda" {
       "bedrock:InvokeModelWithResponseStream",
       "bedrock:Converse",
       "bedrock:ConverseStream",
+      "bedrock:ApplyGuardrail",
     ]
     resources = ["*"]
   }
@@ -237,23 +250,25 @@ resource "aws_lambda_function" "agent" {
 
   environment {
     variables = {
-      ENVIRONMENT          = var.environment
-      BEDROCK_REGION       = var.bedrock_region
-      NOVA_MODEL_ID        = var.nova_model_id
-      TITAN_EMBED_MODEL_ID = var.titan_embed_model_id
-      RUNTIME_SECRET_ARN   = var.runtime_secret_arn
-      ARTEFACTS_BUCKET     = var.artefacts_bucket_name
-      APPS_BUCKET          = var.apps_bucket_name
-      APPS_WILDCARD_DOMAIN = var.apps_wildcard_domain
-      APPS_CF_DOMAIN       = var.apps_cf_domain
-      CODEBUILD_PROJECT    = var.codebuild_project
-      COGNITO_USER_POOL_ID = var.cognito_user_pool_id
-      COGNITO_CLIENT_ID    = var.cognito_client_id
-      ALLOW_DEV_AUTH       = var.allow_dev_auth ? "true" : "false"
-      CORS_ALLOW_ORIGIN    = var.cors_allow_origin
-      ALLOW_GITHUB_PAT     = var.allow_github_pat ? "true" : "false"
-      GITHUB_SSM_PREFIX    = var.github_ssm_prefix != "" ? var.github_ssm_prefix : "/${var.name_prefix}/${var.environment}/github"
-      NODE_OPTIONS         = "--enable-source-maps"
+      ENVIRONMENT               = var.environment
+      BEDROCK_REGION            = var.bedrock_region
+      NOVA_MODEL_ID             = var.nova_model_id
+      TITAN_EMBED_MODEL_ID      = var.titan_embed_model_id
+      BEDROCK_GUARDRAIL_ID      = var.bedrock_guardrail_id
+      BEDROCK_GUARDRAIL_VERSION = var.bedrock_guardrail_version
+      RUNTIME_SECRET_ARN        = var.runtime_secret_arn
+      ARTEFACTS_BUCKET          = var.artefacts_bucket_name
+      APPS_BUCKET               = var.apps_bucket_name
+      APPS_WILDCARD_DOMAIN      = var.apps_wildcard_domain
+      APPS_CF_DOMAIN            = var.apps_cf_domain
+      CODEBUILD_PROJECT         = var.codebuild_project
+      COGNITO_USER_POOL_ID      = var.cognito_user_pool_id
+      COGNITO_CLIENT_ID         = var.cognito_client_id
+      ALLOW_DEV_AUTH            = var.allow_dev_auth ? "true" : "false"
+      CORS_ALLOW_ORIGIN         = var.cors_allow_origin
+      ALLOW_GITHUB_PAT          = var.allow_github_pat ? "true" : "false"
+      GITHUB_SSM_PREFIX         = var.github_ssm_prefix != "" ? var.github_ssm_prefix : "/${var.name_prefix}/${var.environment}/github"
+      NODE_OPTIONS              = "--enable-source-maps"
     }
   }
 

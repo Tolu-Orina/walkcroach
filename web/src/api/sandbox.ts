@@ -51,14 +51,31 @@ export type SandboxSessionInfo = {
   runtime: string;
 };
 
+export type CreateSandboxOptions = {
+  templateId?: string | null;
+  /** Remount starter files into the existing E2B sandbox. */
+  forceRemount?: boolean;
+  /** Kill and recreate the sandbox (new E2B identity). */
+  reset?: boolean;
+};
+
 export async function createProjectSandbox(
   projectId: string,
-  templateId?: string | null,
+  templateIdOrOpts?: string | null | CreateSandboxOptions,
 ): Promise<SandboxSessionInfo> {
+  const opts: CreateSandboxOptions =
+    templateIdOrOpts !== null &&
+    typeof templateIdOrOpts === 'object'
+      ? templateIdOrOpts
+      : { templateId: (templateIdOrOpts as string | null | undefined) ?? undefined };
   const res = await fetch(`${API_URL}/projects/${projectId}/sandbox`, {
     method: 'POST',
     headers: authHeaders(),
-    body: JSON.stringify({ templateId: templateId ?? undefined }),
+    body: JSON.stringify({
+      templateId: opts.templateId ?? undefined,
+      forceRemount: opts.forceRemount === true ? true : undefined,
+      reset: opts.reset === true ? true : undefined,
+    }),
   });
   return parseSandbox(res);
 }

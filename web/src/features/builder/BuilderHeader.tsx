@@ -19,6 +19,8 @@ type BuilderHeaderProps = {
   focusMode: boolean;
   onToggleFocus: () => void;
   onChooseStarter: () => void;
+  /** Opens the Git push checklist before IDE connect. */
+  onOpenInIde: () => void;
 };
 
 /** Compact Builder chrome (~30% denser than the previous header). */
@@ -38,6 +40,7 @@ export function BuilderHeader({
   focusMode,
   onToggleFocus,
   onChooseStarter,
+  onOpenInIde,
 }: BuilderHeaderProps) {
   const { user, signOut } = useAuth();
 
@@ -156,15 +159,17 @@ export function BuilderHeader({
             >
               Projects
             </Link>
-            <Link
-              to="/connect/ide"
-              className="interactive block px-3 py-2 text-sm text-mist hover:bg-ink/60 hover:text-paper"
+            <button
+              type="button"
+              onClick={onOpenInIde}
+              className="interactive block w-full px-3 py-2 text-left text-sm text-mist hover:bg-ink/60 hover:text-paper"
               title="IDE continues via project memory and Git — not this Builder sandbox session"
             >
               Open in IDE
-            </Link>
+            </button>
             <p className="border-t border-line px-3 py-2 text-[10px] leading-snug text-mist/80">
-              IDE picks up via memory + Git. Sandbox session does not hand off.
+              Checklist: connect GitHub → push → IDE sign-in. Sandbox does not
+              hand off.
             </p>
             <button
               type="button"

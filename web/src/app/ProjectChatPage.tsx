@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { getProject } from '../api/client';
+import { createSession, getProject } from '../api/client';
 import { BuilderIconLink } from '../features/builder/BuilderIconLink';
 import { ChatComposer } from '../features/chat/ChatComposer';
 import { MessageRow, StreamingSkeleton } from '../features/chat/MessageRow';
@@ -14,6 +14,7 @@ export function ProjectChatPage() {
   }>();
   const navigate = useNavigate();
   const [projectName, setProjectName] = useState<string | null>(null);
+  const [sessionError, setSessionError] = useState<string | null>(null);
   const {
     status,
     bootError,
@@ -30,12 +31,12 @@ export function ProjectChatPage() {
     sessionId,
   } = useChatSession({
     projectId,
-    initialSessionId: chatId,
   });
 
   const [draft, setDraft] = useState<string | undefined>(undefined);
   const bottomRef = useRef<HTMLDivElement>(null);
   const onDraftConsumed = useCallback(() => setDraft(undefined), []);
+  const openingRef = useRef(false);
 
   useEffect(() => {
     if (!projectId) return;
@@ -57,13 +58,41 @@ export function ProjectChatPage() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [messages, streaming]);
 
+  // Bind URL chatId → session (do not create on mismatch)
   useEffect(() => {
-    if (projectId && sessionId && sessionId !== chatId) {
-      navigate(`/app/projects/${projectId}/chat/${sessionId}`, {
-        replace: true,
-      });
+    if (status !== 'ready' || !projectId || streaming || openingRef.current) {
+      return;
     }
-  }, [projectId, sessionId, chatId, navigate]);
+    if (!chatId) {
+      void (async () => {
+        openingRef.current = true;
+        try {
+          const session = await createSession(projectId, 'chat');
+          navigate(`/app/projects/${projectId}/chat/${session.id}`, {
+            replace: true,
+          });
+        } catch (err) {
+          setSessionError(err instanceof Error ? err.message : String(err));
+        } finally {
+          openingRef.current = false;
+        }
+      })();
+      return;
+    }
+    if (chatId === sessionId) return;
+    void (async () => {
+      openingRef.current = true;
+      setSessionError(null);
+      try {
+        const ok = await openSession(chatId);
+        if (!ok) {
+          setSessionError('Chat not found in this project.');
+        }
+      } finally {
+        openingRef.current = false;
+      }
+    })();
+  }, [status, projectId, chatId, sessionId, streaming, openSession, navigate]);
 
   if (!projectId) {
     return null;
@@ -81,6 +110,20 @@ export function ProjectChatPage() {
     return (
       <div className="grid h-full place-items-center px-6 text-center text-sm text-ember">
         {bootError ?? 'Could not start chat'}
+      </div>
+    );
+  }
+
+  if (sessionError && !sessionId) {
+    return (
+      <div className="grid h-full place-items-center gap-3 px-6 text-center text-sm text-ember">
+        <p>{sessionError}</p>
+        <Link
+          to={`/app/projects/${projectId}`}
+          className="text-signal hover:underline"
+        >
+          Back to project
+        </Link>
       </div>
     );
   }
@@ -112,11 +155,15 @@ export function ProjectChatPage() {
             <button
               key={s.id}
               type="button"
+              disabled={streaming}
               onClick={() => {
-                void openSession(s.id);
-                navigate(`/app/projects/${projectId}/chat/${s.id}`);
+                if (streaming) return;
+                void (async () => {
+                  const ok = await openSession(s.id);
+                  if (ok) navigate(`/app/projects/${projectId}/chat/${s.id}`);
+                })();
               }}
-              className={`interactive shrink-0 rounded-full border px-3 py-1 text-[11px] ${
+              className={`interactive shrink-0 rounded-full border px-3 py-1 text-[11px] disabled:opacity-50 ${
                 s.id === sessionId
                   ? 'border-signal/50 text-paper'
                   : 'border-line text-mist hover:border-signal/40 hover:text-paper'
@@ -129,17 +176,21 @@ export function ProjectChatPage() {
         <BuilderIconLink projectId={projectId} label="Builder" />
       </div>
 
-      {!hasUserMessages ? (
-        <div className="flex min-h-0 flex-1 flex-col">
-          <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-6 pb-4 pt-10 sm:px-10">
-            <h1 className="font-display text-2xl font-bold text-paper sm:text-3xl">
+      {!sessionId ? (
+        <div className="grid flex-1 place-items-center text-sm text-mist">
+          Opening chat…
+        </div>
+      ) : !hasUserMessages ? (
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div className="mx-auto flex w-full max-w-3xl min-h-0 flex-1 flex-col overflow-y-auto px-6 pb-4 pt-10 sm:px-10">
+            <h1 className="shrink-0 font-display text-2xl font-bold text-paper sm:text-3xl">
               Chat in {projectName ?? 'project'}
             </h1>
-            <p className="mt-2 text-sm text-mist">
+            <p className="mt-2 shrink-0 text-sm text-mist">
               Standing instructions and documents from the project home are
               included in context.
             </p>
-            <div className="mt-auto w-full pt-16">
+            <div className="mt-auto w-full shrink-0 pt-10">
               <ChatComposer
                 webSearch={webSearch}
                 onWebSearchChange={setWebSearch}

@@ -13,10 +13,15 @@ import { attachmentStorageKey, putObject } from '../artefacts.js';
 import { writeNdjson } from '../http.js';
 import { assertCredits, debitCredits } from './billing.js';
 
+/** Nova text docs ≤4.5MB; media combined ≤25MB; API GW ~10MB with base64 → 5MB binary. */
+const MAX_ATTACH_BYTES = 5 * 1024 * 1024;
+
 export type PromptBody = {
   message: string;
   projectId: string;
   mode?: 'plan' | 'build' | 'chat' | 'project_chat';
+  /** When false, system prompt disables web_search for this turn. */
+  webSearchEnabled?: boolean;
   attachments?: Array<{
     name: string;
     mime: string;
@@ -24,31 +29,34 @@ export type PromptBody = {
     byteSize?: number;
     /** UTF-8 text body (text files) */
     contentText?: string;
-    /** Base64 binary body (images / other) */
+    /** Base64 binary body (images / documents) */
     contentBase64?: string;
   }>;
 };
 
-type StoredAttachmentMeta = {
+type StoredAttachment = {
   name: string;
   mime: string;
   textPreview: string;
   byteSize?: number;
   storageKey?: string;
+  contentText?: string;
+  bytes?: Uint8Array;
+  ingestError?: string;
 };
 
 async function persistAttachments(
   sessionId: string,
   raw: PromptBody['attachments'],
-): Promise<StoredAttachmentMeta[] | undefined> {
+): Promise<StoredAttachment[] | undefined> {
   if (!raw?.length) return undefined;
-  const out: StoredAttachmentMeta[] = [];
+  const out: StoredAttachment[] = [];
   for (const a of raw.slice(0, 5)) {
     if (!a || typeof a.name !== 'string' || typeof a.textPreview !== 'string') {
       continue;
     }
     const id = randomUUID();
-    const meta: StoredAttachmentMeta = {
+    const meta: StoredAttachment = {
       name: a.name.slice(0, 200),
       mime: typeof a.mime === 'string' ? a.mime.slice(0, 120) : 'text/plain',
       textPreview: a.textPreview.slice(0, 20_000),
@@ -57,31 +65,45 @@ async function persistAttachments(
           ? a.byteSize
           : undefined,
     };
+
+    const hasText =
+      typeof a.contentText === 'string' && a.contentText.length > 0;
+    const hasB64 =
+      typeof a.contentBase64 === 'string' && a.contentBase64.length > 0;
+
     try {
-      if (typeof a.contentText === 'string' && a.contentText.length > 0) {
+      if (hasText) {
+        const text = a.contentText!.slice(0, 2_000_000);
         const key = attachmentStorageKey(sessionId, id);
-        await putObject(key, a.contentText.slice(0, 2_000_000));
+        await putObject(key, text);
         meta.storageKey = key;
-        meta.byteSize = meta.byteSize ?? Buffer.byteLength(a.contentText, 'utf8');
-      } else if (
-        typeof a.contentBase64 === 'string' &&
-        a.contentBase64.length > 0
-      ) {
+        meta.contentText = text;
+        meta.byteSize = meta.byteSize ?? Buffer.byteLength(text, 'utf8');
+      } else if (hasB64) {
         const key = attachmentStorageKey(sessionId, id);
-        const buf = Buffer.from(a.contentBase64, 'base64');
-        if (buf.length > 0 && buf.length <= 2 * 1024 * 1024) {
+        const buf = Buffer.from(a.contentBase64!, 'base64');
+        if (buf.length === 0) {
+          meta.ingestError = 'empty file body';
+        } else if (buf.length > MAX_ATTACH_BYTES) {
+          meta.ingestError = `larger than ${MAX_ATTACH_BYTES / (1024 * 1024)} MB`;
+        } else {
           await putObject(key, buf);
           meta.storageKey = key;
+          meta.bytes = buf;
           meta.byteSize = meta.byteSize ?? buf.length;
         }
       } else if (a.textPreview && !a.textPreview.startsWith('[')) {
-        // Fallback: persist text preview as the artefact body
         const key = attachmentStorageKey(sessionId, id);
         await putObject(key, a.textPreview);
         meta.storageKey = key;
+        meta.contentText = a.textPreview;
+      } else if (a.textPreview.startsWith('[')) {
+        // Client claimed a binary attach but sent no body
+        meta.ingestError = 'file body missing from upload';
       }
-    } catch {
-      // Keep meta without storageKey if put fails
+    } catch (err) {
+      meta.ingestError =
+        err instanceof Error ? err.message : 'failed to store attachment';
     }
     out.push(meta);
   }
@@ -142,6 +164,7 @@ export async function runPromptStream(
         projectId: body.projectId,
         message: body.message,
         mode,
+        webSearchEnabled: body.webSearchEnabled !== false,
         attachments,
       }),
     );

@@ -1,4 +1,4 @@
-export { streamConverse, streamConverseTurn, embedText, getNovaModelId } from './bedrock.js';
+export { streamConverse, streamConverseTurn, embedText, getNovaModelId, getGuardrailConfig } from './bedrock.js';
 export {
   runPromptTurn,
   continueAfterTool,
@@ -16,8 +16,23 @@ export { refreshProjectMemorySummary } from './project-memory.js';
 export {
   loadProjectKnowledge,
   formatProjectKnowledgeBlock,
+  recallProjectDocuments,
+  embedProjectDocument,
   type ProjectKnowledge,
+  type ProjectKnowledgeHit,
 } from './project-knowledge.js';
+export {
+  chunkText,
+  CHUNK_TARGET_CHARS,
+  CHUNK_OVERLAP_CHARS,
+  MAX_CHUNKS_PER_DOCUMENT,
+  type TextChunk,
+} from './text-chunker.js';
+export {
+  buildUserContentBlocks,
+  titleFromMessage,
+  type AttachmentBytes,
+} from './attachment-content.js';
 export {
   TOOLS,
   toolAwaitResult,
@@ -56,6 +71,8 @@ export {
   countProjectsForOwner,
   listBuildEvents,
   extractCitationsFromContent,
+  tryBeginPromptTurn,
+  releasePromptTurnIfRunning,
   type AppendMessageMeta,
   type MessageAttachmentMeta,
   type MessageCitationMeta,
