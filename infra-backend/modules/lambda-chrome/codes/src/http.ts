@@ -30,9 +30,16 @@ export function getCorsHeaders(): Record<string, string> {
     } else if (allowlist.includes(requestOrigin)) {
       origin = requestOrigin;
     } else if (requestOrigin.startsWith('chrome-extension://')) {
-      // Chrome BFF is consumed by the extension; SPA-only allowlists must still
-      // echo extension Origins or side-panel fetch fails CORS without host perms.
-      origin = requestOrigin;
+      // Echo published extension ID(s) when configured; otherwise any extension
+      // Origin (needed before the CWS ID is known / for local unpacked builds).
+      const ids = (process.env.CHROME_EXTENSION_IDS ?? '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const extensionId = requestOrigin.slice('chrome-extension://'.length);
+      if (ids.length === 0 || ids.includes(extensionId)) {
+        origin = requestOrigin;
+      }
     }
   }
 

@@ -36,10 +36,6 @@ async function handleMessage(
   switch (message.type) {
     case 'PING':
       return { ok: true, pong: true };
-    case 'DRAFT_FIELD_FOCUS': {
-      await chrome.storage.session.set({ wc_draft_intent: true });
-      return { ok: true };
-    }
     case 'GET_ACTIVE_TAB_INFO': {
       const [tab] = await chrome.tabs.query({
         active: true,

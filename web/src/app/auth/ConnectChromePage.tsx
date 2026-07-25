@@ -51,7 +51,7 @@ export function ConnectChromePage() {
       }
 
       const stored = loadStoredAuth();
-      if (!stored?.token || !stored.cognito?.refreshToken) {
+      if (!stored?.token) {
         setError(
           'Sign in with your WalkCroach email and password, then retry from the extension.',
         );
@@ -80,9 +80,12 @@ export function ConnectChromePage() {
           body: JSON.stringify({
             state,
             redirectUri,
-            refreshToken: stored.cognito.refreshToken,
-            idToken: stored.cognito.idToken,
-            expiresAt: stored.cognito.expiresAt,
+            // Refresh is optional — ID/access token alone is enough to connect.
+            ...(stored.cognito?.refreshToken
+              ? { refreshToken: stored.cognito.refreshToken }
+              : {}),
+            idToken: stored.cognito?.idToken ?? stored.token,
+            expiresAt: stored.cognito?.expiresAt,
           }),
         });
         const data = (await res.json()) as {

@@ -440,6 +440,23 @@ export async function exchangeOauthToken(body: {
   return (await res.json()) as OauthTokenResponse;
 }
 
+/** Public: refresh Cognito tokens via Chrome BFF (keeps Cognito session alive). */
+export async function refreshCognitoSession(
+  refreshToken: string,
+): Promise<OauthTokenResponse> {
+  const res = await fetch(chromePath('/oauth/refresh'), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ refreshToken }),
+  });
+  if (!res.ok) {
+    throw new Error(
+      (await res.text()) || `oauth refresh failed: ${res.status}`,
+    );
+  }
+  return (await res.json()) as OauthTokenResponse;
+}
+
 /** Create a one-time handoff for Open in Web Chat (page extract stays off the URL). */
 export async function createChatHandoff(
   token: string,

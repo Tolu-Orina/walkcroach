@@ -8,6 +8,9 @@ import { metricLog, parseJsonBody } from '../util.js';
  * Merge anon:device:* ownership into a Cognito sub after sign-in.
  * Caller must authenticate with Cognito JWT and prove device possession
  * via the same deviceKey that minted the anon session.
+ *
+ * Re-connect after a prior upgrade is supported: when anonOwnerId is already
+ * the Cognito sub (device remint after sign-out), verify deviceKey and return ok.
  */
 export async function handleUpgradeAuth(
   auth: AuthContext,
@@ -28,14 +31,14 @@ export async function handleUpgradeAuth(
   const b = body as { anonOwnerId?: string; deviceKey?: string };
   const anonOwnerId = b.anonOwnerId?.trim();
   const deviceKey = b.deviceKey?.trim();
-  if (!anonOwnerId?.startsWith('anon:device:')) {
+  if (!anonOwnerId) {
     return jsonResponse(400, { error: 'anonOwnerId required' });
   }
   if (!deviceKey || deviceKey.length < 16) {
     return jsonResponse(400, { error: 'deviceKey required' });
   }
-  if (anonOwnerId === auth.ownerId) {
-    return jsonResponse(200, { ok: true, merged: false });
+  if (anonOwnerId === auth.ownerId && anonOwnerId.startsWith('anon:device:')) {
+    return jsonResponse(200, { ok: true, merged: false, ownerId: auth.ownerId });
   }
 
   const db = createDbClient();
@@ -51,7 +54,37 @@ export async function handleUpgradeAuth(
       [keyHash],
     );
     const row = session.rows[0];
-    if (!row || row.owner_id !== anonOwnerId) {
+    if (!row) {
+      return jsonResponse(403, {
+        error: 'deviceKey does not match anonOwnerId',
+      });
+    }
+
+    // Already linked to this Cognito account (re-sign-in after sign-out / demotion).
+    if (
+      !anonOwnerId.startsWith('anon:device:') &&
+      (row.upgraded_to_cognito_sub === auth.ownerId ||
+        row.owner_id === auth.ownerId) &&
+      (anonOwnerId === auth.ownerId ||
+        anonOwnerId === row.owner_id ||
+        anonOwnerId === row.upgraded_to_cognito_sub)
+    ) {
+      metricLog('chrome.auth.cognito_upgrade', {
+        ok: true,
+        reconnected: true,
+      });
+      return jsonResponse(200, {
+        ok: true,
+        merged: false,
+        ownerId: auth.ownerId,
+      });
+    }
+
+    if (!anonOwnerId.startsWith('anon:device:')) {
+      return jsonResponse(400, { error: 'anonOwnerId required' });
+    }
+
+    if (row.owner_id !== anonOwnerId) {
       return jsonResponse(403, {
         error: 'deviceKey does not match anonOwnerId',
       });

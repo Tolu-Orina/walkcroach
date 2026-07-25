@@ -1,5 +1,6 @@
 import {
   exchangeOauthToken,
+  refreshCognitoSession,
   upgradeAuth,
   WEB_APP_URL,
 } from './api';
@@ -12,6 +13,8 @@ const TOKEN_EXPIRES_AT = 'wc_token_expires_at';
 const REFRESH_TOKEN = 'wc_refresh_token';
 const ID_TOKEN = 'wc_id_token';
 const OAUTH_PENDING = 'wc_oauth_pending';
+
+const EXPIRY_SKEW_MS = 60_000;
 
 export type StoredSession = {
   accessToken: string;
@@ -40,6 +43,10 @@ export function generateOAuthState(): string {
   let bin = '';
   for (const b of bytes) bin += String.fromCharCode(b);
   return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function isFresh(expiresAt: number | undefined): boolean {
+  return Boolean(expiresAt && expiresAt > Date.now() + EXPIRY_SKEW_MS);
 }
 
 export async function loadSession(): Promise<StoredSession | null> {
@@ -76,9 +83,48 @@ function mintClientDeviceKey(): string {
   return `dk-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
+async function loadRefreshToken(): Promise<string | null> {
+  const data = await chrome.storage.local.get([REFRESH_TOKEN]);
+  const rt = data[REFRESH_TOKEN];
+  return typeof rt === 'string' && rt.trim() ? rt.trim() : null;
+}
+
+async function tryRefreshCognito(
+  existing: StoredSession,
+): Promise<StoredSession | null> {
+  const refreshToken = await loadRefreshToken();
+  if (!refreshToken) return null;
+  try {
+    const tokens = await refreshCognitoSession(refreshToken);
+    const cognitoToken = (tokens.id_token ?? tokens.access_token).trim();
+    if (!cognitoToken) return null;
+    const session: StoredSession = {
+      deviceKey: existing.deviceKey,
+      accessToken: cognitoToken,
+      ownerId: existing.ownerId,
+      source: 'cognito',
+      expiresAt:
+        Date.now() + Math.max(60, tokens.expires_in ?? 55 * 60) * 1000,
+    };
+    await saveSession(session);
+    if (tokens.refresh_token) {
+      await chrome.storage.local.set({ [REFRESH_TOKEN]: tokens.refresh_token });
+    }
+    if (tokens.id_token) {
+      await chrome.storage.local.set({ [ID_TOKEN]: tokens.id_token });
+    }
+    return session;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Device session for try-first. Cognito access tokens replace the Bearer token
  * after upgrade; deviceKey is retained so we can re-mint if needed.
+ *
+ * Does not remint on every bootstrap — only when missing or near expiry —
+ * to avoid storage.onChanged ↔ bootstrap loops.
  */
 export async function ensureDeviceSession(
   createSession: (deviceKey?: string) => Promise<{
@@ -92,39 +138,36 @@ export async function ensureDeviceSession(
 
   const run = (async () => {
     const existing = await loadSession();
+
     if (existing?.source === 'cognito') {
-      if (
-        existing.expiresAt &&
-        existing.expiresAt < Date.now() + 60_000
-      ) {
-        const refreshed = await createSession(existing.deviceKey);
-        const session: StoredSession = {
-          deviceKey: existing.deviceKey,
-          accessToken: refreshed.accessToken,
-          ownerId: refreshed.ownerId,
-          source: 'device',
-          expiresAt: Date.now() + (refreshed.expiresIn ?? 30 * 24 * 3600) * 1000,
-        };
-        await saveSession(session);
-        return session;
+      if (isFresh(existing.expiresAt)) {
+        return existing;
       }
+      const refreshed = await tryRefreshCognito(existing);
+      if (refreshed) return refreshed;
+      // Refresh failed — fall through to device remint (keep deviceKey).
+    } else if (existing && isFresh(existing.expiresAt)) {
       return existing;
     }
 
     if (existing) {
       try {
-        const refreshed = await createSession(existing.deviceKey);
+        const minted = await createSession(existing.deviceKey);
         const session: StoredSession = {
           deviceKey: existing.deviceKey,
-          accessToken: refreshed.accessToken,
-          ownerId: refreshed.ownerId,
+          accessToken: minted.accessToken,
+          ownerId: minted.ownerId,
           source: 'device',
-          expiresAt: Date.now() + (refreshed.expiresIn ?? 30 * 24 * 3600) * 1000,
+          expiresAt:
+            Date.now() + (minted.expiresIn ?? 30 * 24 * 3600) * 1000,
         };
         await saveSession(session);
+        if (existing.source === 'cognito') {
+          await chrome.storage.local.remove([REFRESH_TOKEN, ID_TOKEN]);
+        }
         return session;
       } catch {
-        // fall through
+        // fall through to mint
       }
     }
 
@@ -174,7 +217,7 @@ export async function startWebSignIn(webAppUrl = WEB_APP_URL): Promise<string> {
 
 /**
  * Finish Web → Chrome handoff on auth.html (code+state only).
- * Merges anon device ownership via /auth/upgrade.
+ * Merges anon device ownership via /auth/upgrade when still on anon:device:*.
  */
 export async function completeWebSignIn(
   code: string,
@@ -213,6 +256,8 @@ export async function completeWebSignIn(
     throw new Error('Connect response missing tokens.');
   }
 
+  // Re-connect after prior Cognito upgrade: ownerId is already the Cognito sub.
+  // Upgrade still verifies deviceKey possession for already-linked devices.
   const result = await upgradeAuth(
     cognitoToken,
     existing.ownerId,

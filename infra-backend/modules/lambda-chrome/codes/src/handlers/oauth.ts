@@ -136,12 +136,13 @@ export async function handleExchangeToken(
     return jsonResponse(400, { error: 'redirectUri is not allowed' });
   }
 
+  const stateFp = stateFingerprint(state);
   const db = createDbClient();
   try {
+    // Validate state + redirect_uri in the same atomic consume (never burn
+    // a valid code on a mismatched callback).
     const { rows } = await db.query<{
       code: string;
-      state: string;
-      redirect_uri: string;
       access_token: string;
       refresh_token: string | null;
       id_token: string | null;
@@ -152,18 +153,13 @@ export async function handleExchangeToken(
        WHERE code = $1
          AND consumed_at IS NULL
          AND code_expires_at > now()
-       RETURNING code, state, redirect_uri, access_token, refresh_token, id_token,
-                 token_expires_at`,
-      [code],
+         AND state = $2
+         AND redirect_uri = $3
+       RETURNING code, access_token, refresh_token, id_token, token_expires_at`,
+      [code, stateFp, redirectUri],
     );
     const row = rows[0];
     if (!row) {
-      return jsonResponse(400, { error: 'invalid_grant' });
-    }
-    if (row.state !== stateFingerprint(state)) {
-      return jsonResponse(400, { error: 'invalid_grant' });
-    }
-    if (row.redirect_uri !== redirectUri) {
       return jsonResponse(400, { error: 'invalid_grant' });
     }
 
@@ -186,6 +182,80 @@ export async function handleExchangeToken(
     });
   } finally {
     await db.close();
+  }
+}
+
+/**
+ * POST /chrome/v1/oauth/refresh — public Cognito REFRESH_TOKEN_AUTH proxy.
+ * Keeps the extension Cognito session alive without demoting to device.
+ */
+export async function handleRefreshToken(
+  rawBody: string | undefined,
+): Promise<ReturnType<typeof jsonResponse>> {
+  const parsed = parseJsonBody<{ refreshToken?: string }>(rawBody);
+  if ('error' in parsed && parsed.error === 'invalid JSON body') {
+    return jsonResponse(400, { error: parsed.error });
+  }
+  const refreshToken = (parsed as { refreshToken?: string }).refreshToken?.trim();
+  if (!refreshToken || refreshToken.length < 20) {
+    return jsonResponse(400, { error: 'refreshToken is required' });
+  }
+
+  const clientId = process.env.COGNITO_CLIENT_ID?.trim();
+  const region =
+    process.env.COGNITO_REGION?.trim() ||
+    process.env.COGNITO_USER_POOL_ID?.split('_')[0]?.trim() ||
+    'eu-west-2';
+  if (!clientId) {
+    return jsonResponse(503, { error: 'cognito_unconfigured' });
+  }
+
+  try {
+    const res = await fetch(
+      `https://cognito-idp.${region}.amazonaws.com/`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/x-amz-json-1.1',
+          'x-amz-target':
+            'AWSCognitoIdentityProviderService.InitiateAuth',
+        },
+        body: JSON.stringify({
+          AuthFlow: 'REFRESH_TOKEN_AUTH',
+          ClientId: clientId,
+          AuthParameters: { REFRESH_TOKEN: refreshToken },
+        }),
+      },
+    );
+    const data = (await res.json()) as {
+      AuthenticationResult?: {
+        AccessToken: string;
+        IdToken: string;
+        ExpiresIn: number;
+        RefreshToken?: string;
+      };
+      __type?: string;
+      message?: string;
+    };
+    if (!res.ok || !data.AuthenticationResult) {
+      metricLog('chrome.oauth.refresh', { ok: false });
+      return jsonResponse(400, {
+        error: data.message || data.__type || 'invalid_grant',
+      });
+    }
+    const result = data.AuthenticationResult;
+    metricLog('chrome.oauth.refresh', { ok: true });
+    return jsonResponse(200, {
+      access_token: result.AccessToken,
+      id_token: result.IdToken,
+      refresh_token: result.RefreshToken ?? refreshToken,
+      expires_in: result.ExpiresIn,
+      token_type: 'Bearer',
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'refresh failed';
+    console.error('oauth refresh failed', message);
+    return jsonResponse(502, { error: 'refresh failed' });
   }
 }
 

@@ -61,7 +61,6 @@ export function App() {
   const [activeWs, setActiveWs] = useState<string>('');
   const [captures, setCaptures] = useState<Capture[]>([]);
   const [newWsName, setNewWsName] = useState('');
-  const [draftIntent, setDraftIntent] = useState(false);
   const [profile, setProfile] = useState<SiteProfile | null>(null);
   const [proposalFields, setProposalFields] = useState<Record<
     string,
@@ -122,12 +121,6 @@ export function App() {
       setWorkspaces(ws);
       if (ws[0]) setActiveWs(ws[0].id);
       await refreshWebProjects(s.accessToken, s.source);
-      const draft = await chrome.storage.session.get('wc_draft_intent');
-      if (draft.wc_draft_intent) {
-        setDraftIntent(true);
-        setTab('page');
-        await chrome.storage.session.remove('wc_draft_intent');
-      }
     } catch (err) {
       setError(formatNetworkError(err, 'bootstrap failed'));
     } finally {
@@ -139,14 +132,19 @@ export function App() {
     void bootstrap();
   }, [bootstrap]);
 
-  // Web connect finishes on auth.html — refresh side panel when session flips to Cognito.
+  // Web connect finishes on auth.html — refresh only when auth source flips.
   useEffect(() => {
+    const clearSummarizeCache = async () => {
+      const all = await chrome.storage.session.get(null);
+      const keys = Object.keys(all).filter((k) => k.startsWith('sum:'));
+      if (keys.length) await chrome.storage.session.remove(keys);
+    };
     const onChanged: Parameters<
       typeof chrome.storage.onChanged.addListener
     >[0] = (changes, area) => {
       if (area !== 'local') return;
-      if (!changes.wc_auth_source && !changes.wc_access_token) return;
-      void bootstrap();
+      if (!changes.wc_auth_source) return;
+      void clearSummarizeCache().then(() => bootstrap());
     };
     chrome.storage.onChanged.addListener(onChanged);
     return () => chrome.storage.onChanged.removeListener(onChanged);
@@ -290,6 +288,11 @@ export function App() {
 
   const onOpenInWebChat = async () => {
     if (!token) return;
+    if (session?.source !== 'cognito') {
+      setError('Sign in with WalkCroach on the Trust tab to open Web Chat.');
+      setTab('trust');
+      return;
+    }
     const page = await preparePage();
     if (!page) return;
     try {
@@ -331,9 +334,10 @@ export function App() {
         {
           ...page,
           workspaceId: activeWs || null,
-          instruction: draftIntent || matched?.actionId === 'draft_support'
-            ? 'Draft a reply suitable for the focused compose field.'
-            : 'Draft helpful copy based on this page.',
+          instruction:
+            matched?.actionId === 'draft_support'
+              ? 'Draft a reply suitable for the focused compose field.'
+              : 'Draft helpful copy based on this page.',
           tone,
         },
         beginStream(),
@@ -710,7 +714,7 @@ export function App() {
               Save{activeWsName ? ` → ${activeWsName}` : ''}
             </button>
           </div>
-          {activeLinkedProjectId && linkedProjectName && (
+          {activeWs && activeLinkedProjectId && linkedProjectName && (
             <p className="muted small">
               Draft uses standing instructions from linked project “
               {linkedProjectName}”.

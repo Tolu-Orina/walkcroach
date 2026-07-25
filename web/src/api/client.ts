@@ -723,7 +723,7 @@ export async function listMyApps(): Promise<MyAppDeployment[]> {
   return data.apps ?? [];
 }
 
-/** Public one-time Chrome → Chat handoff (no auth; code is the secret). */
+/** Authenticated one-time Chrome → Chat handoff (owner-bound). */
 export async function fetchChromeChatHandoff(code: string): Promise<{
   title?: string | null;
   url?: string | null;
@@ -732,6 +732,7 @@ export async function fetchChromeChatHandoff(code: string): Promise<{
 }> {
   const res = await fetch(
     `${API_URL}/chrome/v1/chat-handoff/${encodeURIComponent(code)}`,
+    { headers: authHeaders() },
   );
   return parseJson(res);
 }

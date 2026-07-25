@@ -16,7 +16,6 @@ import { fetchChromeChatHandoff } from '../api/client';
 import {
   consumePendingChatContext,
   formatChatHandoffDraft,
-  setPendingChatContext,
 } from '../lib/pending-chat-context';
 
 /**
@@ -79,26 +78,62 @@ export function ChatHomePage() {
       return;
     }
 
-    handoffConsumed.current = true;
+    let cancelled = false;
     void (async () => {
-      let draftText = q ?? '';
+      let draftText = '';
+      let handoffOk = false;
+
       if (handoff) {
+        const cacheKey = `walkcroach.handoff.${handoff}`;
         try {
-          const ctx = await fetchChromeChatHandoff(handoff);
-          setPendingChatContext(ctx);
-          draftText = formatChatHandoffDraft(ctx);
-          if (!draftText && q) draftText = q;
+          const cached = sessionStorage.getItem(cacheKey);
+          if (cached) {
+            const ctx = JSON.parse(cached) as {
+              title?: string | null;
+              url?: string | null;
+              extractedText: string;
+              question?: string | null;
+            };
+            draftText = formatChatHandoffDraft(ctx);
+            handoffOk = Boolean(draftText);
+          } else {
+            const ctx = await fetchChromeChatHandoff(handoff);
+            if (cancelled) return;
+            sessionStorage.setItem(cacheKey, JSON.stringify(ctx));
+            draftText = formatChatHandoffDraft(ctx);
+            handoffOk = Boolean(draftText);
+          }
         } catch {
+          if (cancelled) return;
+          // Keep ?handoff= so the user can retry after signing in / refresh.
           if (q) draftText = q;
+          else {
+            setDraft(undefined);
+            return;
+          }
         }
+      } else if (q) {
+        draftText = q;
+        handoffOk = true;
       }
+
+      if (cancelled) return;
       if (draftText) setDraft(draftText);
-      const next = new URLSearchParams(searchParams);
-      next.delete('handoff');
-      next.delete('q');
-      next.delete('webSearch');
-      setSearchParams(next, { replace: true });
+
+      // Only strip URL params after a successful handoff (or q-only link).
+      if (handoffOk || (!handoff && q)) {
+        handoffConsumed.current = true;
+        const next = new URLSearchParams(searchParams);
+        next.delete('handoff');
+        next.delete('q');
+        next.delete('webSearch');
+        setSearchParams(next, { replace: true });
+      }
     })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [status, searchParams, setSearchParams, setWebSearch]);
 
   useEffect(() => {

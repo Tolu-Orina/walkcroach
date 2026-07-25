@@ -16,6 +16,13 @@ Unreleased batch since 0.1.4 (deploy as one package):
 - Project Remembered: Chrome filter/badge for `source_surface=chrome`
 - Draft injects linked project standing instructions + memory summary
 
+**Review fixes (pre-deploy)**
+- No device-session remint loop on side-panel bootstrap
+- Cognito re-connect after sign-out; refresh via `/oauth/refresh`
+- OAuth consume validates state+redirect atomically
+- Chat handoff owner-bound + StrictMode-safe; Open in Web Chat requires Cognito
+- Draft linked-project hint only when a workspace is selected
+
 Also from 0.1.4 line: narrow API `host_permissions`, CORS echo for extensions, Retry UX, new icons.
 
 ## 0.1.4 — 2026-07-25

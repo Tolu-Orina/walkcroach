@@ -150,11 +150,28 @@ describe('ensureDeviceSession', () => {
     expect(session.deviceKey).toBe('server-dk');
   });
 
-  it('refreshes existing device session', async () => {
+  it('returns existing fresh device session without reminting', async () => {
     storage['wc_device_key'] = 'dk-old';
     storage['wc_access_token'] = 'tok-old';
     storage['wc_owner_id'] = 'owner-old';
     storage['wc_auth_source'] = 'device';
+    storage['wc_token_expires_at'] = Date.now() + 600_000;
+
+    const { ensureDeviceSession } = await import('./auth');
+    const createSession = vi.fn();
+
+    const session = await ensureDeviceSession(createSession);
+    expect(session.accessToken).toBe('tok-old');
+    expect(session.deviceKey).toBe('dk-old');
+    expect(createSession).not.toHaveBeenCalled();
+  });
+
+  it('remints device session when near expiry', async () => {
+    storage['wc_device_key'] = 'dk-old';
+    storage['wc_access_token'] = 'tok-old';
+    storage['wc_owner_id'] = 'owner-old';
+    storage['wc_auth_source'] = 'device';
+    storage['wc_token_expires_at'] = Date.now() + 30_000;
 
     const { ensureDeviceSession } = await import('./auth');
     const createSession = vi.fn().mockResolvedValueOnce({
@@ -185,12 +202,20 @@ describe('ensureDeviceSession', () => {
     expect(createSession).not.toHaveBeenCalled();
   });
 
-  it('falls back to device session when cognito token is near-expired', async () => {
+  it('falls back to device session when cognito token is near-expired and refresh fails', async () => {
     storage['wc_device_key'] = 'dk';
     storage['wc_access_token'] = 'expired-cognito';
     storage['wc_owner_id'] = 'owner';
     storage['wc_auth_source'] = 'cognito';
     storage['wc_token_expires_at'] = Date.now() + 30_000;
+    storage['wc_refresh_token'] = 'rt-bad';
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: 'invalid_grant' }), {
+        status: 400,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
 
     const { ensureDeviceSession } = await import('./auth');
     const createSession = vi.fn().mockResolvedValueOnce({
@@ -202,6 +227,35 @@ describe('ensureDeviceSession', () => {
     const session = await ensureDeviceSession(createSession);
     expect(session.source).toBe('device');
     expect(session.accessToken).toBe('device-tok');
+  });
+
+  it('refreshes cognito via BFF when near expiry', async () => {
+    storage['wc_device_key'] = 'dk';
+    storage['wc_access_token'] = 'expired-cognito';
+    storage['wc_owner_id'] = 'cognito-sub';
+    storage['wc_auth_source'] = 'cognito';
+    storage['wc_token_expires_at'] = Date.now() + 30_000;
+    storage['wc_refresh_token'] = 'rt-good';
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          access_token: 'new-access',
+          id_token: 'new-id',
+          refresh_token: 'rt-good',
+          expires_in: 3600,
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+
+    const { ensureDeviceSession } = await import('./auth');
+    const createSession = vi.fn();
+
+    const session = await ensureDeviceSession(createSession);
+    expect(session.source).toBe('cognito');
+    expect(session.accessToken).toBe('new-id');
+    expect(createSession).not.toHaveBeenCalled();
   });
 
   it('deduplicates concurrent calls', async () => {
@@ -232,6 +286,7 @@ describe('ensureDeviceSession', () => {
     storage['wc_access_token'] = 'tok-fail';
     storage['wc_owner_id'] = 'owner-fail';
     storage['wc_auth_source'] = 'device';
+    storage['wc_token_expires_at'] = Date.now() + 30_000;
 
     const { ensureDeviceSession } = await import('./auth');
     const createSession = vi

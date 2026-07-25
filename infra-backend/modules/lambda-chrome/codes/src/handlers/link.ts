@@ -241,39 +241,50 @@ async function backfillWorkspaceCapturesToMemory(
   workspaceId: string,
   projectId: string,
 ): Promise<number> {
-  const { rows } = await db.query<{
-    id: string;
-    url: string;
-    title: string | null;
-    extracted_text: string | null;
-    embedding: string | null;
-    capture_type: string;
-  }>(
-    `SELECT id, url, title, extracted_text, embedding::text AS embedding, capture_type
-     FROM page_captures
-     WHERE workspace_id = $1::uuid
-       AND superseded_by IS NULL
-       AND embedding IS NOT NULL
-     ORDER BY captured_at ASC
-     LIMIT 200`,
-    [workspaceId],
-  );
-
+  const BATCH = 200;
+  const HARD_CAP = 2000;
   let count = 0;
-  for (const row of rows) {
-    if (!row.embedding || !row.extracted_text) continue;
-    const id = await mirrorCaptureToProjectMemory({
-      db,
-      projectId,
-      captureId: row.id,
-      url: row.url,
-      title: row.title,
-      extractedText: row.extracted_text,
-      embedding: row.embedding,
-      captureType: row.capture_type,
-    });
-    if (id) count += 1;
+  let offset = 0;
+
+  while (offset < HARD_CAP) {
+    const { rows } = await db.query<{
+      id: string;
+      url: string;
+      title: string | null;
+      extracted_text: string | null;
+      embedding: string | null;
+      capture_type: string;
+    }>(
+      `SELECT id, url, title, extracted_text, embedding::text AS embedding, capture_type
+       FROM page_captures
+       WHERE workspace_id = $1::uuid
+         AND superseded_by IS NULL
+         AND embedding IS NOT NULL
+       ORDER BY captured_at ASC
+       LIMIT $2 OFFSET $3`,
+      [workspaceId, BATCH, offset],
+    );
+    if (!rows.length) break;
+
+    for (const row of rows) {
+      if (!row.embedding || !row.extracted_text) continue;
+      const id = await mirrorCaptureToProjectMemory({
+        db,
+        projectId,
+        captureId: row.id,
+        url: row.url,
+        title: row.title,
+        extractedText: row.extracted_text,
+        embedding: row.embedding,
+        captureType: row.capture_type,
+      });
+      if (id) count += 1;
+    }
+
+    offset += rows.length;
+    if (rows.length < BATCH) break;
   }
+
   return count;
 }
 

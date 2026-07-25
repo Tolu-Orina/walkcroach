@@ -22,6 +22,7 @@ import { handleUpgradeAuth } from './upgrade.js';
 import {
   handleCreateSessionCode,
   handleExchangeToken,
+  handleRefreshToken,
   extractBearer,
 } from './oauth.js';
 import {
@@ -99,7 +100,7 @@ export async function handleChromeRest(
     return jsonResponse(200, {
       ok: true,
       service: 'walkcroach-chrome',
-      version: '0.1.0',
+      version: '0.1.5',
     });
   }
 
@@ -118,15 +119,23 @@ export async function handleChromeRest(
     return handleExchangeToken(req.body);
   }
 
-  // Public: one-time Chrome → Web Chat context consume.
-  const handoffGet = path.match(/\/chrome\/v1\/chat-handoff\/([^/]+)\/?$/);
-  if (req.method === 'GET' && handoffGet) {
-    return handleConsumeChatHandoff(handoffGet[1]!);
+  // Public: Cognito refresh (extension keeps signed-in session).
+  if (
+    req.method === 'POST' &&
+    /\/chrome\/v1\/oauth\/refresh\/?$/.test(path)
+  ) {
+    return handleRefreshToken(req.body);
   }
 
   const auth = await requireAuth(req.headers);
   if ('error' in auth) {
     return jsonResponse(auth.status, { error: auth.error });
+  }
+
+  // Authenticated: owner-bound chat handoff consume.
+  const handoffGet = path.match(/\/chrome\/v1\/chat-handoff\/([^/]+)\/?$/);
+  if (req.method === 'GET' && handoffGet) {
+    return handleConsumeChatHandoff(auth, handoffGet[1]!);
   }
 
   if (

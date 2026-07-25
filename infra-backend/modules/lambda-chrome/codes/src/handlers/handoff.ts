@@ -14,11 +14,18 @@ function newCode(): string {
 /**
  * POST /chrome/v1/chat-handoff
  * Store page context for Web Chat deep-link (short code in URL only).
+ * Requires Cognito so consume can enforce ownership.
  */
 export async function handleCreateChatHandoff(
   auth: AuthContext,
   rawBody: string | undefined,
 ): Promise<ReturnType<typeof jsonResponse>> {
+  if (auth.isAnonymous || auth.source === 'device') {
+    return jsonResponse(401, {
+      error: 'Sign in with WalkCroach to open Web Chat',
+    });
+  }
+
   const parsed = parseJsonBody<{
     title?: string;
     url?: string;
@@ -45,7 +52,7 @@ export async function handleCreateChatHandoff(
   try {
     await db.query(
       `DELETE FROM chrome_chat_handoffs
-       WHERE code_expires_at < now() OR consumed_at IS NOT NULL`,
+       WHERE code_expires_at < now()`,
     );
     await db.query(
       `INSERT INTO chrome_chat_handoffs (
@@ -72,9 +79,11 @@ export async function handleCreateChatHandoff(
 }
 
 /**
- * GET /chrome/v1/chat-handoff/:code — public one-time consume for Web Chat.
+ * GET /chrome/v1/chat-handoff/:code — authenticated, owner-bound, idempotent
+ * within TTL (StrictMode / remount safe).
  */
 export async function handleConsumeChatHandoff(
+  auth: AuthContext,
   codeParam: string,
 ): Promise<ReturnType<typeof jsonResponse>> {
   const code = codeParam?.trim();
@@ -91,18 +100,17 @@ export async function handleConsumeChatHandoff(
       question: string | null;
     }>(
       `UPDATE chrome_chat_handoffs
-       SET consumed_at = now()
+       SET consumed_at = COALESCE(consumed_at, now())
        WHERE code = $1
-         AND consumed_at IS NULL
+         AND owner_id = $2
          AND code_expires_at > now()
        RETURNING title, url, extract_text, question`,
-      [code],
+      [code, auth.ownerId],
     );
     const row = rows[0];
     if (!row) {
       return jsonResponse(404, { error: 'handoff not found or expired' });
     }
-    await db.query(`DELETE FROM chrome_chat_handoffs WHERE code = $1`, [code]);
     metricLog('chrome.chat.handoff_consume', { ok: true });
     return jsonResponse(200, {
       title: row.title,
