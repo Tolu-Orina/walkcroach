@@ -146,6 +146,16 @@ body {
   letter-spacing: -0.03em;
 }
 
+/* Chat assistant markdown — light typography without @tailwindcss/typography */
+.chat-md > :first-child {
+  margin-top: 0;
+}
+
+.chat-md input[type='checkbox'] {
+  margin-right: 0.4rem;
+  accent-color: var(--color-signal);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

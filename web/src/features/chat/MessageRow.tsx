@@ -88,7 +88,7 @@ export function MessageRow({ msg, streaming, saveContext }: MessageRowProps) {
       <div className="min-w-0 flex-1 pt-0.5 text-[15px] leading-relaxed">
         <MarkdownContent
           text={msg.content}
-          streaming={isStreaming && !msg.content}
+          streaming={isStreaming}
           saveContext={isStreaming ? undefined : saveContext}
         />
       </div>

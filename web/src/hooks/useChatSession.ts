@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, startTransition } from 'react';
 import {
   createSession,
   ensureChatWorkspace,
@@ -133,16 +133,21 @@ export function useChatSession(opts?: {
         if (event.type === 'token') {
           assistantBuf.current += event.text;
           const text = assistantBuf.current;
-          setMessages((prev) => {
-            const withoutStream = prev.filter((m) => m.id !== 'stream-assistant');
-            return [
-              ...withoutStream,
-              {
-                id: 'stream-assistant',
-                role: 'assistant' as const,
-                content: text,
-              },
-            ];
+          // Interruptible updates keep the composer responsive under fast streams.
+          startTransition(() => {
+            setMessages((prev) => {
+              const withoutStream = prev.filter(
+                (m) => m.id !== 'stream-assistant',
+              );
+              return [
+                ...withoutStream,
+                {
+                  id: 'stream-assistant',
+                  role: 'assistant' as const,
+                  content: text,
+                },
+              ];
+            });
           });
         } else if (event.type === 'error') {
           setMessages((prev) => [

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, startTransition } from 'react';
 import {
   createSession,
   getLatestSession,
@@ -141,15 +141,17 @@ export function useAgentSession(
         if (event.type === 'token') {
           assistantBuf.current += event.text;
           const text = assistantBuf.current;
-          setMessages((prev) => {
-            const last = prev[prev.length - 1];
-            if (last?.role === 'assistant' && last.id.startsWith('stream-')) {
-              return [...prev.slice(0, -1), { ...last, content: text }];
-            }
-            return [
-              ...prev,
-              { id: `stream-${uid()}`, role: 'assistant', content: text },
-            ];
+          startTransition(() => {
+            setMessages((prev) => {
+              const last = prev[prev.length - 1];
+              if (last?.role === 'assistant' && last.id.startsWith('stream-')) {
+                return [...prev.slice(0, -1), { ...last, content: text }];
+              }
+              return [
+                ...prev,
+                { id: `stream-${uid()}`, role: 'assistant', content: text },
+              ];
+            });
           });
         } else if (event.type === 'memory_recalled') {
           setMessages((prev) => [
