@@ -8,6 +8,8 @@ const apiBase =
 const privacyUrl =
   process.env.WALKCROACH_PRIVACY_URL ??
   'http://localhost:5173/chrome-privacy.html';
+const webUrl =
+  process.env.WALKCROACH_WEB_URL ?? 'http://localhost:5173';
 
 if (requireProdEnv && !process.env.WALKCROACH_API_BASE) {
   throw new Error(
@@ -19,16 +21,22 @@ if (requireProdEnv && !process.env.WALKCROACH_PRIVACY_URL) {
     'WALKCROACH_PRIVACY_URL must be set for production Chrome extension builds',
   );
 }
+if (requireProdEnv && !process.env.WALKCROACH_WEB_URL) {
+  throw new Error(
+    'WALKCROACH_WEB_URL must be set for production Chrome extension builds',
+  );
+}
 if (requireProdEnv) {
-  if (!apiBase.startsWith('https://') || apiBase.includes('localhost')) {
-    throw new Error(
-      'WALKCROACH_API_BASE must be an https production URL (not localhost)',
-    );
-  }
-  if (!privacyUrl.startsWith('https://') || privacyUrl.includes('localhost')) {
-    throw new Error(
-      'WALKCROACH_PRIVACY_URL must be an https production URL (not localhost)',
-    );
+  for (const [label, value] of [
+    ['WALKCROACH_API_BASE', apiBase],
+    ['WALKCROACH_PRIVACY_URL', privacyUrl],
+    ['WALKCROACH_WEB_URL', webUrl],
+  ] as const) {
+    if (!value.startsWith('https://') || value.includes('localhost')) {
+      throw new Error(
+        `${label} must be an https production URL (not localhost)`,
+      );
+    }
   }
 }
 
@@ -41,9 +49,6 @@ function apiHostPermission(base: string): string {
 const apiHost = apiHostPermission(apiBase);
 
 // https://wxt.dev/api/config.html
-// Path B: no page hosts / no content_scripts. API host is required so the
-// side panel can fetch the WalkCroach Chrome BFF (CORS otherwise blocks
-// chrome-extension:// origins when ACAO is locked to the web SPA).
 export default defineConfig({
   modules: ['@wxt-dev/module-react'],
   manifest: {
@@ -63,6 +68,7 @@ export default defineConfig({
     define: {
       __WALKCROACH_API_BASE__: JSON.stringify(apiBase),
       __WALKCROACH_PRIVACY_URL__: JSON.stringify(privacyUrl),
+      __WALKCROACH_WEB_URL__: JSON.stringify(webUrl),
     },
   }),
 });

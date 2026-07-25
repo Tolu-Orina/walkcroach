@@ -17,10 +17,37 @@ function setupChrome() {
         set: vi.fn(async (items: Record<string, unknown>) => {
           Object.assign(storage, items);
         }),
+        remove: vi.fn(async (keys: string | string[]) => {
+          const list = Array.isArray(keys) ? keys : [keys];
+          for (const k of list) delete storage[k];
+        }),
       } as unknown as chrome.storage.LocalStorageArea,
-      session: {} as chrome.storage.SessionStorageArea,
+      session: {
+        get: vi.fn(async (keys: string | string[] | Record<string, unknown>) => {
+          const list = Array.isArray(keys)
+            ? keys
+            : typeof keys === 'string'
+              ? [keys]
+              : Object.keys(keys);
+          const result: Record<string, unknown> = {};
+          for (const k of list) {
+            if (k in storage) result[k] = storage[k];
+          }
+          return result;
+        }),
+        set: vi.fn(async (items: Record<string, unknown>) => {
+          Object.assign(storage, items);
+        }),
+        remove: vi.fn(async (keys: string | string[]) => {
+          const list = Array.isArray(keys) ? keys : [keys];
+          for (const k of list) delete storage[k];
+        }),
+      } as unknown as chrome.storage.SessionStorageArea,
     },
-    runtime: { id: 'ext-id' },
+    runtime: { id: 'abcdefghijklmnopabcdefghijklmnop' },
+    tabs: {
+      create: vi.fn(async () => ({ id: 1 })),
+    } as unknown as typeof chrome.tabs,
     permissions: {} as typeof chrome.permissions,
   } as unknown as typeof chrome;
 }
@@ -220,6 +247,38 @@ describe('ensureDeviceSession', () => {
     const session = await ensureDeviceSession(createSession);
     expect(session.accessToken).toBe('minted-tok');
     expect(createSession).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('chromeRedirectUri', () => {
+  it('builds auth.html redirect for this extension id', async () => {
+    const { chromeRedirectUri } = await import('./auth');
+    expect(chromeRedirectUri()).toBe(
+      'chrome-extension://abcdefghijklmnopabcdefghijklmnop/auth.html',
+    );
+  });
+});
+
+describe('startWebSignIn', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it('stores pending oauth and opens WalkCroach connect tab', async () => {
+    const { startWebSignIn } = await import('./auth');
+    const url = await startWebSignIn('https://walkcroach.example');
+    expect(url).toContain('/connect/chrome?');
+    expect(url).toContain('state=');
+    expect(url).toContain(
+      encodeURIComponent(
+        'chrome-extension://abcdefghijklmnopabcdefghijklmnop/auth.html',
+      ),
+    );
+    expect(chrome.tabs.create).toHaveBeenCalled();
+    expect(storage['wc_oauth_pending']).toMatchObject({
+      redirectUri:
+        'chrome-extension://abcdefghijklmnopabcdefghijklmnop/auth.html',
+    });
   });
 });
 

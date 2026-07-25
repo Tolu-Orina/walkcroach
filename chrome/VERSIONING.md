@@ -16,4 +16,4 @@ WalkCroach Chrome uses **semver** in `package.json` → WXT embeds it in the ext
 4. Production builds must set `WALKCROACH_API_BASE` to the live API stage URL (never localhost).
 5. Use `npm run zip:prod` for store uploads (fail-closed HTTPS bake + localhost scan).
 
-**Current store line: `0.1.4`** (hotfixes API host permission after 0.1.3 public approval).
+**Current store line: `0.1.5`** (unreleased: Cognito connect + P1/P2; deploy before bumping further).

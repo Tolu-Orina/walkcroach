@@ -11,12 +11,14 @@ import {
   listWorkspaces,
   PRIVACY_URL,
   saveCapture,
+  createChatHandoff,
   streamAsk,
   streamDraft,
   streamPropose,
   streamRecall,
   streamSummarize,
   trackPrice,
+  WEB_APP_URL,
   type AgentEvent,
   type Capture,
   type WebProject,
@@ -24,6 +26,8 @@ import {
 } from '../../lib/api';
 import {
   ensureDeviceSession,
+  signOutToDevice,
+  startWebSignIn,
   upgradeToCognito,
   type StoredSession,
 } from '../../lib/auth';
@@ -51,6 +55,7 @@ export function App() {
   const [streamText, setStreamText] = useState('');
   const [streaming, setStreaming] = useState(false);
   const [question, setQuestion] = useState('');
+  const [webSearch, setWebSearch] = useState(false);
   const [recallQ, setRecallQ] = useState('');
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [activeWs, setActiveWs] = useState<string>('');
@@ -132,6 +137,19 @@ export function App() {
 
   useEffect(() => {
     void bootstrap();
+  }, [bootstrap]);
+
+  // Web connect finishes on auth.html — refresh side panel when session flips to Cognito.
+  useEffect(() => {
+    const onChanged: Parameters<
+      typeof chrome.storage.onChanged.addListener
+    >[0] = (changes, area) => {
+      if (area !== 'local') return;
+      if (!changes.wc_auth_source && !changes.wc_access_token) return;
+      void bootstrap();
+    };
+    chrome.storage.onChanged.addListener(onChanged);
+    return () => chrome.storage.onChanged.removeListener(onChanged);
   }, [bootstrap]);
 
   const loadExtract = useCallback(async () => {
@@ -258,8 +276,43 @@ export function App() {
     const page = await preparePage();
     if (!page) return;
     await runStream(
-      streamAsk(token, { ...page, question: question.trim() }, beginStream()),
+      streamAsk(
+        token,
+        {
+          ...page,
+          question: question.trim(),
+          webSearchEnabled: webSearch,
+        },
+        beginStream(),
+      ),
     );
+  };
+
+  const onOpenInWebChat = async () => {
+    if (!token) return;
+    const page = await preparePage();
+    if (!page) return;
+    try {
+      setError(null);
+      const { code } = await createChatHandoff(token, {
+        title: page.title,
+        url: page.url,
+        extractedText: page.extractedText,
+        question: question.trim() || undefined,
+      });
+      const target = new URL('/app/chat', WEB_APP_URL.replace(/\/$/, ''));
+      target.searchParams.set('handoff', code);
+      if (question.trim()) {
+        target.searchParams.set('q', question.trim().slice(0, 400));
+      }
+      if (webSearch) target.searchParams.set('webSearch', '1');
+      await chrome.tabs.create({ url: target.toString() });
+      setSaveNote('Opened WalkCroach Web Chat with this page context.');
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : 'Could not open Web Chat',
+      );
+    }
   };
 
   const onDraft = async () => {
@@ -657,6 +710,12 @@ export function App() {
               Save{activeWsName ? ` → ${activeWsName}` : ''}
             </button>
           </div>
+          {activeLinkedProjectId && linkedProjectName && (
+            <p className="muted small">
+              Draft uses standing instructions from linked project “
+              {linkedProjectName}”.
+            </p>
+          )}
           <div className="ask-row">
             <input
               value={question}
@@ -667,6 +726,22 @@ export function App() {
               Ask
             </button>
           </div>
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={webSearch}
+              onChange={(e) => setWebSearch(e.target.checked)}
+            />
+            <span>Include web search</span>
+          </label>
+          <button
+            type="button"
+            className="link"
+            disabled={streaming}
+            onClick={() => void onOpenInWebChat()}
+          >
+            Open in Web Chat
+          </button>
           {proposalFields && (
             <div className="proposal">
               <h2>Review before saving</h2>
@@ -934,32 +1009,88 @@ export function App() {
             Session: {session?.ownerId ?? '—'} ({session?.source ?? 'device'})
           </p>
           {session?.source === 'device' && (
-            <div className="ask-row">
-              <input
-                id="cognito-token"
-                placeholder="Paste Cognito access token to link account"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    const v = (e.target as HTMLInputElement).value.trim();
-                    if (!v) return;
-                    void upgradeToCognito(v)
-                      .then(async (s) => {
-                        setSession(s);
-                        setError(null);
-                        (e.target as HTMLInputElement).value = '';
-                        const ws = await listWorkspaces(s.accessToken);
-                        setWorkspaces(ws);
-                        await refreshWebProjects(s.accessToken, s.source);
-                      })
-                      .catch((err) =>
-                        setError(
-                          err instanceof Error ? err.message : 'upgrade failed',
-                        ),
-                      );
-                  }
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  void startWebSignIn()
+                    .then(() =>
+                      setSaveNote(
+                        'Complete sign-in in the WalkCroach tab that just opened.',
+                      ),
+                    )
+                    .catch((err) =>
+                      setError(
+                        err instanceof Error ? err.message : 'sign-in failed',
+                      ),
+                    );
                 }}
-              />
-            </div>
+              >
+                Sign in with WalkCroach
+              </button>
+              <p className="muted small">
+                Opens walkcroach.conquerorfoundation.com — same login as Web and
+                IDE. Your device captures merge into your account after you
+                finish.
+              </p>
+              <details className="small">
+                <summary>Advanced: paste Cognito token</summary>
+                <div className="ask-row">
+                  <input
+                    id="cognito-token"
+                    placeholder="Paste Cognito access or ID token"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        const v = (e.target as HTMLInputElement).value.trim();
+                        if (!v) return;
+                        void upgradeToCognito(v)
+                          .then(async (s) => {
+                            setSession(s);
+                            setError(null);
+                            (e.target as HTMLInputElement).value = '';
+                            const ws = await listWorkspaces(s.accessToken);
+                            setWorkspaces(ws);
+                            await refreshWebProjects(s.accessToken, s.source);
+                          })
+                          .catch((err) =>
+                            setError(
+                              err instanceof Error
+                                ? err.message
+                                : 'upgrade failed',
+                            ),
+                          );
+                      }
+                    }}
+                  />
+                </div>
+              </details>
+            </>
+          )}
+          {session?.source === 'cognito' && (
+            <button
+              type="button"
+              className="link"
+              onClick={() =>
+                void signOutToDevice(createDeviceSession)
+                  .then(async (s) => {
+                    setSession(s);
+                    setWebProjects([]);
+                    setLinkHint(
+                      'Sign in on the Trust tab to link a WalkCroach Web project.',
+                    );
+                    const ws = await listWorkspaces(s.accessToken);
+                    setWorkspaces(ws);
+                    setError(null);
+                  })
+                  .catch((err) =>
+                    setError(
+                      err instanceof Error ? err.message : 'sign-out failed',
+                    ),
+                  )
+              }
+            >
+              Sign out (back to device session)
+            </button>
           )}
           <button
             type="button"

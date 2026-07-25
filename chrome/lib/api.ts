@@ -1,5 +1,6 @@
 declare const __WALKCROACH_API_BASE__: string;
 declare const __WALKCROACH_PRIVACY_URL__: string;
+declare const __WALKCROACH_WEB_URL__: string;
 
 export const API_BASE =
   typeof __WALKCROACH_API_BASE__ !== 'undefined'
@@ -11,6 +12,12 @@ export const PRIVACY_URL =
   typeof __WALKCROACH_PRIVACY_URL__ !== 'undefined'
     ? __WALKCROACH_PRIVACY_URL__
     : 'http://localhost:5173/chrome-privacy.html';
+
+/** WalkCroach Web origin for /connect/chrome sign-in. */
+export const WEB_APP_URL =
+  typeof __WALKCROACH_WEB_URL__ !== 'undefined'
+    ? __WALKCROACH_WEB_URL__
+    : 'http://localhost:5173';
 
 export type DeviceSessionResponse = {
   accessToken: string;
@@ -72,6 +79,7 @@ export type PagePayload = {
   captureType?: string;
   fields?: string[];
   label?: string;
+  webSearchEnabled?: boolean;
 };
 
 function chromePath(path: string): string {
@@ -405,4 +413,48 @@ export async function upgradeAuth(
     merged: boolean;
     ownerId?: string;
   };
+}
+
+export type OauthTokenResponse = {
+  access_token: string;
+  refresh_token?: string;
+  id_token?: string;
+  expires_in?: number;
+  token_type?: string;
+};
+
+/** Public: exchange one-time Web→Chrome connect code for Cognito tokens. */
+export async function exchangeOauthToken(body: {
+  code: string;
+  state: string;
+  redirectUri: string;
+}): Promise<OauthTokenResponse> {
+  const res = await fetch(chromePath('/oauth/token'), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    throw new Error((await res.text()) || `oauth token failed: ${res.status}`);
+  }
+  return (await res.json()) as OauthTokenResponse;
+}
+
+/** Create a one-time handoff for Open in Web Chat (page extract stays off the URL). */
+export async function createChatHandoff(
+  token: string,
+  body: {
+    title: string;
+    url: string;
+    extractedText: string;
+    question?: string;
+  },
+): Promise<{ code: string; expiresIn: number }> {
+  const res = await fetch(chromePath('/chat-handoff'), {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return (await res.json()) as { code: string; expiresIn: number };
 }

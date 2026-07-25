@@ -2,10 +2,12 @@ import {
   formatVector,
   embedText,
   streamConverse,
+  webSearch,
   type AgentEvent,
 } from '@walkcroach/agent-harness';
 import { createDbClient } from '@walkcroach/db';
 import type { AuthContext } from '../auth.js';
+import { getLinkedProjectId } from './link.js';
 import { assertRateLimit, metricLog, truncateExtract } from '../util.js';
 
 export type PageContextBody = {
@@ -17,6 +19,8 @@ export type PageContextBody = {
   question?: string;
   instruction?: string;
   tone?: string;
+  /** When true, pre-ground Ask with SearXNG hits (same provider as Web Chat). */
+  webSearchEnabled?: boolean;
 };
 
 function pageBlock(body: PageContextBody): string {
@@ -24,6 +28,18 @@ function pageBlock(body: PageContextBody): string {
   const url = body.url?.trim() || '';
   const text = truncateExtract(body.extractedText ?? '');
   return `URL: ${url}\nTitle: ${title}\n\nPage content:\n${text}`;
+}
+
+function formatSearchBlock(
+  query: string,
+  hits: Array<{ title: string; url: string; content: string }>,
+): string {
+  if (!hits.length) return '';
+  const lines = hits.map(
+    (h, i) =>
+      `[${i + 1}] ${h.title}\n${h.url}\n${(h.content || '').slice(0, 280)}`,
+  );
+  return `Web search results for "${query}":\n${lines.join('\n\n')}`;
 }
 
 export async function* streamSummarize(
@@ -80,19 +96,49 @@ export async function* streamAsk(
     yield { type: 'error', message: 'page extract too short' };
     return;
   }
+
+  let searchBlock = '';
+  const wantSearch = body.webSearchEnabled === true;
+  if (wantSearch) {
+    try {
+      const result = await webSearch(question, { limit: 5 });
+      if (result.provider === 'searxng' && result.hits.length) {
+        searchBlock = formatSearchBlock(question, result.hits);
+        metricLog('chrome.ask.web_search', {
+          hits: result.hits.length,
+          ok: true,
+        });
+      } else {
+        metricLog('chrome.ask.web_search', { hits: 0, ok: false });
+      }
+    } catch (err) {
+      metricLog('chrome.ask.web_search', {
+        ok: false,
+        error: err instanceof Error ? err.message.slice(0, 80) : 'error',
+      });
+    }
+  }
+
+  const system = searchBlock
+    ? 'You are WalkCroach. Prefer the provided page content for page-specific questions. You may also use the web search results when helpful — cite titles and URLs when you do. Be concise and practical. If neither source answers, say so.'
+    : 'You are WalkCroach. Answer using only the provided page content unless the user asks for general knowledge. Be concise and practical. If the page lacks the answer, say so.';
+
+  const userText = [
+    pageBlock({ ...body, extractedText: text }),
+    searchBlock,
+    `Question: ${question}`,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+
   const t0 = Date.now();
   let first = true;
   for await (const ev of streamConverse({
-    system:
-      'You are WalkCroach. Answer using only the provided page content unless the user asks for general knowledge. Be concise and practical. If the page lacks the answer, say so.',
+    system,
     messages: [
       {
         role: 'user',
-        content: [
-          {
-            text: `${pageBlock({ ...body, extractedText: text })}\n\nQuestion: ${question}`,
-          },
-        ],
+        content: [{ text: userText }],
       },
     ],
   })) {
@@ -118,6 +164,7 @@ export async function* streamDraft(
   const tone = body.tone?.trim() || 'professional, plain language';
   const page = truncateExtract(body.extractedText ?? '');
   let workspaceContext = '';
+  let projectContext = '';
 
   if (body.workspaceId) {
     const db = createDbClient();
@@ -148,13 +195,57 @@ export async function* streamDraft(
           )
           .join('\n');
       }
+
+      const linkedProjectId = await getLinkedProjectId(
+        db,
+        body.workspaceId,
+        auth.ownerId,
+      );
+      if (linkedProjectId) {
+        const { rows: projects } = await db.query<{
+          name: string;
+          instructions: string | null;
+          memory_summary: string | null;
+        }>(
+          `SELECT name, instructions, memory_summary
+           FROM projects
+           WHERE id = $1::uuid
+             AND owner_id = $2
+             AND deleted_at IS NULL`,
+          [linkedProjectId, auth.ownerId],
+        );
+        const project = projects[0];
+        if (project) {
+          const parts: string[] = [];
+          const standing = project.instructions?.trim();
+          if (standing) {
+            parts.push(
+              `Standing instructions for project "${project.name}" (follow these):\n${truncateExtract(standing, 4000)}`,
+            );
+          }
+          const summary = project.memory_summary?.trim();
+          if (summary) {
+            parts.push(
+              `Project memory summary:\n${truncateExtract(summary, 1500)}`,
+            );
+          }
+          projectContext = parts.join('\n\n');
+          if (projectContext) {
+            metricLog('chrome.draft.project_context', {
+              ok: true,
+              hasInstructions: Boolean(standing),
+              hasSummary: Boolean(summary),
+            });
+          }
+        }
+      }
     } finally {
       await db.close();
     }
   }
 
   for await (const ev of streamConverse({
-    system: `You are WalkCroach drafting assistance. Tone: ${tone}. Propose draft text only — never send or submit. The user will insert it manually.`,
+    system: `You are WalkCroach drafting assistance. Tone: ${tone}. Propose draft text only — never send or submit. The user will insert it manually. When project standing instructions are provided, follow them.`,
     messages: [
       {
         role: 'user',
@@ -163,6 +254,7 @@ export async function* streamDraft(
             text: [
               `Instruction: ${instruction}`,
               page ? `Current page context:\n${page}` : '',
+              projectContext ? `Linked WalkCroach project:\n${projectContext}` : '',
               workspaceContext
                 ? `Saved workspace context:\n${workspaceContext}`
                 : '',

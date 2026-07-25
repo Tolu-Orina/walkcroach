@@ -20,12 +20,17 @@ const DEFAULT_API =
   'https://awbcf4clij.execute-api.eu-west-2.amazonaws.com/v1';
 const DEFAULT_PRIVACY =
   'https://walkcroach.conquerorfoundation.com/chrome-privacy.html';
+const DEFAULT_WEB = 'https://walkcroach.conquerorfoundation.com';
 
 const apiBase = (process.env.WALKCROACH_API_BASE ?? DEFAULT_API).replace(
   /\/$/,
   '',
 );
 const privacyUrl = process.env.WALKCROACH_PRIVACY_URL ?? DEFAULT_PRIVACY;
+const webUrl = (process.env.WALKCROACH_WEB_URL ?? DEFAULT_WEB).replace(
+  /\/$/,
+  '',
+);
 
 function fail(msg) {
   console.error(`zip:prod error: ${msg}`);
@@ -53,6 +58,7 @@ function assertHttpsUrl(label, value) {
 
 assertHttpsUrl('WALKCROACH_API_BASE', apiBase);
 assertHttpsUrl('WALKCROACH_PRIVACY_URL', privacyUrl);
+assertHttpsUrl('WALKCROACH_WEB_URL', webUrl);
 
 if (!apiBase.includes('/v1')) {
   console.warn(
@@ -62,11 +68,13 @@ if (!apiBase.includes('/v1')) {
 
 console.log('zip:prod API     =', apiBase);
 console.log('zip:prod privacy =', privacyUrl);
+console.log('zip:prod web     =', webUrl);
 
 const env = {
   ...process.env,
   WALKCROACH_API_BASE: apiBase,
   WALKCROACH_PRIVACY_URL: privacyUrl,
+  WALKCROACH_WEB_URL: webUrl,
   WALKCROACH_REQUIRE_PROD_ENV: 'true',
 };
 
@@ -149,6 +157,7 @@ const textFiles = files.filter((f) =>
 );
 let sawApi = false;
 let sawPrivacy = false;
+let sawWeb = false;
 for (const f of textFiles) {
   const body = readFileSync(f, 'utf8');
   if (
@@ -160,6 +169,7 @@ for (const f of textFiles) {
   }
   if (body.includes(apiBase)) sawApi = true;
   if (body.includes(privacyUrl)) sawPrivacy = true;
+  if (body.includes(webUrl)) sawWeb = true;
 }
 
 if (!sawApi) {
@@ -167,6 +177,9 @@ if (!sawApi) {
 }
 if (!sawPrivacy) {
   fail(`baked privacy URL not found in build output: ${privacyUrl}`);
+}
+if (!sawWeb) {
+  fail(`baked Web URL not found in build output: ${webUrl}`);
 }
 
 console.log(`zip:prod OK — version ${pkg.version}`);

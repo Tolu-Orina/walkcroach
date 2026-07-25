@@ -14,7 +14,16 @@ import {
   handlePatchCapture,
 } from './captures.js';
 import { handlePriceTrack } from './price-track.js';
+import {
+  handleCreateChatHandoff,
+  handleConsumeChatHandoff,
+} from './handoff.js';
 import { handleUpgradeAuth } from './upgrade.js';
+import {
+  handleCreateSessionCode,
+  handleExchangeToken,
+  extractBearer,
+} from './oauth.js';
 import {
   handleLinkWorkspace,
   handleListMyProjects,
@@ -101,9 +110,41 @@ export async function handleChromeRest(
     return handleDeviceSession(req.body);
   }
 
+  // Public: one-time code → Cognito tokens (Web → extension handoff).
+  if (
+    req.method === 'POST' &&
+    /\/chrome\/v1\/oauth\/token\/?$/.test(path)
+  ) {
+    return handleExchangeToken(req.body);
+  }
+
+  // Public: one-time Chrome → Web Chat context consume.
+  const handoffGet = path.match(/\/chrome\/v1\/chat-handoff\/([^/]+)\/?$/);
+  if (req.method === 'GET' && handoffGet) {
+    return handleConsumeChatHandoff(handoffGet[1]!);
+  }
+
   const auth = await requireAuth(req.headers);
   if ('error' in auth) {
     return jsonResponse(auth.status, { error: auth.error });
+  }
+
+  if (
+    req.method === 'POST' &&
+    /\/chrome\/v1\/oauth\/session-code\/?$/.test(path)
+  ) {
+    const bearer = extractBearer(req.headers);
+    if (!bearer) {
+      return jsonResponse(401, { error: 'missing bearer' });
+    }
+    return handleCreateSessionCode(auth, req.body, bearer);
+  }
+
+  if (
+    req.method === 'POST' &&
+    /\/chrome\/v1\/chat-handoff\/?$/.test(path)
+  ) {
+    return handleCreateChatHandoff(auth, req.body);
   }
 
   if (req.method === 'GET' && /\/chrome\/v1\/me\/projects\/?$/.test(path)) {

@@ -1,10 +1,17 @@
-import { upgradeAuth } from './api';
+import {
+  exchangeOauthToken,
+  upgradeAuth,
+  WEB_APP_URL,
+} from './api';
 
 const DEVICE_KEY = 'wc_device_key';
 const ACCESS_TOKEN = 'wc_access_token';
 const OWNER_ID = 'wc_owner_id';
 const AUTH_SOURCE = 'wc_auth_source'; // 'device' | 'cognito'
 const TOKEN_EXPIRES_AT = 'wc_token_expires_at';
+const REFRESH_TOKEN = 'wc_refresh_token';
+const ID_TOKEN = 'wc_id_token';
+const OAUTH_PENDING = 'wc_oauth_pending';
 
 export type StoredSession = {
   accessToken: string;
@@ -15,7 +22,25 @@ export type StoredSession = {
   expiresAt?: number;
 };
 
+export type OauthPending = {
+  state: string;
+  redirectUri: string;
+  createdAt: number;
+};
+
 let ensureInFlight: Promise<StoredSession> | null = null;
+
+export function chromeRedirectUri(): string {
+  return `chrome-extension://${chrome.runtime.id}/auth.html`;
+}
+
+export function generateOAuthState(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  let bin = '';
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
 
 export async function loadSession(): Promise<StoredSession | null> {
   const data = await chrome.storage.local.get([
@@ -72,8 +97,6 @@ export async function ensureDeviceSession(
         existing.expiresAt &&
         existing.expiresAt < Date.now() + 60_000
       ) {
-        // Access token expired / about to — fall back to device session so
-        // the user can still use Chrome until they paste a fresh Cognito token.
         const refreshed = await createSession(existing.deviceKey);
         const session: StoredSession = {
           deviceKey: existing.deviceKey,
@@ -126,8 +149,98 @@ export async function ensureDeviceSession(
 }
 
 /**
- * After Cognito sign-in: merge anon workspaces/captures onto Cognito sub,
- * then store Cognito access token for subsequent API calls (NFR-C06 / PA.19).
+ * Open WalkCroach Web /connect/chrome (same pattern as IDE).
+ * Returns after the connect tab is opened; completion happens on auth.html.
+ */
+export async function startWebSignIn(webAppUrl = WEB_APP_URL): Promise<string> {
+  if (!webAppUrl) {
+    throw new Error('WalkCroach Web URL is not configured.');
+  }
+  const state = generateOAuthState();
+  const redirectUri = chromeRedirectUri();
+  const pending: OauthPending = {
+    state,
+    redirectUri,
+    createdAt: Date.now(),
+  };
+  await chrome.storage.session.set({ [OAUTH_PENDING]: pending });
+
+  const authUrl = new URL('/connect/chrome', webAppUrl.replace(/\/$/, ''));
+  authUrl.searchParams.set('state', state);
+  authUrl.searchParams.set('redirect_uri', redirectUri);
+  await chrome.tabs.create({ url: authUrl.toString() });
+  return authUrl.toString();
+}
+
+/**
+ * Finish Web → Chrome handoff on auth.html (code+state only).
+ * Merges anon device ownership via /auth/upgrade.
+ */
+export async function completeWebSignIn(
+  code: string,
+  state: string,
+): Promise<StoredSession> {
+  const raw = await chrome.storage.session.get(OAUTH_PENDING);
+  const pending = raw[OAUTH_PENDING] as OauthPending | undefined;
+  if (!pending?.state || !pending.redirectUri) {
+    throw new Error('Sign-in session expired. Open Trust and try again.');
+  }
+  if (pending.state !== state) {
+    throw new Error('Invalid callback (state mismatch).');
+  }
+  if (Date.now() - pending.createdAt > 5 * 60_000) {
+    await chrome.storage.session.remove(OAUTH_PENDING);
+    throw new Error('Sign-in timed out. Open Trust and try again.');
+  }
+
+  const tokens = await exchangeOauthToken({
+    code,
+    state,
+    redirectUri: pending.redirectUri,
+  });
+
+  const existing = await loadSession();
+  if (!existing?.deviceKey || !existing.ownerId) {
+    throw new Error('No device session to upgrade. Reopen the side panel first.');
+  }
+
+  // Prefer ID token (matches Web/IDE); fall back to access_token.
+  const cognitoToken = (
+    tokens.id_token ??
+    tokens.access_token
+  ).trim();
+  if (!cognitoToken) {
+    throw new Error('Connect response missing tokens.');
+  }
+
+  const result = await upgradeAuth(
+    cognitoToken,
+    existing.ownerId,
+    existing.deviceKey,
+  );
+
+  const expiresAt =
+    Date.now() +
+    Math.max(60, tokens.expires_in ?? 55 * 60) * 1000;
+
+  const session: StoredSession = {
+    deviceKey: existing.deviceKey,
+    accessToken: cognitoToken,
+    ownerId: result.ownerId ?? existing.ownerId,
+    source: 'cognito',
+    expiresAt,
+  };
+  await saveSession(session);
+  await chrome.storage.local.set({
+    [REFRESH_TOKEN]: tokens.refresh_token ?? null,
+    [ID_TOKEN]: tokens.id_token ?? cognitoToken,
+  });
+  await chrome.storage.session.remove(OAUTH_PENDING);
+  return session;
+}
+
+/**
+ * After Cognito sign-in (paste fallback): merge anon workspaces/captures.
  */
 export async function upgradeToCognito(
   cognitoAccessToken: string,
@@ -141,7 +254,6 @@ export async function upgradeToCognito(
     existing.ownerId,
     existing.deviceKey,
   );
-  // Cognito access tokens are typically ~1h; store a conservative expiry.
   const expiresAt = Date.now() + 55 * 60 * 1000;
   const session: StoredSession = {
     deviceKey: existing.deviceKey,
@@ -149,6 +261,30 @@ export async function upgradeToCognito(
     ownerId: result.ownerId ?? existing.ownerId,
     source: 'cognito',
     expiresAt,
+  };
+  await saveSession(session);
+  return session;
+}
+
+/** Drop Cognito credentials; keep deviceKey so a fresh device session can mint. */
+export async function signOutToDevice(
+  createSession: (deviceKey?: string) => Promise<{
+    accessToken: string;
+    ownerId: string;
+    deviceKey?: string;
+    expiresIn?: number;
+  }>,
+): Promise<StoredSession> {
+  const existing = await loadSession();
+  const deviceKey = existing?.deviceKey ?? mintClientDeviceKey();
+  await chrome.storage.local.remove([REFRESH_TOKEN, ID_TOKEN]);
+  const minted = await createSession(deviceKey);
+  const session: StoredSession = {
+    deviceKey: minted.deviceKey ?? deviceKey,
+    accessToken: minted.accessToken,
+    ownerId: minted.ownerId,
+    source: 'device',
+    expiresAt: Date.now() + (minted.expiresIn ?? 30 * 24 * 3600) * 1000,
   };
   await saveSession(session);
   return session;

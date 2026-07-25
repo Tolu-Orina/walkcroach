@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WalkCroach Sign-in</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 2rem;
+        color: #1a2e1a;
+        background: #f4f7f4;
+      }
+      .card {
+        max-width: 28rem;
+        margin: 0 auto;
+        padding: 1.5rem;
+        background: #fff;
+        border: 1px solid #d5e0d5;
+        border-radius: 8px;
+      }
+      .err {
+        color: #b42318;
+      }
+      .ok {
+        color: #1a7f37;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>WalkCroach</h1>
+      <p id="status">Finishing sign-in…</p>
+    </div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

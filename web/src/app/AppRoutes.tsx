@@ -10,6 +10,7 @@ import { ProjectPageSkeleton } from '../components/Skeleton';
 import { peekPendingPrompt, projectNameFromPrompt } from '../lib/pending-prompt';
 import { AppsHubPage } from './AppsHubPage';
 import { AuthGithubCallbackPage } from './AuthGithubCallbackPage';
+import { ConnectChromePage } from './auth/ConnectChromePage';
 import { ConnectIdePage } from './auth/ConnectIdePage';
 import { ForgotPasswordPage } from './auth/ForgotPasswordPage';
 import { ResetPasswordPage } from './auth/ResetPasswordPage';
@@ -164,6 +165,7 @@ export function AppRoutes() {
       <Route path="/signin" element={<SignInPage />} />
       <Route path="/signup" element={<SignUpPage />} />
       <Route path="/connect/ide" element={<ConnectIdePage />} />
+      <Route path="/connect/chrome" element={<ConnectChromePage />} />
       <Route path="/verify" element={<VerifyEmailPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />

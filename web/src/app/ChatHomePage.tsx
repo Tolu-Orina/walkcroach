@@ -1,20 +1,34 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
+import {
+  Link,
+  useLocation,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from 'react-router-dom';
 import { useAuth } from '../auth/useAuth';
 import { ChatComposer } from '../features/chat/ChatComposer';
 import { CHAT_TEMPLATES } from '../features/chat/chatTemplates';
 import { MessageRow, StreamingSkeleton } from '../features/chat/MessageRow';
 import { useChatSession } from '../hooks/useChatSession';
 import { useShell } from '../hooks/useShell';
+import { fetchChromeChatHandoff } from '../api/client';
+import {
+  consumePendingChatContext,
+  formatChatHandoffDraft,
+  setPendingChatContext,
+} from '../lib/pending-chat-context';
 
 /**
  * Chat home — welcome + templates when empty; thread when active.
  * Recents live in the expandable sidebar; a compact strip remains when collapsed.
+ * Supports Chrome deep-link: /app/chat?handoff=<code>&q=<short>&webSearch=1
  */
 export function ChatHomePage() {
   const { chatId } = useParams<{ chatId?: string }>();
   const location = useLocation();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
   const { expanded } = useShell();
   const {
@@ -34,6 +48,7 @@ export function ChatHomePage() {
   } = useChatSession();
 
   const [draft, setDraft] = useState<string | undefined>(undefined);
+  const handoffConsumed = useRef(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const displayName =
     user?.displayName?.split(/\s+/)[0] ||
@@ -43,6 +58,48 @@ export function ChatHomePage() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [messages, streaming]);
+
+  // Chrome extension /connect handoff → composer draft
+  useEffect(() => {
+    if (status !== 'ready' || handoffConsumed.current) return;
+
+    const handoff = searchParams.get('handoff')?.trim();
+    const q = searchParams.get('q')?.trim();
+    const webSearchParam = searchParams.get('webSearch');
+
+    if (webSearchParam === '1') setWebSearch(true);
+    if (webSearchParam === '0') setWebSearch(false);
+
+    if (!handoff && !q) {
+      const pending = consumePendingChatContext();
+      if (pending) {
+        handoffConsumed.current = true;
+        setDraft(formatChatHandoffDraft(pending));
+      }
+      return;
+    }
+
+    handoffConsumed.current = true;
+    void (async () => {
+      let draftText = q ?? '';
+      if (handoff) {
+        try {
+          const ctx = await fetchChromeChatHandoff(handoff);
+          setPendingChatContext(ctx);
+          draftText = formatChatHandoffDraft(ctx);
+          if (!draftText && q) draftText = q;
+        } catch {
+          if (q) draftText = q;
+        }
+      }
+      if (draftText) setDraft(draftText);
+      const next = new URLSearchParams(searchParams);
+      next.delete('handoff');
+      next.delete('q');
+      next.delete('webSearch');
+      setSearchParams(next, { replace: true });
+    })();
+  }, [status, searchParams, setSearchParams, setWebSearch]);
 
   useEffect(() => {
     const state = location.state as { newChat?: boolean } | null;

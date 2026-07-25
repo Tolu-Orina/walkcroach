@@ -20,6 +20,10 @@ import type {
 } from '../api/types';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { BuilderIconLink } from '../features/builder/BuilderIconLink';
+import {
+  displayMemoryText,
+  memorySurfaceLabel,
+} from '../features/memory/memoryDisplay';
 
 /**
  * Project home — chat compilation + knowledge container.
@@ -44,6 +48,9 @@ export function ProjectHomePage() {
   const [addingDoc, setAddingDoc] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [memoryFilter, setMemoryFilter] = useState<'all' | 'chrome' | 'other'>(
+    'all',
+  );
   const fileRef = useRef<HTMLInputElement>(null);
   const loadGen = useRef(0);
 
@@ -440,21 +447,66 @@ export function ProjectHomePage() {
           {memoryEntries.length === 0 ? (
             <p className="text-sm text-mist">
               No memory entries yet — preferences appear here as you chat.
+              Saves from WalkCroach Chrome also show up here when this project
+              is linked.
             </p>
           ) : (
-            <ul className="space-y-2">
-              {memoryEntries.slice(0, 12).map((e) => (
-                <li
-                  key={e.id}
-                  className="border-l-2 border-signal/40 pl-3 text-sm text-paper/90"
-                >
-                  <span className="text-[10px] uppercase tracking-wider text-mist">
-                    {e.kind} · {e.sourceSurface}
-                  </span>
-                  <p className="mt-0.5 line-clamp-3 text-mist">{e.text}</p>
-                </li>
-              ))}
-            </ul>
+            <>
+              <div className="flex flex-wrap gap-2">
+                {(
+                  [
+                    ['all', 'All'],
+                    ['chrome', 'From Chrome'],
+                    ['other', 'Other'],
+                  ] as const
+                ).map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setMemoryFilter(id)}
+                    className={
+                      memoryFilter === id
+                        ? 'btn-ghost text-xs ring-1 ring-signal/50'
+                        : 'btn-ghost text-xs'
+                    }
+                  >
+                    {label}
+                    {id === 'chrome'
+                      ? ` (${memoryEntries.filter((e) => e.sourceSurface === 'chrome').length})`
+                      : ''}
+                  </button>
+                ))}
+              </div>
+              <ul className="space-y-2">
+                {memoryEntries
+                  .filter((e) => {
+                    if (memoryFilter === 'chrome')
+                      return e.sourceSurface === 'chrome';
+                    if (memoryFilter === 'other')
+                      return e.sourceSurface !== 'chrome';
+                    return true;
+                  })
+                  .slice(0, 12)
+                  .map((e) => (
+                    <li
+                      key={e.id}
+                      className={
+                        e.sourceSurface === 'chrome'
+                          ? 'border-l-2 border-signal pl-3 text-sm text-paper/90'
+                          : 'border-l-2 border-signal/40 pl-3 text-sm text-paper/90'
+                      }
+                    >
+                      <span className="text-[10px] uppercase tracking-wider text-mist">
+                        {e.kind} · {memorySurfaceLabel(e.sourceSurface)}
+                        {e.sourceSurface === 'chrome' ? ' · browser save' : ''}
+                      </span>
+                      <p className="mt-0.5 line-clamp-3 text-mist">
+                        {displayMemoryText(e.text, e.sourceSurface)}
+                      </p>
+                    </li>
+                  ))}
+              </ul>
+            </>
           )}
         </section>
 

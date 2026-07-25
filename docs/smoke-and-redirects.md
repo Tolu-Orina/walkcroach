@@ -46,6 +46,8 @@ shows “E2B cloud”). Otherwise the client uses **local WebContainer** preview
 | `/app/projects/:id/builder` | Builder (auth) |
 | `/signin` / `/signup` | Auth cards |
 | `/connect/ide` | IDE connect flow |
+| `/connect/chrome` | Chrome extension connect flow |
+| `/app/chat?handoff=&q=` | Chrome → Web Chat context handoff |
 
 After CodePipeline / infra deploy:
 

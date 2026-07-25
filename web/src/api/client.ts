@@ -722,3 +722,16 @@ export async function listMyApps(): Promise<MyAppDeployment[]> {
   const data = await parseJson<{ apps: MyAppDeployment[] }>(res);
   return data.apps ?? [];
 }
+
+/** Public one-time Chrome → Chat handoff (no auth; code is the secret). */
+export async function fetchChromeChatHandoff(code: string): Promise<{
+  title?: string | null;
+  url?: string | null;
+  extractedText: string;
+  question?: string | null;
+}> {
+  const res = await fetch(
+    `${API_URL}/chrome/v1/chat-handoff/${encodeURIComponent(code)}`,
+  );
+  return parseJson(res);
+}

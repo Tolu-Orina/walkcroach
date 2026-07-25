@@ -42,6 +42,7 @@ export async function ensureRuntimeSecrets(): Promise<void> {
     chrome_device_signing_key?: string;
     walkcroach_api_key?: string;
     aws_bearer_token_bedrock?: string;
+    searxng_url?: string;
   };
 
   applySecret(secret.crdb_connection_string, 'CRDB_CONNECTION_STRING');
@@ -53,6 +54,8 @@ export async function ensureRuntimeSecrets(): Promise<void> {
   if (!process.env.CHROME_DEVICE_SIGNING_KEY && secret.walkcroach_api_key) {
     process.env.CHROME_DEVICE_SIGNING_KEY = secret.walkcroach_api_key;
   }
+
+  applySecret(secret.searxng_url, 'SEARXNG_URL');
 
   if (
     secret.aws_bearer_token_bedrock &&
