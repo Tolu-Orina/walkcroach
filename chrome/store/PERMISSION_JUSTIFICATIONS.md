@@ -7,11 +7,12 @@ manifest, remove it from the dashboard before upload.
 | Permission | Justification |
 |------------|---------------|
 | `storage` | Persist device session tokens, workspace selection, and auth source locally so the side panel works across browser restarts without re-prompting on every open. |
-| `activeTab` | Read the currently focused tab only after the user opens WalkCroach from the toolbar (or side panel action) so we can extract the page they asked about—no broad always-on tab or host access. |
+| `activeTab` | Read the currently focused tab only after the user opens WalkCroach from the toolbar so we can extract the page they asked about—no broad always-on tab or page-host access. |
 | `scripting` | Run a one-shot page extract (and optional draft insert) in the active tab via `scripting.executeScript` when the user requests summarize/save/insert. |
 | `sidePanel` | Host the main WalkCroach UI in Chrome’s Side Panel (primary UX), opened from the toolbar action. |
+| Host permission for WalkCroach API only (`https://<api-host>/*`, e.g. `https://awbcf4clij.execute-api.eu-west-2.amazonaws.com/*`) | Call our HTTPS Chrome backend (device session, summarize, ask, draft, save, recall). **Not** used to read arbitrary websites. Page reading uses `activeTab` + `scripting` after a toolbar gesture. |
 
-**Host permissions:** none required and none optional. WalkCroach does **not** use `https://*/*`, `http://*/*`, or `<all_urls>`. Page access is limited to the active tab after a toolbar gesture (`activeTab` + `scripting`).
+**Not requested:** `https://*/*`, `http://*/*`, `<all_urls>`, or content scripts. We do not inject a persistent FAB or grant site-wide browsing access.
 
 ## Remote code
 

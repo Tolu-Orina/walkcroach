@@ -1,6 +1,7 @@
 /**
  * Page extract + draft insert via activeTab + scripting.executeScript.
- * No broad host permissions / content_scripts (CWS review path B).
+ * No page host permissions / content_scripts (CWS path B).
+ * Narrow API host_permissions live in wxt.config (BFF fetch only).
  */
 import {
   isAllowedMessage,
@@ -11,6 +12,7 @@ import type { PageExtract } from '../lib/extract';
 import { MAX_EXTRACT_CHARS } from '../lib/extract';
 
 export default defineBackground(() => {
+  void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
   chrome.runtime.onInstalled.addListener(() => {
     void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
   });
@@ -88,11 +90,22 @@ async function handleMessage(
       });
       if (!tab?.id) return { ok: false, error: 'no active tab' };
       try {
-        await chrome.scripting.executeScript({
+        const injected = await chrome.scripting.executeScript({
           target: { tabId: tab.id },
           func: insertDraftText,
           args: [text],
         });
+        const result = injected[0]?.result as
+          | { inserted: boolean; reason?: string }
+          | undefined;
+        if (!result?.inserted) {
+          return {
+            ok: false,
+            error:
+              result?.reason ??
+              'no focused field — click into a text box on the page, then Insert again (or Copy)',
+          };
+        }
         return { ok: true };
       } catch (err) {
         return {
@@ -105,7 +118,6 @@ async function handleMessage(
       }
     }
     case 'GET_GRANTED_ORIGINS':
-      // No host permissions in activeTab-only build.
       return { ok: true, origins: [] };
     case 'REVOKE_ORIGIN':
       return { ok: true, removed: false };
@@ -128,18 +140,26 @@ async function requestExtract(tabId: number): Promise<PageExtract | null> {
   }
 }
 
-function insertDraftText(text: string): void {
+function insertDraftText(text: string): { inserted: boolean; reason?: string } {
   const el = document.activeElement as HTMLElement | null;
   if (el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement) {
     const start = el.selectionStart ?? el.value.length;
     const end = el.selectionEnd ?? el.value.length;
     el.value = `${el.value.slice(0, start)}${text}${el.value.slice(end)}`;
     el.dispatchEvent(new Event('input', { bubbles: true }));
-    return;
+    return { inserted: true };
   }
   if (el?.isContentEditable) {
-    document.execCommand('insertText', false, text);
+    const ok = document.execCommand('insertText', false, text);
+    return ok
+      ? { inserted: true }
+      : { inserted: false, reason: 'could not insert into contenteditable' };
   }
+  return {
+    inserted: false,
+    reason:
+      'no focused field — click into a text box on the page, then Insert again',
+  };
 }
 
 function extractInPage(maxChars: number): {
@@ -151,11 +171,22 @@ function extractInPage(maxChars: number): {
   const normalize = (t: string) => t.replace(/\s+/g, ' ').trim();
   const title = document.title || '';
   let extractedText = '';
-  const main =
-    document.querySelector('main, article, [role="main"]')?.textContent ??
-    document.body?.innerText ??
-    '';
-  extractedText = normalize(main);
+
+  // Prefer semantic containers; then largest text block; then body.
+  const candidates = Array.from(
+    document.querySelectorAll('main, article, [role="main"]'),
+  );
+  let best = '';
+  for (const node of candidates) {
+    const t = normalize(node.textContent ?? '');
+    if (t.length > best.length) best = t;
+  }
+  if (best.length >= 40) {
+    extractedText = best;
+  } else {
+    extractedText = normalize(document.body?.innerText ?? '');
+  }
+
   if (extractedText.length > maxChars) {
     extractedText = `${extractedText.slice(0, maxChars)}…`;
   }

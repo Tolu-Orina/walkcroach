@@ -11,6 +11,7 @@ import {
 } from './handlers/rest.js';
 import { ensureRuntimeSecrets } from './secrets.js';
 import { bridgeBedrockEnv } from './util.js';
+import { runWithRequestOrigin } from './http.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -60,42 +61,48 @@ const server = createServer(async (req, res) => {
     };
 
     const httpReq = normalizeEvent(event);
-    if (httpReq.method === 'OPTIONS') {
-      res.writeHead(204, CORS_HEADERS);
-      res.end();
-      return;
-    }
-
-    const streamRoute = matchStreamRoute(httpReq.method, httpReq.path);
-    if (streamRoute) {
-      const auth = await requireStreamAuth(httpReq);
-      if ('error' in auth) {
-        res.writeHead(auth.status, {
-          'content-type': 'application/json',
-          ...CORS_HEADERS,
-        });
-        res.end(JSON.stringify({ error: auth.error }));
+    await runWithRequestOrigin(httpReq.headers.origin, async () => {
+      if (httpReq.method === 'OPTIONS') {
+        res.writeHead(204, CORS_HEADERS);
+        res.end();
         return;
       }
-      res.writeHead(200, {
-        'content-type': 'application/x-ndjson',
-        ...CORS_HEADERS,
-      });
-      try {
-        for await (const ev of handleChromeStream(httpReq, streamRoute, auth)) {
-          res.write(`${JSON.stringify(ev)}\n`);
-        }
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'stream error';
-        res.write(`${JSON.stringify({ type: 'error', message })}\n`);
-      }
-      res.end();
-      return;
-    }
 
-    const result = await handleChromeRest(httpReq);
-    res.writeHead(result.statusCode, result.headers);
-    res.end(result.body);
+      const streamRoute = matchStreamRoute(httpReq.method, httpReq.path);
+      if (streamRoute) {
+        const auth = await requireStreamAuth(httpReq);
+        if ('error' in auth) {
+          res.writeHead(auth.status, {
+            'content-type': 'application/json',
+            ...CORS_HEADERS,
+          });
+          res.end(JSON.stringify({ error: auth.error }));
+          return;
+        }
+        res.writeHead(200, {
+          'content-type': 'application/x-ndjson',
+          ...CORS_HEADERS,
+        });
+        try {
+          for await (const ev of handleChromeStream(
+            httpReq,
+            streamRoute,
+            auth,
+          )) {
+            res.write(`${JSON.stringify(ev)}\n`);
+          }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'stream error';
+          res.write(`${JSON.stringify({ type: 'error', message })}\n`);
+        }
+        res.end();
+        return;
+      }
+
+      const result = await handleChromeRest(httpReq);
+      res.writeHead(result.statusCode, result.headers);
+      res.end(result.body);
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'internal error';
     console.error(message);

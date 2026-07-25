@@ -1,4 +1,4 @@
-# Chrome Web Store listing copy (PD.4) — v0.1.3
+# Chrome Web Store listing copy (PD.4) — v0.1.4
 
 ## Store name
 
@@ -22,7 +22,7 @@ WalkCroach helps solo operators and small teams work from the page they are alre
 **What it does not do**
 - It does not scrape the web in the background
 - It does not auto-submit forms or run browser automation
-- It does not request site-wide host access—open WalkCroach from the toolbar; it only reads the page you act on
+- It does not request site-wide browsing access—open WalkCroach from the toolbar; it only reads the page you act on (API host permission is for our backend only)
 
 **Privacy**
 See our privacy policy: https://walkcroach.conquerorfoundation.com/chrome-privacy.html  
@@ -43,9 +43,9 @@ English
 
 **File:** `icon-128.png` — exactly **128×128** PNG (RGBA).
 
-Upload this in the Chrome Web Store listing / store icon field.
+Source: `docs/walkcroach-icon.png` (resized). Upload this in the Chrome Web Store listing / store icon field.
 
-Extension toolbar icons (16/32/48/128) live in `chrome/public/` and ship with `npm run zip:prod`.
+Extension toolbar icons (16/32/48/128) live in `chrome/public/` (same artwork) and ship with `npm run zip:prod`.
 
 ## Promotional images
 

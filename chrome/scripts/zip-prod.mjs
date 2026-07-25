@@ -115,6 +115,35 @@ if (!zip.replace(/\\/g, '/').endsWith(expectedZipName)) {
   );
 }
 
+const manifestPath = join(outputDir, 'chrome-mv3', 'manifest.json');
+if (!existsSync(manifestPath)) fail('chrome-mv3/manifest.json missing');
+const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+const apiOrigin = `${new URL(apiBase).protocol}//${new URL(apiBase).host}/*`;
+const hosts = Array.isArray(manifest.host_permissions)
+  ? manifest.host_permissions
+  : [];
+if (!hosts.includes(apiOrigin)) {
+  fail(
+    `manifest host_permissions must include API origin ${apiOrigin} (got ${JSON.stringify(hosts)})`,
+  );
+}
+if (hosts.some((h) => h === 'https://*/*' || h === 'http://*/*' || h === '<all_urls>')) {
+  fail('manifest must not include broad page host permissions');
+}
+if (manifest.content_scripts) {
+  fail('manifest must not include content_scripts (path B)');
+}
+const optionalHosts = Array.isArray(manifest.optional_host_permissions)
+  ? manifest.optional_host_permissions
+  : [];
+if (
+  optionalHosts.some(
+    (h) => h === 'https://*/*' || h === 'http://*/*',
+  )
+) {
+  fail('manifest must not include broad optional_host_permissions');
+}
+
 const textFiles = files.filter((f) =>
   /\.(js|html|json|css|mjs)$/i.test(f),
 );

@@ -50,6 +50,6 @@ The live privacy policy includes the required affirmative Limited Use statement.
 Before upload, verify dashboard permissions list matches:
 
 - `storage`, `activeTab`, `scripting`, `sidePanel`
-- **No** host permissions (required or optional)
-- **No** `<all_urls>` / `http://*/*` / `https://*/*`
+- **One** API host only: `https://awbcf4clij.execute-api.eu-west-2.amazonaws.com/*` (or the baked `WALKCROACH_API_BASE` origin)
+- **No** page hosts: no `<all_urls>` / `http://*/*` / `https://*/*`
 - **No** `content_scripts` in the package manifest

@@ -136,12 +136,15 @@
 
       <h2>4. Permissions and Limited Use</h2>
       <p>
-        At install, WalkCroach requests only <code>storage</code>, <code>activeTab</code>,
-        <code>scripting</code>, and <code>sidePanel</code>. It does
+        At install, WalkCroach requests <code>storage</code>, <code>activeTab</code>,
+        <code>scripting</code>, <code>sidePanel</code>, and a
+        <strong>single host permission for the WalkCroach HTTPS API</strong>
+        (our backend only—not arbitrary websites). It does
         <strong>not</strong> request site-wide host permissions
-        (<code>https://*/*</code>, <code>http://*/*</code>, or <code>&lt;all_urls&gt;</code>).
-        After you open WalkCroach from the toolbar, it may read the active page only when you
-        summarize, ask, draft, save, or insert—using Chrome’s active-tab access for that gesture.
+        (<code>https://*/*</code>, <code>http://*/*</code>, or <code>&lt;all_urls&gt;</code>)
+        and does not inject a persistent content script. After you open WalkCroach from the
+        toolbar, it may read the active page only when you summarize, ask, draft, save, or
+        insert—using Chrome’s active-tab access for that gesture.
       </p>
       <p>
         <strong>Limited Use:</strong> The use of information received from Chrome APIs and from

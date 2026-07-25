@@ -12,6 +12,7 @@ import {
 import { ensureRuntimeSecrets } from './secrets.js';
 import { bridgeBedrockEnv, metricLog } from './util.js';
 import { normalizeEvent } from './event.js';
+import { runWithRequestOrigin } from './http.js';
 
 function writeHttp(
   responseStream: NodeJS.WritableStream,
@@ -60,37 +61,39 @@ async function streamHandler(
     bridgeBedrockEnv();
     const req = normalizeEvent(event);
 
-    if (req.method === 'OPTIONS') {
-      writeHttp(responseStream, 204, CORS_HEADERS, '');
-      return;
-    }
+    await runWithRequestOrigin(req.headers.origin, async () => {
+      if (req.method === 'OPTIONS') {
+        writeHttp(responseStream, 204, CORS_HEADERS, '');
+        return;
+      }
 
-    const streamRoute = matchStreamRoute(req.method, req.path);
-    if (streamRoute) {
-      const auth = await requireStreamAuth(req);
-      if ('error' in auth) {
-        writeHttp(
+      const streamRoute = matchStreamRoute(req.method, req.path);
+      if (streamRoute) {
+        const auth = await requireStreamAuth(req);
+        if ('error' in auth) {
+          writeHttp(
+            responseStream,
+            auth.status,
+            { 'content-type': 'application/json', ...CORS_HEADERS },
+            JSON.stringify({ error: auth.error }),
+          );
+          return;
+        }
+        await writeNdjsonStream(
           responseStream,
-          auth.status,
-          { 'content-type': 'application/json', ...CORS_HEADERS },
-          JSON.stringify({ error: auth.error }),
+          handleChromeStream(req, streamRoute, auth),
         );
         return;
       }
-      await writeNdjsonStream(
-        responseStream,
-        handleChromeStream(req, streamRoute, auth),
-      );
-      return;
-    }
 
-    const result = await handleChromeRest(req);
-    writeHttp(
-      responseStream,
-      result.statusCode,
-      result.headers,
-      result.body,
-    );
+      const result = await handleChromeRest(req);
+      writeHttp(
+        responseStream,
+        result.statusCode,
+        result.headers,
+        result.body,
+      );
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'internal error';
     console.error('chrome lambda error', message);

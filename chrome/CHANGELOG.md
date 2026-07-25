@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.4 — 2026-07-25
+
+Hotfix — restore API connectivity after Public CWS approval:
+
+- Add **narrow** `host_permissions` for the WalkCroach API host only (fixes side-panel `Failed to fetch` when CORS ACAO is the web SPA origin)
+- Chrome BFF CORS reflects `chrome-extension://` Origins (defense in depth; requires Lambda redeploy)
+- Bootstrap Retry + clearer network error copy
+- Insert-into-page reports focus failure; Copy clipboard fallback
+- Side panel behavior set on every service-worker start
+- Store justifications / privacy: distinguish API host vs page hosts
+
 ## 0.1.3 — 2026-07-23
 
 Chrome Web Store review path B — activeTab-only:

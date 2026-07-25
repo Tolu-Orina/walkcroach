@@ -9,8 +9,8 @@
       "installation_mode": "allowed",
       "toolbar_pin": "force_pinned",
       "runtime_allowed_hosts": [
-        "https://*.walkcroach.com",
-        "https://*/*"
+        "https://awbcf4clij.execute-api.eu-west-2.amazonaws.com",
+        "https://walkcroach.conquerorfoundation.com"
       ],
       "runtime_blocked_hosts": []
     }

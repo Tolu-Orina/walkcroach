@@ -28,6 +28,7 @@ import {
   type StoredSession,
 } from '../../lib/auth';
 import type { PageExtract } from '../../lib/extract';
+import { formatNetworkError } from '../../lib/errors';
 import {
   matchSiteProfile,
   type SiteProfile,
@@ -123,7 +124,7 @@ export function App() {
         await chrome.storage.session.remove('wc_draft_intent');
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'bootstrap failed');
+      setError(formatNetworkError(err, 'bootstrap failed'));
     } finally {
       setLoading(false);
     }
@@ -600,6 +601,26 @@ export function App() {
           <button type="button" className="link" onClick={() => setError(null)}>
             dismiss
           </button>
+          {!session && !loading && (
+            <>
+              {' '}
+              <button
+                type="button"
+                className="link"
+                onClick={() => void bootstrap()}
+              >
+                Retry
+              </button>
+            </>
+          )}
+        </p>
+      )}
+      {!loading && !session && !error && (
+        <p className="status">
+          Not connected.{' '}
+          <button type="button" className="link" onClick={() => void bootstrap()}>
+            Retry
+          </button>
         </p>
       )}
 
@@ -701,27 +722,43 @@ export function App() {
             <div className="stream">
               {streamText || (streaming ? '…' : '')}
               {streamText && !streaming && (
-                <button
-                  type="button"
-                  className="link"
-                  onClick={() => {
-                    void chrome.runtime
-                      .sendMessage({
-                        type: 'INSERT_DRAFT',
-                        payload: { text: streamText },
-                      })
-                      .then((res: { ok?: boolean; error?: string }) => {
-                        if (!res?.ok) {
-                          setError(
-                            res?.error ??
-                              'Could not insert — focus a text field on the page, then try again.',
-                          );
-                        }
-                      });
-                  }}
-                >
-                  Insert into page
-                </button>
+                <div className="ask-row">
+                  <button
+                    type="button"
+                    className="link"
+                    onClick={() => {
+                      void chrome.runtime
+                        .sendMessage({
+                          type: 'INSERT_DRAFT',
+                          payload: { text: streamText },
+                        })
+                        .then((res: { ok?: boolean; error?: string }) => {
+                          if (!res?.ok) {
+                            setError(
+                              res?.error ??
+                                'Could not insert — focus a text field on the page, then try again.',
+                            );
+                          }
+                        });
+                    }}
+                  >
+                    Insert into page
+                  </button>
+                  <button
+                    type="button"
+                    className="link"
+                    onClick={() => {
+                      void navigator.clipboard
+                        .writeText(streamText)
+                        .then(() => setSaveNote('Copied to clipboard.'))
+                        .catch(() =>
+                          setError('Could not copy — select the text manually.'),
+                        );
+                    }}
+                  >
+                    Copy
+                  </button>
+                </div>
               )}
             </div>
           )}
