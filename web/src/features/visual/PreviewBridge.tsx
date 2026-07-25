@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { getInlineEditQuota, recordInlineEdit } from '../../api/client';
 import { AlertDialog } from '../../components/ConfirmDialog';
 import { ElementToolbar } from './ElementToolbar';
@@ -20,11 +27,22 @@ type PreviewBridgeProps = {
   onFilesMutated: () => void;
 };
 
+type CredentiallessIFrame = HTMLIFrameElement & { credentialless: boolean };
+
 /**
- * WalkCroach Web sets COEP: require-corp (WebContainer). Cross-origin E2B
- * previews (*.e2b.app) then fail in a normal iframe even when the URL works
- * in a new tab. `credentialless` lets Chrome embed them under COEP without
- * requiring CORP on the E2B response.
+ * WalkCroach Web sets COEP: require-corp (WebContainer / SharedArrayBuffer).
+ * That policy is recursive: a normal cross-origin iframe (*.e2b.app) is blocked
+ * even when the same URL works in a top-level tab.
+ *
+ * Chrome 110+ lifts COEP for iframes with the `credentialless` flag. The IDL
+ * property MUST be set before the first navigation — React applying `src` before
+ * a spread `credentialless` prop is enough to fail the embed ("refused to connect").
+ *
+ * Firefox / Safari do not support credentialless iframes yet; Open tab is the
+ * escape hatch there. Parent COEP:credentialless does NOT help nested documents.
+ *
+ * @see https://developer.chrome.com/blog/iframe-credentialless
+ * @see https://wicg.github.io/anonymous-iframe/
  */
 function isCrossOriginPreview(url: string): boolean {
   try {
@@ -33,6 +51,13 @@ function isCrossOriginPreview(url: string): boolean {
   } catch {
     return true;
   }
+}
+
+function supportsIframeCredentialless(): boolean {
+  return (
+    typeof HTMLIFrameElement !== 'undefined' &&
+    'credentialless' in HTMLIFrameElement.prototype
+  );
 }
 
 export function PreviewBridge({
@@ -56,6 +81,8 @@ export function PreviewBridge({
     [previewUrl],
   );
 
+  const canCredentialless = useMemo(() => supportsIframeCredentialless(), []);
+
   const previewOrigin = useMemo(() => {
     if (!previewUrl) return null;
     try {
@@ -71,16 +98,39 @@ export function PreviewBridge({
       .catch(() => {});
   }, [projectId]);
 
-  // If the iframe never paints under COEP, surface a clear escape hatch.
+  // Apply credentialless BEFORE src. Do not put src in JSX for cross-origin
+  // embeds — React attribute order would navigate before the flag is set.
+  useLayoutEffect(() => {
+    const el = iframeRef.current as CredentiallessIFrame | null;
+    if (!el || !previewUrl) return;
+
+    if (crossOrigin && canCredentialless) {
+      el.credentialless = true;
+      // Reflect content attribute too (boolean presence form).
+      if (!el.hasAttribute('credentialless')) {
+        el.setAttribute('credentialless', '');
+      }
+    }
+
+    if (el.getAttribute('src') !== previewUrl) {
+      el.src = previewUrl;
+    }
+  }, [previewUrl, crossOrigin, canCredentialless]);
+
+  // Escape hatch when COEP blocks the frame (unsupported browser or failed paint).
   useEffect(() => {
     if (!previewUrl || !crossOrigin) {
       setEmbedHint(false);
       return;
     }
+    if (!canCredentialless) {
+      setEmbedHint(true);
+      return;
+    }
     setEmbedHint(false);
     const t = window.setTimeout(() => setEmbedHint(true), 2500);
     return () => window.clearTimeout(t);
-  }, [previewUrl, crossOrigin]);
+  }, [previewUrl, crossOrigin, canCredentialless]);
 
   const postToPreview = useCallback((msg: WcBridgeMessage) => {
     // Prefer * so credentialless / HMR origin quirks don't drop edit-mode sync.
@@ -150,6 +200,10 @@ export function PreviewBridge({
     }
   };
 
+  const hintCopy = !canCredentialless
+    ? 'This browser cannot embed cross-origin previews under page isolation. Use'
+    : 'Preview URL is live but the in-app frame can be blocked by page isolation (COEP). Use';
+
   return (
     <>
       {/* Always-visible preview toolbar (select + open) */}
@@ -208,11 +262,9 @@ export function PreviewBridge({
         <iframe
           ref={iframeRef}
           title="App preview"
-          src={previewUrl}
+          // src assigned in useLayoutEffect after credentialless (see above).
           className="h-full w-full border-0 bg-white pt-9"
           allow="cross-origin-isolated"
-          // React's DOM types may lag the credentialless attribute.
-          {...({ credentialless: crossOrigin ? true : undefined } as object)}
           onLoad={() => {
             setEmbedHint(false);
             // Re-sync after Vite HMR / navigation so pick mode survives rewrites.
@@ -224,8 +276,7 @@ export function PreviewBridge({
       {embedHint && previewUrl && (
         <div className="pointer-events-none absolute inset-x-0 bottom-3 z-10 flex justify-center px-4">
           <div className="pointer-events-auto max-w-md rounded-[var(--radius-surface)] border border-line bg-ink/95 px-3 py-2 text-center text-[11px] text-mist shadow-lg">
-            Preview URL is live but the in-app frame can be blocked by page
-            isolation (COEP). Use{' '}
+            {hintCopy}{' '}
             <a
               href={previewUrl}
               target="_blank"
