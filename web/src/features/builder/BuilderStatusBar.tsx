@@ -38,7 +38,11 @@ export function BuilderStatusBar({
           }`}
           aria-hidden
         />
-        <ActivityChips sessionId={sessionId} refreshKey={activityRefresh} />
+        <ActivityChips
+          sessionId={sessionId}
+          refreshKey={activityRefresh}
+          streaming={streaming}
+        />
       </div>
 
       <p className="hidden text-[11px] text-mist sm:block">{runtimeLabel}</p>

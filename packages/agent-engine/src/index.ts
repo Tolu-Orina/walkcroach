@@ -79,20 +79,37 @@ export {
 } from './hooks.js';
 export {
   loadWorkspaceAgentConfig,
+  loadRuleBody,
+  parseRuleFrontmatter,
+  formatRuleCatalog,
+  loadMcpServersConfig,
+  parseMcpServersJson,
   parseSettingsJson,
   parseVerifyJson,
   isVerifyCommand,
   isBackgroundAllowed,
   matchesDenyPattern,
+  matchesGlob,
   defaultSettings,
   SETTINGS_REL_PATH,
   VERIFY_REL_PATH,
   RULES_REL_DIR,
+  MCP_CONFIG_REL_PATH,
   type WalkcroachSettings,
   type VerifyConfig,
   type WorkspaceAgentConfig,
+  type RuleFrontmatter,
+  type RuleCatalogEntry,
+  type McpServerFileConfig,
 } from './workspace-config.js';
 export { WorkspacePolicy } from './workspace-policy.js';
+export {
+  recordCheckpoint,
+  revertTurn,
+  CHECKPOINTS_REL_DIR,
+  DEFAULT_MAX_CHECKPOINT_TURNS,
+  type CheckpointEntry,
+} from './checkpoints.js';
 
 export type { Message as BedrockMessage } from '@aws-sdk/client-bedrock-runtime';
 
@@ -116,21 +133,54 @@ export {
   type HostToWebviewType,
   type WebviewToHostMessage,
   type WebviewToHostType,
+  type SubmitAttachment,
+  type PersistedChatTurn,
+  parsePersistedChatTurns,
 } from './protocol.js';
+export {
+  attachmentsToContentBlocks,
+  redactAttachmentBlocks,
+  sanitizeDocumentName,
+  MAX_ATTACHMENT_BYTES,
+  MAX_ATTACHMENTS_PER_MESSAGE,
+} from './attachments.js';
 
 export { TokenDeltaCoalescer, type CoalesceFlush } from './coalesce.js';
 
 export {
   createBedrockClient,
   getNovaModelId,
+  getNovaReasoningEffort,
+  getTitanEmbedModelId,
+  embedText,
   streamConverseTurn,
   streamPing,
   DEFAULT_MAX_OUTPUT_TOKENS,
+  DEFAULT_MAX_REASONING_OUTPUT_TOKENS,
   DEFAULT_MAX_OUTPUT_CONTINUATIONS,
   type ConverseTurnResult,
   type ParsedToolUse,
   type StreamDelta,
+  type NovaReasoningEffort,
 } from './bedrock.js';
+export {
+  updateIndex,
+  semanticSearch,
+  chunkLines,
+  cosineSimilarity,
+  INDEX_REL_DIR,
+  MANIFEST_REL_PATH,
+  VECTORS_REL_PATH,
+  DEFAULT_CHUNK_WINDOW_LINES,
+  DEFAULT_CHUNK_OVERLAP_LINES,
+  DEFAULT_MAX_INDEX_FILES,
+  MAX_INDEXABLE_FILE_BYTES,
+  DEFAULT_SEMANTIC_SEARCH_TOP_K,
+  type EmbedFn,
+  type IndexChunkRecord,
+  type SemanticSearchHit,
+  type UpdateIndexResult,
+} from './local-index.js';
 
 export {
   runAgentLoop,
@@ -223,12 +273,17 @@ export { executeTool } from './tools/execute.js';
 
 export {
   CockroachMcpClient,
+  GenericMcpClient,
+  McpServerRegistry,
   DEFAULT_MCP_URL,
+  RESERVED_COCKROACHDB_SERVER_NAME,
   isMcpWriteTool,
   parseMcpConfigSnippet,
   plainMcpError,
   type McpConfig,
   type McpToolInfo,
+  type McpServerConfig,
+  type McpClientLike,
 } from './mcp.js';
 export {
   runCcloud,
@@ -242,6 +297,7 @@ export {
   SkillsRegistry,
   defaultSkillRoots,
   parseSkillMd,
+  loadOfficialCockroachSkills,
   type SkillMeta,
   type SkillFull,
 } from './skills.js';
@@ -260,6 +316,10 @@ export type {
   ProjectMemoryBridge,
   ProjectMemoryHit,
 } from './project-memory.js';
+export type {
+  SharedSkillsBridge,
+  SharedSkillRecord,
+} from './shared-skills.js';
 export {
   normalizeLocalRepoKey,
 } from './repo-key.js';

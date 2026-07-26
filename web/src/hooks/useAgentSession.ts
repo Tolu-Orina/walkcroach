@@ -183,16 +183,36 @@ export function useAgentSession(
             prev?.planId === event.planId ? prev : { planId: event.planId, files: [] },
           );
         } else if (event.type === 'tool_call') {
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: uid(),
-              role: 'tool',
-              content: `${event.tool}${event.awaitResult ? ' (await)' : ''}`,
-              tool: event.tool,
-              awaitResult: event.awaitResult,
-            },
-          ]);
+          // Finalize in-progress assistant text so the caret doesn't look stuck
+          // while client tools (ls, npm, …) run in the background.
+          const toolMsgId = uid();
+          setMessages((prev) => {
+            const finalized = prev.map((m) =>
+              m.role === 'assistant' && m.id.startsWith('stream-')
+                ? { ...m, id: uid() }
+                : m,
+            );
+            return [
+              ...finalized,
+              {
+                id: toolMsgId,
+                role: 'tool' as const,
+                content: event.tool,
+                tool: event.tool,
+                awaitResult: event.awaitResult,
+              },
+            ];
+          });
+
+          const markToolDone = () => {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === toolMsgId
+                  ? { ...m, awaitResult: false, content: event.tool }
+                  : m,
+              ),
+            );
+          };
 
           const act = actionsRef.current;
           if (event.tool === 'write_file' || event.tool === 'edit_file') {
@@ -227,6 +247,7 @@ export function useAgentSession(
               ok = false;
               stderr = err instanceof Error ? err.message : String(err);
             }
+            markToolDone();
             // Stop owns the tool-result when cancelEpoch advanced.
             if (cancelEpochRef.current !== epochAtStart) {
               return;
@@ -268,6 +289,7 @@ export function useAgentSession(
             };
             const cmd = String(event.args.cmd ?? '');
             const result = await act.applyTerminal(cmd);
+            markToolDone();
             if (cancelEpochRef.current !== epochAtStart) {
               return;
             }
@@ -291,6 +313,8 @@ export function useAgentSession(
                 inflightToolRef.current = null;
               }
             }
+          } else {
+            markToolDone();
           }
         } else if (event.type === 'warning') {
           setMessages((prev) => [

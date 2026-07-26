@@ -2,6 +2,7 @@ import type {
   AgentEvent,
   AgentTodo,
   HostToWebviewMessage,
+  PersistedChatTurn,
 } from '@walkcroach/agent-engine';
 import {
   TokenDeltaCoalescer,
@@ -88,6 +89,7 @@ export class MessageBridge {
           type: 'DONE',
           reason: event.reason,
           canContinue: event.canContinue,
+          turnId: event.turnId,
         });
         return;
       case 'error':
@@ -136,6 +138,7 @@ export class MessageBridge {
     mcpConfigured?: boolean;
     bedrockConfigured?: boolean;
     bedrockModelId?: string;
+    reasoningEffort?: string;
     ccloudConfigured?: boolean;
     telemetry?: Record<string, number>;
     signedIn?: boolean;
@@ -143,6 +146,7 @@ export class MessageBridge {
     linkedProjectName?: string | null;
     todos?: AgentTodo[];
     hasSession?: boolean;
+    uiTurns?: PersistedChatTurn[];
   }): void {
     this.coalescer.flushNow();
     this.post({
@@ -155,6 +159,7 @@ export class MessageBridge {
       mcpConfigured: params.mcpConfigured,
       bedrockConfigured: params.bedrockConfigured,
       bedrockModelId: params.bedrockModelId,
+      reasoningEffort: params.reasoningEffort,
       ccloudConfigured: params.ccloudConfigured,
       telemetry: params.telemetry,
       signedIn: params.signedIn,
@@ -162,6 +167,7 @@ export class MessageBridge {
       linkedProjectName: params.linkedProjectName,
       todos: params.todos,
       hasSession: params.hasSession,
+      uiTurns: params.uiTurns,
     });
   }
 
@@ -176,7 +182,8 @@ export class MessageBridge {
   }
 
   dispose(): void {
-    this.disposed = true;
+    // Flush buffered tokens while still accepting posts, then seal.
     this.coalescer.dispose();
+    this.disposed = true;
   }
 }

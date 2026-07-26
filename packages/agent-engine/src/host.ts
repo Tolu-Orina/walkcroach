@@ -64,7 +64,13 @@ export type AgentEvent =
       summary?: string;
     }
   | { type: 'todos'; todos: AgentTodo[] }
-  | { type: 'done'; reason: string; canContinue?: boolean }
+  | {
+      type: 'done';
+      reason: string;
+      canContinue?: boolean;
+      /** P2 checkpoints — this turn's id, for "revert to before this turn". */
+      turnId?: string;
+    }
   | { type: 'error'; message: string; fatal?: boolean }
   | { type: 'warning'; message: string }
   | {
@@ -120,6 +126,8 @@ export type BackgroundTerminalPoll = {
 export interface HostAdapter {
   readFile(path: string): Promise<string>;
   writeFile(path: string, content: string): Promise<void>;
+  /** P2 checkpoints — delete a file the agent created, used only by revertTurn. */
+  deleteFile?(path: string): Promise<void>;
   listDir(path: string): Promise<string[]>;
   search(
     pattern: string,
@@ -146,6 +154,11 @@ export interface HostAdapter {
   killBackgroundTerminal?(taskId: string): Promise<boolean>;
   /** Kill every tracked shell (blocking + background + sessions). Called on Stop. */
   killAllTerminals?(): void;
+  /**
+   * Kill interactive Tier C sessions only (leave background tasks running).
+   * Called when a run ends cleanly so REPLs don't orphan after done.
+   */
+  killInteractiveTerminalSessions?(): void;
   /**
    * Tier C — interactive session (REPL/TUI). Prefer host registry over one-shot
    * run_terminal when the agent must write/read mid-run.
@@ -179,12 +192,14 @@ export interface HostAdapter {
     sessionId: string;
     messages: import('@aws-sdk/client-bedrock-runtime').Message[];
     transcript?: string;
+    uiTurns?: import('./protocol.js').PersistedChatTurn[];
     createdAt?: string;
   }): Promise<{ sessionId: string }>;
   loadAgentSession?(): Promise<{
     sessionId: string;
     messages: import('@aws-sdk/client-bedrock-runtime').Message[];
     transcript: string;
+    uiTurns: import('./protocol.js').PersistedChatTurn[];
     createdAt: string;
     updatedAt: string;
   } | null>;
@@ -226,7 +241,9 @@ export interface HostAdapter {
   getAutonomy(): AutonomyLevel;
   setAutonomy(level: AutonomyLevel): void;
   /** Optional gather helpers (read-only). */
-  gatherMeta?(signal?: AbortSignal): Promise<{ gitStatus?: string }>;
+  gatherMeta?(
+    signal?: AbortSignal,
+  ): Promise<{ gitStatus?: string; activeFile?: string }>;
   getWorkspaceRoot(): string | undefined;
   /** NFR-D07 — agentic tools must refuse untrusted workspaces. */
   isTrustedWorkspace(): boolean;

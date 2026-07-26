@@ -10,13 +10,22 @@ import { READ_ONLY_TOOL_NAMES } from './defs.js';
 import {
   CockroachMcpClient,
   isMcpWriteTool,
+  type McpServerRegistry,
 } from '../mcp.js';
 import type { SkillsRegistry } from '../skills.js';
 import { ensureJsonOutput, runCcloud, plainCcloudError } from '../ccloud.js';
 import type { TelemetrySink } from '../telemetry.js';
 import type { ProjectMemoryBridge } from '../project-memory.js';
+import type { SharedSkillsBridge } from '../shared-skills.js';
 import type { WorkspacePolicy } from '../workspace-policy.js';
-import { isVerifyCommand } from '../workspace-config.js';
+import { isVerifyCommand, loadRuleBody } from '../workspace-config.js';
+import { recordCheckpoint } from '../checkpoints.js';
+import { embedText } from '../bedrock.js';
+import {
+  semanticSearch,
+  updateIndex,
+  DEFAULT_MAX_INDEX_FILES,
+} from '../local-index.js';
 import { applyPatchEdits, normalizePatchEdits } from '../patch.js';
 import {
   buildStdinPayload,
@@ -43,13 +52,21 @@ export type ExecuteToolOptions = {
   }) => Promise<string>;
   /** Phase B context */
   mcp?: CockroachMcpClient | null;
+  /** Additional MCP servers from .walkcroach/mcp.json (mcp_call) — separate from mcp/cockroach_mcp. */
+  mcpServers?: Pick<McpServerRegistry, 'callTool'> | null;
   skills?: SkillsRegistry | null;
   telemetry?: TelemetrySink | null;
   ccloudApiKey?: string;
   /** Phase C — shared project memory when linked */
   projectMemory?: ProjectMemoryBridge | null;
+  /** Cross-surface shared skill library — available whenever signed in */
+  sharedSkills?: SharedSkillsBridge | null;
   /** P1 — settings / verify recipes */
   policy?: WorkspacePolicy | null;
+  /** P2 — current agent turn, for checkpoint/revert. Unset → checkpoints are not recorded. */
+  turnId?: string;
+  /** P3 — local semantic index settings (.walkcroach/settings.json index). Unset → enabled with defaults. */
+  indexSettings?: { enabled: boolean; maxFiles: number };
 };
 
 function str(v: unknown): string {
@@ -129,6 +146,50 @@ export async function executeTool(
         content = truncateText(
           files.length ? files.join('\n') : '(no matches)',
         ).text;
+        break;
+      }
+      case 'semantic_search': {
+        const query = str(input.query);
+        if (!query.trim()) {
+          throw new Error('semantic_search requires a non-empty query');
+        }
+        const root = host.getWorkspaceRoot();
+        if (!root) throw new Error('No workspace folder open');
+        if (opts.indexSettings?.enabled === false) {
+          throw new Error(
+            'Semantic search is disabled (.walkcroach/settings.json index.enabled: false).',
+          );
+        }
+        const maxFiles = opts.indexSettings?.maxFiles ?? DEFAULT_MAX_INDEX_FILES;
+        const topK = typeof input.top_k === 'number' ? input.top_k : undefined;
+        host.emit({ type: 'tool_card', id, name, status: 'running', detail: query });
+        let hits;
+        try {
+          await updateIndex(root, (t) => embedText(t), { maxFiles });
+          hits = await semanticSearch(root, (t) => embedText(t), query, { topK });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          throw new Error(
+            `Semantic search failed (requires Bedrock credentials, same as chat): ${message}`,
+          );
+        }
+        content = truncateText(
+          hits.length
+            ? hits
+                .map(
+                  (h, i) =>
+                    `${i + 1}. ${h.path}:${h.startLine}-${h.endLine} (score ${h.score.toFixed(3)})\n${h.snippet}`,
+                )
+                .join('\n\n')
+            : 'No semantically related results found.',
+        ).text;
+        opts.telemetry?.bump('semantic_search');
+        host.emit({
+          type: 'telemetry',
+          name: 'semantic_search',
+          counters: opts.telemetry?.counters,
+          detail: query,
+        });
         break;
       }
       case 'todo_write': {
@@ -386,10 +447,12 @@ export async function executeTool(
         assertPathAllowed(opts.policy, path);
         const next = str(input.content);
         let before = '';
+        let beforeExisted = true;
         try {
           before = await host.readFile(path);
         } catch {
           before = '';
+          beforeExisted = false;
         }
         const decision = await host.showDiffPreview(path, before, next, {
           toolName: 'write_file',
@@ -412,6 +475,16 @@ export async function executeTool(
         }
         host.emit({ type: 'tool_card', id, name, status: 'running' });
         await host.writeFile(path, next);
+        if (opts.turnId) {
+          await recordCheckpoint(host.getWorkspaceRoot(), {
+            turnId: opts.turnId,
+            toolUseId: id,
+            path,
+            before,
+            beforeExisted,
+            after: next,
+          });
+        }
         content = `Wrote ${path} (${next.length} chars)`;
         break;
       }
@@ -455,6 +528,16 @@ export async function executeTool(
         }
         host.emit({ type: 'tool_card', id, name, status: 'running' });
         await host.writeFile(path, after);
+        if (opts.turnId) {
+          await recordCheckpoint(host.getWorkspaceRoot(), {
+            turnId: opts.turnId,
+            toolUseId: id,
+            path,
+            before,
+            beforeExisted: true,
+            after,
+          });
+        }
         content = `Edited ${path}`;
         break;
       }
@@ -491,6 +574,16 @@ export async function executeTool(
           await host.applyDiff(path, JSON.stringify(edits));
         } else {
           await host.writeFile(path, after);
+        }
+        if (opts.turnId) {
+          await recordCheckpoint(host.getWorkspaceRoot(), {
+            turnId: opts.turnId,
+            toolUseId: id,
+            path,
+            before,
+            beforeExisted: true,
+            after,
+          });
         }
         content = `Patched ${path} (${edits.length} edit${edits.length === 1 ? '' : 's'})`;
         break;
@@ -799,6 +892,16 @@ export async function executeTool(
         }
         host.emit({ type: 'tool_card', id, name, status: 'running' });
         await host.writeFile(WALKCROACH_MD, next);
+        if (opts.turnId) {
+          await recordCheckpoint(host.getWorkspaceRoot(), {
+            turnId: opts.turnId,
+            toolUseId: id,
+            path: WALKCROACH_MD,
+            before: existing ?? '',
+            beforeExisted: existing !== undefined,
+            after: next,
+          });
+        }
         content = `Updated ${WALKCROACH_MD}`;
         break;
       }
@@ -885,6 +988,58 @@ export async function executeTool(
         });
         break;
       }
+      case 'mcp_call': {
+        const registry = opts.mcpServers;
+        if (!registry) {
+          throw new Error(
+            'No additional MCP servers configured. Add .walkcroach/mcp.json (mcpServers) and retry.',
+          );
+        }
+        if (opts.readOnly) {
+          throw new Error('mcp_call is not available in read-only sub-agent mode');
+        }
+        const server = str(input.server);
+        const mcpTool = str(input.tool);
+        const args =
+          input.arguments && typeof input.arguments === 'object'
+            ? (input.arguments as Record<string, unknown>)
+            : {};
+        // No per-server read/write classification in v1 — every call requires consent.
+        const decision = await host.confirmCommand(
+          `MCP CALL: ${server}.${mcpTool} ${JSON.stringify(args)}`,
+          { toolName: 'mcp_call', stepId: id },
+        );
+        if (decision !== 'approve') {
+          host.emit({
+            type: 'tool_card',
+            id,
+            name,
+            status: 'done',
+            detail: 'rejected by user',
+          });
+          return {
+            toolUseId: id,
+            content: 'User rejected the MCP call.',
+            status: 'rejected',
+          };
+        }
+        host.emit({
+          type: 'tool_card',
+          id,
+          name,
+          status: 'running',
+          detail: `${server}.${mcpTool}`,
+        });
+        content = truncateText(await registry.callTool(server, mcpTool, args)).text;
+        opts.telemetry?.bump('mcp_call');
+        host.emit({
+          type: 'telemetry',
+          name: 'mcp_call',
+          counters: opts.telemetry?.counters,
+          detail: `${server}.${mcpTool}`,
+        });
+        break;
+      }
       case 'load_skill': {
         const skills = opts.skills;
         if (!skills) {
@@ -917,6 +1072,25 @@ export async function executeTool(
           counters: opts.telemetry?.counters,
           detail: skillName,
         });
+        break;
+      }
+      case 'load_rule': {
+        const ruleName = str(input.name);
+        const rule = await loadRuleBody(host.getWorkspaceRoot(), ruleName);
+        if (!rule) {
+          throw new Error(`Unknown project rule "${ruleName}".`);
+        }
+        host.emit({
+          type: 'tool_card',
+          id,
+          name,
+          status: 'running',
+          detail: ruleName,
+        });
+        const header = rule.description
+          ? `# Rule: ${rule.name}\n\n> ${rule.description}\n\n`
+          : `# Rule: ${rule.name}\n\n`;
+        content = truncateText(`${header}${rule.body.trim()}`).text;
         break;
       }
       case 'ccloud': {
@@ -1083,6 +1257,60 @@ export async function executeTool(
         content = `Mirrored to project ${pm.projectId} as ${kind} (id=${result.id}).`;
         break;
       }
+      case 'mirror_skill': {
+        const ss = opts.sharedSkills;
+        if (!ss) {
+          throw new Error(
+            'Shared skill sync is unavailable. Sign in to WalkCroach first.',
+          );
+        }
+        const skillName = str(input.name).trim();
+        if (!skillName) throw new Error('name is required');
+        const description = str(input.description).trim();
+        if (!description) throw new Error('description is required');
+        const skillBody = str(input.body).trim();
+        if (!skillBody) throw new Error('body is required');
+        const preview = `MIRROR skill "${skillName}" to your shared skill library:\n${description}`;
+        const decision = await host.confirmCommand(preview, {
+          toolName: 'mirror_skill',
+          stepId: id,
+        });
+        if (decision !== 'approve') {
+          host.emit({
+            type: 'tool_card',
+            id,
+            name,
+            status: 'done',
+            detail: 'rejected by user',
+          });
+          return {
+            toolUseId: id,
+            content: 'User rejected mirroring to shared skill library.',
+            status: 'rejected',
+          };
+        }
+        host.emit({
+          type: 'tool_card',
+          id,
+          name,
+          status: 'running',
+          detail: skillName,
+        });
+        const result = await ss.mirror({
+          name: skillName,
+          description,
+          body: skillBody,
+        });
+        opts.telemetry?.bump('skill_mirror');
+        host.emit({
+          type: 'telemetry',
+          name: 'skill_mirror',
+          counters: opts.telemetry?.counters,
+          detail: result.id,
+        });
+        content = `Mirrored skill "${skillName}" to your shared skill library (id=${result.id}).`;
+        break;
+      }
       default:
         throw new Error(`Unknown tool: ${name}`);
     }
@@ -1146,8 +1374,11 @@ function summarizeInput(
   if (name === 'verify') return str(input.command) || 'verify';
   if (name === 'spawn_subagent') return str(input.name);
   if (name === 'cockroach_mcp') return str(input.tool);
+  if (name === 'mcp_call') return `${str(input.server)}.${str(input.tool)}`;
   if (name === 'load_skill') return str(input.name);
+  if (name === 'load_rule') return str(input.name);
   if (name === 'glob') return str(input.pattern);
+  if (name === 'semantic_search') return str(input.query);
   if (name === 'todo_write' && Array.isArray(input.todos)) {
     return `${input.todos.length} items`;
   }

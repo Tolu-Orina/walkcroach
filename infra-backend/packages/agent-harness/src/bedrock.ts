@@ -17,8 +17,28 @@ function getClient() {
 
 export function getNovaModelId(): string {
   return (
-    process.env.BEDROCK_NOVA_MODEL_ID ?? 'global.amazon.nova-2-lite-v1:0'
+    process.env.BEDROCK_NOVA_MODEL_ID ??
+    process.env.NOVA_MODEL_ID ??
+    'global.amazon.nova-2-lite-v1:0'
   );
+}
+
+export type NovaReasoningEffort = 'low' | 'medium' | 'high' | 'off';
+
+/**
+ * Nova 2 Lite extended thinking. Default medium for App Builder multi-step
+ * coding. Set BEDROCK_NOVA_REASONING=off|low|medium|high to override.
+ * @see https://docs.aws.amazon.com/nova/latest/nova2-userguide/extended-thinking.html
+ */
+export function getNovaReasoningEffort(): NovaReasoningEffort {
+  const raw = (process.env.BEDROCK_NOVA_REASONING ?? 'medium')
+    .trim()
+    .toLowerCase();
+  if (raw === 'off' || raw === 'disabled' || raw === '0' || raw === 'false') {
+    return 'off';
+  }
+  if (raw === 'low' || raw === 'medium' || raw === 'high') return raw;
+  return 'medium';
 }
 
 export function getTitanEmbedModelId(): string {
@@ -151,6 +171,25 @@ export async function* streamConverseTurn(params: {
     ? tagLatestUserMessageForGuardrail(params.messages)
     : params.messages;
 
+  const reasoningEffort = getNovaReasoningEffort();
+  // Medium is the AWS-recommended tier for multi-file coding / tool loops.
+  // High forbids temperature/topP/maxTokens — keep those unset only then.
+  const additionalModelRequestFields =
+    reasoningEffort === 'off'
+      ? undefined
+      : {
+          reasoningConfig: {
+            type: 'enabled',
+            maxReasoningEffort: reasoningEffort,
+          },
+        };
+  const inferenceConfig =
+    reasoningEffort === 'high'
+      ? undefined
+      : reasoningEffort === 'off'
+        ? { maxTokens: 8192 }
+        : { maxTokens: 30_000 };
+
   const command = new ConverseStreamCommand({
     modelId: getNovaModelId(),
     system: params.system ? [{ text: params.system }] : undefined,
@@ -158,6 +197,10 @@ export async function* streamConverseTurn(params: {
     toolConfig: params.tools?.length
       ? { tools: params.tools as never }
       : undefined,
+    ...(inferenceConfig ? { inferenceConfig } : {}),
+    ...(additionalModelRequestFields
+      ? { additionalModelRequestFields }
+      : {}),
     ...(guardrail
       ? {
           guardrailConfig: {
@@ -217,6 +260,15 @@ export async function* streamConverseTurn(params: {
       text += chunk;
       currentText += chunk;
       yield { type: 'token', text: chunk };
+    }
+
+    // Nova extended thinking streams as reasoningContent (often "[REDACTED]").
+    // Do not surface it in the chat timeline — still billed as output tokens.
+    if (
+      event.contentBlockDelta?.delta &&
+      'reasoningContent' in event.contentBlockDelta.delta
+    ) {
+      // intentional no-op
     }
 
     if (event.contentBlockDelta?.delta?.toolUse?.input) {

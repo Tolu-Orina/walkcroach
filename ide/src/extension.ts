@@ -73,6 +73,15 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand(
+      'walkcroach.viewSharedSkills',
+      async () => {
+        await provider.viewSharedSkills();
+      },
+    ),
+  );
+
+  context.subscriptions.push(
     vscode.window.registerUriHandler({
       handleUri: (uri) => {
         void provider.handleAuthUri(uri);

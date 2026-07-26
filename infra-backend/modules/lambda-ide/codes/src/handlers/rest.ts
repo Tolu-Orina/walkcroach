@@ -19,6 +19,7 @@ import {
   handleCreateSessionCode,
   handleExchangeToken,
 } from './oauth.js';
+import { handleSkillsList, handleSkillsMirror } from './skills.js';
 
 /** Strip API Gateway stage prefix if present (`/v1/ide/...` → `/ide/...`). */
 export function normalizeIdePath(path: string): string {
@@ -103,6 +104,14 @@ export async function handleIdeRest(req: HttpRequest) {
   const patchMem = path.match(/\/ide\/v1\/memory\/entries\/([^/]+)\/?$/);
   if (method === 'PATCH' && patchMem) {
     return handleUpdateMemoryEntry(auth, patchMem[1]!, req.body);
+  }
+
+  if (method === 'POST' && /\/ide\/v1\/skills\/mirror\/?$/.test(path)) {
+    return handleSkillsMirror(auth, req.body);
+  }
+
+  if (method === 'GET' && /\/ide\/v1\/skills\/?$/.test(path)) {
+    return handleSkillsList(auth);
   }
 
   return jsonResponse(404, { error: 'not found', path });

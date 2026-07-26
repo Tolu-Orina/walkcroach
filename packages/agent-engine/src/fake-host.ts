@@ -81,6 +81,9 @@ export function createFakeHost(opts: FakeHostOptions = {}): HostAdapter & {
     writeFile: async (path, content) => {
       files.set(norm(path), content);
     },
+    deleteFile: async (path) => {
+      files.delete(norm(path));
+    },
     applyDiff: async (path, diff) => {
       const { applyDiffString } = await import('./patch.js');
       const key = norm(path);
@@ -197,6 +200,9 @@ export function createFakeHost(opts: FakeHostOptions = {}): HostAdapter & {
     }),
     killBackgroundTerminal: async () => true,
     killAllTerminals: () => {
+      sessions.killAll();
+    },
+    killInteractiveTerminalSessions: () => {
       sessions.killAll();
     },
     startTerminalSession: async (params) =>

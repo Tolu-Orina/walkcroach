@@ -37,3 +37,26 @@ describe('Phase C tools', () => {
     ).toBe(false);
   });
 });
+
+describe('shared skills tools', () => {
+  it('includes mirror_skill only when includeSharedSkills', () => {
+    const without = toBedrockTools({ includeSharedSkills: false });
+    expect(without.some((t) => t.toolSpec?.name === 'mirror_skill')).toBe(
+      false,
+    );
+    const withShared = toBedrockTools({ includeSharedSkills: true });
+    expect(withShared.some((t) => t.toolSpec?.name === 'mirror_skill')).toBe(
+      true,
+    );
+  });
+
+  it('never auto-approves mirror_skill under low_friction', () => {
+    expect(
+      shouldAutoApprove({
+        autonomy: 'low_friction',
+        toolName: 'mirror_skill',
+        input: { name: 'x', description: 'y', body: 'z' },
+      }),
+    ).toBe(false);
+  });
+});

@@ -11,21 +11,21 @@ export function activityChipLabel(event: ActivityEvent): string {
 
   switch (event.tool) {
     case 'write_file':
-      return path ? `Writing ${path}` : 'Writing a file';
+      return path ? `Wrote ${path}` : 'Wrote a file';
     case 'edit_file':
-      return path ? `Editing ${path}` : 'Editing a file';
+      return path ? `Edited ${path}` : 'Edited a file';
     case 'run_terminal':
       if (cmd) {
         const short = cmd.length > 36 ? `${cmd.slice(0, 33)}…` : cmd;
-        return `Running · ${short}`;
+        return `Ran · ${short}`;
       }
-      return 'Running a command';
+      return 'Ran a command';
     case 'web_search':
-      return 'Searching the web';
+      return 'Searched the web';
     case 'read_file':
-      return path ? `Reading ${path}` : 'Reading a file';
+      return path ? `Read ${path}` : 'Read a file';
     case 'list_files':
-      return 'Listing project files';
+      return 'Listed project files';
     default:
       if (event.summary) return event.summary;
       return event.tool.replace(/_/g, ' ');

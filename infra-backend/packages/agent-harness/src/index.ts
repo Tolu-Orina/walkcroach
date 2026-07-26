@@ -1,4 +1,11 @@
-export { streamConverse, streamConverseTurn, embedText, getNovaModelId, getGuardrailConfig } from './bedrock.js';
+export {
+  streamConverse,
+  streamConverseTurn,
+  embedText,
+  getNovaModelId,
+  getNovaReasoningEffort,
+  getGuardrailConfig,
+} from './bedrock.js';
 export {
   runPromptTurn,
   continueAfterTool,
@@ -13,6 +20,11 @@ export {
   updateMemoryEntryText,
 } from './memory.js';
 export { refreshProjectMemorySummary } from './project-memory.js';
+export {
+  writeSharedSkill,
+  listSharedSkills,
+  type SharedSkillRecord,
+} from './skills.js';
 export {
   loadProjectKnowledge,
   formatProjectKnowledgeBlock,

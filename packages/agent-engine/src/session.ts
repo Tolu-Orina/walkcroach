@@ -1,4 +1,4 @@
-import type { Message } from '@aws-sdk/client-bedrock-runtime';
+import type { ContentBlock, Message } from '@aws-sdk/client-bedrock-runtime';
 
 /** Soft cap on persisted session messages (tool-heavy turns are large). */
 export const DEFAULT_MAX_SESSION_MESSAGES = 48;
@@ -67,20 +67,23 @@ export function cloneMessages(messages: Message[]): Message[] {
 }
 
 /**
- * Append a follow-up user text turn without creating two consecutive `user`
- * roles (illegal for Bedrock Converse after a tool-result user turn).
+ * Append a follow-up user text turn (optionally with attachment content
+ * blocks) without creating two consecutive `user` roles (illegal for Bedrock
+ * Converse after a tool-result user turn).
  */
 export function appendUserFollowUp(
   prior: Message[],
   text: string,
+  extraBlocks: ContentBlock[] = [],
 ): Message[] {
   const messages = cloneMessages(prior);
+  const newBlocks: ContentBlock[] = [{ text }, ...extraBlocks];
   const last = messages[messages.length - 1];
   if (last && roleOf(last) === 'user') {
-    const content = [...(last.content ?? []), { text }];
+    const content = [...(last.content ?? []), ...newBlocks];
     messages[messages.length - 1] = { role: 'user', content };
     return messages;
   }
-  messages.push({ role: 'user', content: [{ text }] });
+  messages.push({ role: 'user', content: newBlocks });
   return messages;
 }

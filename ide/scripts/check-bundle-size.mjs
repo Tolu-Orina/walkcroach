@@ -32,3 +32,20 @@ function check(label, file, max) {
 
 check('webview.js', webview, limits.webviewJs);
 check('extension.cjs', extension, limits.extensionCjs);
+
+const skillsJson = join(root, 'dist', 'cockroachdb-official.generated.json');
+if (!existsSync(skillsJson)) {
+  console.error(
+    `FAIL cockroach skills JSON: missing ${skillsJson} (esbuild must copy it beside extension.cjs)`,
+  );
+  process.exitCode = 1;
+} else {
+  const size = statSync(skillsJson).size;
+  console.log(
+    `OK cockroach skills JSON: ${(size / 1024).toFixed(1)} KiB`,
+  );
+  if (size < 1_000) {
+    console.error('FAIL cockroach skills JSON: file looks empty/corrupt');
+    process.exitCode = 1;
+  }
+}

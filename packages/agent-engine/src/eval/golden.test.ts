@@ -15,10 +15,12 @@ const mockStreamPing = vi.fn();
 
 vi.mock('../bedrock.js', () => ({
   getNovaModelId: () => 'test-model',
+  getNovaReasoningEffort: () => 'medium',
   createBedrockClient: vi.fn(),
   streamConverseTurn: (...args: unknown[]) => mockStreamConverseTurn(...args),
   streamPing: (...args: unknown[]) => mockStreamPing(...args),
   DEFAULT_MAX_OUTPUT_TOKENS: 4096,
+  DEFAULT_MAX_REASONING_OUTPUT_TOKENS: 30_000,
   DEFAULT_MAX_OUTPUT_CONTINUATIONS: 2,
 }));
 

@@ -559,7 +559,7 @@ export function BuilderPage({ projectId, projectName, templateId }: BuilderPageP
           onClose={() => setCanvasMode('preview')}
           listFiles={sandbox.listFiles}
           onSave={(path, content) => sandbox.applyWriteFile(path, content)}
-          refreshKey={session.checkpointRefresh}
+          refreshKey={session.activityRefresh + session.checkpointRefresh}
           ready={sandbox.status === 'ready'}
         />
       )}

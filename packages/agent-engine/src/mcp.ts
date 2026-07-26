@@ -47,18 +47,37 @@ export function isMcpWriteTool(name: string): boolean {
   return true;
 }
 
-export function plainMcpError(err: unknown): string {
+const COCKROACHDB_LABEL = 'CockroachDB MCP';
+
+/**
+ * `serverLabel` defaults to the CockroachDB label so every existing call site
+ * (CockroachMcpClient) is byte-for-byte unchanged. GenericMcpClient passes its
+ * own server name so generic-server errors don't misleadingly say "CockroachDB".
+ */
+export function plainMcpError(
+  err: unknown,
+  serverLabel: string = COCKROACHDB_LABEL,
+): string {
   const msg = err instanceof Error ? err.message : String(err);
+  const isCockroachDb = serverLabel === COCKROACHDB_LABEL;
   if (/401|unauthorized|forbidden/i.test(msg)) {
-    return 'CockroachDB MCP rejected credentials. Re-run “WalkCroach: Configure CockroachDB” and check the service-account API key + cluster ID.';
+    return isCockroachDb
+      ? 'CockroachDB MCP rejected credentials. Re-run “WalkCroach: Configure CockroachDB” and check the service-account API key + cluster ID.'
+      : `MCP server "${serverLabel}" rejected credentials (401/403). Check the headers in .walkcroach/mcp.json.`;
   }
   if (/ENOTFOUND|ECONNREFUSED|fetch failed|network/i.test(msg)) {
-    return 'Could not reach the CockroachDB Managed MCP server. Check network access to cockroachlabs.cloud.';
+    return isCockroachDb
+      ? 'Could not reach the CockroachDB Managed MCP server. Check network access to cockroachlabs.cloud.'
+      : `Could not reach MCP server "${serverLabel}". Check the url in .walkcroach/mcp.json.`;
   }
   if (/timeout/i.test(msg)) {
-    return 'CockroachDB MCP timed out. Retry the same tool call.';
+    return isCockroachDb
+      ? 'CockroachDB MCP timed out. Retry the same tool call.'
+      : `MCP server "${serverLabel}" timed out. Retry the same tool call.`;
   }
-  return `CockroachDB MCP error: ${msg}`;
+  return isCockroachDb
+    ? `CockroachDB MCP error: ${msg}`
+    : `MCP server "${serverLabel}" error: ${msg}`;
 }
 
 export class CockroachMcpClient {
@@ -159,6 +178,198 @@ export class CockroachMcpClient {
       }
       this.client = null;
       this.tools = [];
+    }
+  }
+}
+
+/** Project-configured (`.walkcroach/mcp.json`) MCP server — arbitrary headers, no CockroachDB assumptions. */
+export type McpServerConfig = {
+  url: string;
+  headers?: Record<string, string>;
+};
+
+/** Common shape shared by CockroachMcpClient and GenericMcpClient (structural — no explicit `implements` needed). */
+export type McpClientLike = {
+  readonly connected: boolean;
+  connect(): Promise<void>;
+  listTools(): McpToolInfo[];
+  callTool(name: string, args: Record<string, unknown>): Promise<string>;
+  close(): Promise<void>;
+};
+
+/**
+ * Generic Streamable-HTTP MCP client for arbitrary project-configured servers
+ * (`.walkcroach/mcp.json`). HTTP/Streamable only — no stdio spawning (see
+ * McpServerRegistry doc comment for why that's deferred).
+ */
+export class GenericMcpClient implements McpClientLike {
+  private client: Client | null = null;
+  private tools: McpToolInfo[] = [];
+
+  constructor(
+    private readonly config: McpServerConfig,
+    /** Server name from .walkcroach/mcp.json, used only for error messages. */
+    private readonly serverName: string = 'MCP server',
+  ) {}
+
+  get connected(): boolean {
+    return this.client !== null;
+  }
+
+  listTools(): McpToolInfo[] {
+    return this.tools;
+  }
+
+  async connect(): Promise<void> {
+    if (this.client) return;
+
+    // Unlike CockroachMcpClient's DEFAULT_MCP_URL fallback, a generic server's url is
+    // user-configured (.walkcroach/mcp.json) and can be malformed — parse it inside the
+    // try block so a bad URL is reported through plainMcpError, not a raw TypeError.
+    let client: Client | undefined;
+    try {
+      const url = new URL(this.config.url);
+      const transport = new StreamableHTTPClientTransport(url, {
+        requestInit: {
+          headers: this.config.headers ?? {},
+        },
+      });
+      client = new Client({
+        name: 'walkcroach-ide',
+        version: '0.1.0',
+      });
+      await client.connect(transport);
+      const listed = await client.listTools();
+      this.tools = (listed.tools ?? []).map((t) => ({
+        name: t.name,
+        description: t.description,
+        inputSchema: t.inputSchema as Record<string, unknown> | undefined,
+      }));
+      this.client = client;
+    } catch (err) {
+      try {
+        await client?.close();
+      } catch {
+        // ignore
+      }
+      throw new Error(plainMcpError(err, this.serverName));
+    }
+  }
+
+  async callTool(
+    name: string,
+    args: Record<string, unknown>,
+  ): Promise<string> {
+    if (!this.client) {
+      throw new Error(`MCP server "${this.serverName}" is not connected.`);
+    }
+    try {
+      const result = await this.client.callTool({
+        name,
+        arguments: args,
+      });
+      const content = result.content;
+      if (!Array.isArray(content)) {
+        return truncateJson(result);
+      }
+      const text = content
+        .map((block) => {
+          if (
+            block &&
+            typeof block === 'object' &&
+            'type' in block &&
+            (block as { type: string }).type === 'text' &&
+            'text' in block
+          ) {
+            return String((block as { text: string }).text);
+          }
+          return truncateJson(block);
+        })
+        .join('\n');
+      return text || '(empty MCP result)';
+    } catch (err) {
+      throw new Error(plainMcpError(err, this.serverName));
+    }
+  }
+
+  async close(): Promise<void> {
+    if (this.client) {
+      try {
+        await this.client.close();
+      } catch {
+        // ignore
+      }
+      this.client = null;
+      this.tools = [];
+    }
+  }
+}
+
+/** Name reserved for the auto-registered CockroachDB client — cannot be overridden by .walkcroach/mcp.json. */
+export const RESERVED_COCKROACHDB_SERVER_NAME = 'cockroachdb';
+
+/**
+ * Registry of additionally configured MCP servers (`.walkcroach/mcp.json`), separate
+ * from the always-on `cockroach_mcp` tool / CockroachMcpClient. HTTP/Streamable-only
+ * for v1 — stdio-spawned local servers are deferred (spawning arbitrary configured
+ * processes from a committed JSON file is a real security surface deserving its own
+ * review, not a rider on this change).
+ */
+export class McpServerRegistry {
+  private clients = new Map<string, GenericMcpClient>();
+
+  register(name: string, config: McpServerConfig): void {
+    this.clients.set(name, new GenericMcpClient(config, name));
+  }
+
+  serverNames(): string[] {
+    return [...this.clients.keys()];
+  }
+
+  isConnected(name: string): boolean {
+    return this.clients.get(name)?.connected ?? false;
+  }
+
+  /** Connects every registered server; returns per-server error messages for any that failed. */
+  async connectAll(): Promise<Map<string, string>> {
+    const errors = new Map<string, string>();
+    for (const [name, client] of this.clients) {
+      try {
+        await client.connect();
+      } catch (err) {
+        errors.set(name, err instanceof Error ? err.message : String(err));
+      }
+    }
+    return errors;
+  }
+
+  listAllTools(): Array<{ server: string; name: string; description?: string }> {
+    const out: Array<{ server: string; name: string; description?: string }> = [];
+    for (const [server, client] of this.clients) {
+      for (const t of client.listTools()) {
+        out.push({ server, name: t.name, description: t.description });
+      }
+    }
+    return out;
+  }
+
+  async callTool(
+    server: string,
+    tool: string,
+    args: Record<string, unknown>,
+  ): Promise<string> {
+    const client = this.clients.get(server);
+    if (!client?.connected) {
+      throw new Error(
+        `MCP server "${server}" is not connected. Check .walkcroach/mcp.json.`,
+      );
+    }
+    return client.callTool(tool, args);
+  }
+
+  async closeAll(): Promise<void> {
+    for (const client of this.clients.values()) {
+      await client.close();
     }
   }
 }

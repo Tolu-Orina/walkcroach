@@ -8,10 +8,12 @@ import {
   normalizeLocalRepoKey,
   type AgentEvent,
   type ProjectMemoryBridge,
+  type SharedSkillsBridge,
 } from '@walkcroach/agent-engine';
 import { CliHostAdapter } from '../host/CliHostAdapter.js';
 import {
   createProjectMemoryBridge,
+  createSharedSkillsBridge,
   ideMe,
 } from '../lib/api.js';
 import { getSecret } from '../lib/config.js';
@@ -61,10 +63,15 @@ export async function runAgentCommand(opts: RunCommandOpts): Promise<number> {
     (await getSecret(SECRET_KEYS.ccloudApiKey)) ?? mcpConfig?.apiKey;
 
   let projectMemory: ProjectMemoryBridge | null = null;
+  let sharedSkills: SharedSkillsBridge | null = null;
   let linkedName: string | null = null;
   let signedIn = Boolean(token);
 
   if (token) {
+    sharedSkills = createSharedSkillsBridge({
+      getToken: () => getSecret(SECRET_KEYS.cognitoAccessToken),
+      sourceSurface: 'desktop',
+    });
     try {
       const remote = await gitRemote(cwd);
       const localRepoKey = normalizeLocalRepoKey({
@@ -96,6 +103,7 @@ export async function runAgentCommand(opts: RunCommandOpts): Promise<number> {
     mcpConfig,
     ccloudApiKey,
     projectMemory,
+    sharedSkills,
   };
 
   let exitCode = 0;

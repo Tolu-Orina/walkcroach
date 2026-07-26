@@ -3,14 +3,20 @@
  * Metadata always cheap; full body on load_skill match.
  */
 
+import { existsSync, readFileSync } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
-import { join, basename, dirname } from 'node:path';
-import { BUNDLED_SKILLS } from './skills/bundled.js';
+import { dirname, join, basename } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import {
+  BUNDLED_SKILLS,
+  type BundledSkill,
+} from './skills/bundled.js';
+import type { SharedSkillsBridge } from './shared-skills.js';
 
 export type SkillMeta = {
   name: string;
   description: string;
-  source: 'bundled' | 'workspace';
+  source: 'bundled' | 'workspace' | 'shared';
   path?: string;
   origin?: string;
 };
@@ -19,6 +25,57 @@ export type SkillFull = SkillMeta & {
   body: string;
   references?: Record<string, string>;
 };
+
+const OFFICIAL_JSON_NAME = 'cockroachdb-official.generated.json';
+
+/**
+ * Load official CockroachDB skills from JSON (not inlined in the IDE JS bundle).
+ * Resolve order: explicit path → env → next to this module → cwd fallbacks.
+ */
+export function loadOfficialCockroachSkills(
+  explicitPath?: string,
+): BundledSkill[] {
+  let moduleDir: string | undefined;
+  try {
+    // Works in ESM (CLI / vitest). Under the IDE's esbuild CJS bundle,
+    // import.meta.url is empty — callers must pass officialSkillsJsonPath.
+    const metaUrl = import.meta.url;
+    if (metaUrl) moduleDir = dirname(fileURLToPath(metaUrl));
+  } catch {
+    moduleDir = undefined;
+  }
+
+  const candidates = [
+    explicitPath,
+    process.env.WALKCROACH_COCKROACH_SKILLS_JSON,
+    moduleDir ? join(moduleDir, 'skills', OFFICIAL_JSON_NAME) : undefined,
+    moduleDir ? join(moduleDir, OFFICIAL_JSON_NAME) : undefined,
+    join(process.cwd(), 'dist', OFFICIAL_JSON_NAME),
+    join(process.cwd(), 'dist', 'skills', OFFICIAL_JSON_NAME),
+    join(process.cwd(), OFFICIAL_JSON_NAME),
+  ].filter((p): p is string => Boolean(p && p.trim()));
+
+  for (const path of candidates) {
+    try {
+      if (!existsSync(path)) continue;
+      const raw = JSON.parse(readFileSync(path, 'utf8')) as unknown;
+      if (!Array.isArray(raw)) continue;
+      return raw.filter(
+        (s): s is BundledSkill =>
+          Boolean(
+            s &&
+              typeof s === 'object' &&
+              typeof (s as BundledSkill).name === 'string' &&
+              typeof (s as BundledSkill).description === 'string' &&
+              typeof (s as BundledSkill).body === 'string',
+          ),
+      );
+    } catch {
+      /* try next */
+    }
+  }
+  return [];
+}
 
 export function parseSkillMd(raw: string): {
   name?: string;
@@ -69,13 +126,29 @@ export class SkillsRegistry {
   private bodies = new Map<string, string>();
   private references = new Map<string, Record<string, string>>();
 
-  /** Load bundled + optional workspace skill roots (workspace may override). */
-  async init(workspaceRoots: string[] = []): Promise<void> {
+  /**
+   * Load bundled + optional CockroachDB-synced shared skills + optional
+   * workspace skill roots. Precedence on name collision: workspace overrides
+   * shared, shared overrides bundled — so a local file always wins.
+   */
+  async init(
+    workspaceRoots: string[] = [],
+    opts?: {
+      sharedSkills?: SharedSkillsBridge;
+      /** Absolute path to cockroachdb-official.generated.json (IDE sets this). */
+      officialSkillsJsonPath?: string;
+    },
+  ): Promise<void> {
     this.metas = [];
     this.bodies.clear();
     this.references.clear();
 
-    for (const s of BUNDLED_SKILLS) {
+    const bundled: BundledSkill[] = [
+      ...loadOfficialCockroachSkills(opts?.officialSkillsJsonPath),
+      ...BUNDLED_SKILLS,
+    ];
+
+    for (const s of bundled) {
       this.upsert({
         name: s.name,
         description: s.description,
@@ -84,6 +157,25 @@ export class SkillsRegistry {
         body: s.body,
         references: s.references,
       });
+    }
+
+    if (opts?.sharedSkills) {
+      try {
+        const shared = await opts.sharedSkills.list();
+        for (const s of shared) {
+          this.upsert({
+            name: s.name,
+            description: s.description,
+            source: 'shared',
+            origin: s.sourceSurface ? `walkcroach:shared:${s.sourceSurface}` : 'walkcroach:shared',
+            body: s.body,
+            overwrite: true,
+          });
+        }
+      } catch {
+        // Sync failure just means fewer skills this run, not a hard error —
+        // matches scanDir's own silent-catch resilience below.
+      }
     }
 
     for (const root of workspaceRoots) {
@@ -147,7 +239,7 @@ export class SkillsRegistry {
   private upsert(params: {
     name: string;
     description: string;
-    source: 'bundled' | 'workspace';
+    source: 'bundled' | 'workspace' | 'shared';
     body: string;
     path?: string;
     origin?: string;

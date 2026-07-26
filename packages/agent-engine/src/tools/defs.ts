@@ -5,7 +5,11 @@
 export type ToolDef = {
   name: string;
   description: string;
-  /** If true, never eligible for low-friction auto-approve. */
+  /**
+   * If true, never eligible for low-friction auto-approve.
+   * Honored by `shouldAutoApprove` via `getToolDef`. Use for cloud/privileged
+   * tools (e.g. ccloud). Do not set on shell tools — those use critical-cmd gates.
+   */
   infra?: boolean;
   inputSchema: Record<string, unknown>;
 };
@@ -68,6 +72,25 @@ export const PHASE_A_TOOLS: ToolDef[] = [
     },
   },
   {
+    name: 'semantic_search',
+    description:
+      'Conceptual/fuzzy search over the workspace using embeddings — finds related code even when it does not contain the literal query terms (e.g. "where do we decide whether a command auto-approves"). Complementary to search/glob: prefer search for exact strings or regex, glob for filenames. Builds/refreshes a local index on first use in a session; requires Bedrock credentials (same as chat).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Natural-language or conceptual query',
+        },
+        top_k: {
+          type: 'number',
+          description: 'Max results to return (default 8)',
+        },
+      },
+      required: ['query'],
+    },
+  },
+  {
     name: 'write_file',
     description: 'Create or overwrite a file (requires user approval of the diff)',
     inputSchema: {
@@ -121,7 +144,6 @@ export const PHASE_A_TOOLS: ToolDef[] = [
     name: 'run_terminal',
     description:
       'Run a shell command. Critical/infra commands always need approval; routine local commands may auto-run in low-friction mode. Use mode=blocking (default) for npm install/test/build. Use mode=background for long-lived processes (dev servers, watchers) so the agent can keep working — then poll with await_terminal. Prefer non-interactive flags (-y/--yes) when available; otherwise pass stdin or replies for planned confirmations (e.g. replies: ["y"]). Unexpected [y/N] prompts are surfaced via ask_user when interactive (default on without preload). Prefer write_file for source files.',
-    infra: true,
     inputSchema: {
       type: 'object',
       properties: {
@@ -180,7 +202,6 @@ export const PHASE_A_TOOLS: ToolDef[] = [
     name: 'terminal_session',
     description:
       'Tier C interactive terminal session for REPLs/TUIs and multi-step stdin. Actions: start (approval like run_terminal; returns session_id + backend pty|pipe), write (send input; newline appended by default), read (wait for output settle; returns new output since last read), close, list. Prefer this over blocking run_terminal when you must converse with a process mid-run (python -i, psql, node REPL, debuggers). Use run_terminal for one-shot installs/builds/tests. Max 4 concurrent sessions. Password prompts are not supported — close and use a non-secret flow.',
-    infra: true,
     inputSchema: {
       type: 'object',
       properties: {
@@ -237,7 +258,6 @@ export const PHASE_A_TOOLS: ToolDef[] = [
     name: 'verify',
     description:
       'Run a project check from .walkcroach/verify.json (tests/typecheck/build). Prefer this after mutating work. command must be an exact entry from verify.json (or omit to run the first). Exit 0 marks the session verified.',
-    infra: true,
     inputSchema: {
       type: 'object',
       properties: {
@@ -338,6 +358,21 @@ export const PHASE_A_TOOLS: ToolDef[] = [
       required: ['name', 'prompt'],
     },
   },
+  {
+    name: 'load_rule',
+    description:
+      'Load the full body of a manual/agent-requested project rule by name (progressive disclosure, see the project rules catalog for names/descriptions). Rules with alwaysApply or a matching glob are already included in context — only call this for catalog-only rules that look relevant.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: {
+          type: 'string',
+          description: 'Rule name from the project rules catalog',
+        },
+      },
+      required: ['name'],
+    },
+  },
 ];
 
 /** Phase B — CockroachDB Managed MCP, Agent Skills, ccloud CLI. */
@@ -360,6 +395,29 @@ export const PHASE_B_TOOLS: ToolDef[] = [
         },
       },
       required: ['tool'],
+    },
+  },
+  {
+    name: 'mcp_call',
+    description:
+      'Call a tool on an additionally configured MCP server (.walkcroach/mcp.json) — not CockroachDB (use cockroach_mcp for that). HTTP/Streamable servers only. Every call requires explicit user approval regardless of tool name.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        server: {
+          type: 'string',
+          description: 'MCP server name, a key under mcpServers in .walkcroach/mcp.json',
+        },
+        tool: {
+          type: 'string',
+          description: 'Tool name on that server',
+        },
+        arguments: {
+          type: 'object',
+          description: 'Arguments for the MCP tool',
+        },
+      },
+      required: ['server', 'tool'],
     },
   },
   {
@@ -447,10 +505,42 @@ export const PHASE_C_TOOLS: ToolDef[] = [
   },
 ];
 
+/**
+ * Cross-surface shared skill library — available whenever the user is
+ * signed in, independent of whether a project is linked (unlike Phase C).
+ */
+export const SHARED_SKILL_TOOLS: ToolDef[] = [
+  {
+    name: 'mirror_skill',
+    description:
+      'Save a reusable skill (a repeatable how-to) to your shared WalkCroach skill library, synced via CockroachDB across surfaces (Web, Chrome, IDE). Use when you or the user discover a recipe worth keeping for future tasks. Requires user approval.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: {
+          type: 'string',
+          description: 'kebab-case skill name, e.g. "deploying-to-fly-io"',
+        },
+        description: {
+          type: 'string',
+          description:
+            'One or two sentences: what it does and when to use it (this is what future catalog matching sees)',
+        },
+        body: {
+          type: 'string',
+          description: 'Full markdown instructions (steps, pitfalls, references)',
+        },
+      },
+      required: ['name', 'description', 'body'],
+    },
+  },
+];
+
 export const ALL_TOOLS: ToolDef[] = [
   ...PHASE_A_TOOLS,
   ...PHASE_B_TOOLS,
   ...PHASE_C_TOOLS,
+  ...SHARED_SKILL_TOOLS,
 ];
 
 export function getToolDef(name: string): ToolDef | undefined {
@@ -461,13 +551,16 @@ export function toBedrockTools(opts?: {
   includeSubagents?: boolean;
   includePhaseB?: boolean;
   includePhaseC?: boolean;
+  includeSharedSkills?: boolean;
 }) {
   const includeSubagents = opts?.includeSubagents !== false;
   const includePhaseB = opts?.includePhaseB !== false;
   const includePhaseC = opts?.includePhaseC === true;
+  const includeSharedSkills = opts?.includeSharedSkills === true;
   let list = PHASE_A_TOOLS;
   if (includePhaseB) list = [...list, ...PHASE_B_TOOLS];
   if (includePhaseC) list = [...list, ...PHASE_C_TOOLS];
+  if (includeSharedSkills) list = [...list, ...SHARED_SKILL_TOOLS];
   return list
     .filter((t) => includeSubagents || t.name !== 'spawn_subagent')
     .map((t) => ({
@@ -484,7 +577,9 @@ export const READ_ONLY_TOOL_NAMES = new Set([
   'list_dir',
   'search',
   'glob',
+  'semantic_search',
   'load_skill',
+  'load_rule',
   'cockroach_mcp',
   'recall_project_memory',
   'ask_user',

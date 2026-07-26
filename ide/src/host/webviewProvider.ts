@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import * as path from 'node:path';
 import * as vscode from 'vscode';
 import {
   runAgentLoop,
@@ -11,8 +12,12 @@ import {
   DEFAULT_MCP_URL,
   normalizeLocalRepoKey,
   CONTINUE_PROMPT,
+  revertTurn,
+  createBedrockClient,
   type AgentTodo,
   type BedrockMessage,
+  type PersistedChatTurn,
+  type SubmitAttachment,
 } from '@walkcroach/agent-engine';
 import type { HostToWebviewMessage } from '@walkcroach/agent-engine';
 import {
@@ -21,11 +26,13 @@ import {
 } from '../auth/session.js';
 import {
   createProjectMemoryBridge,
+  createSharedSkillsBridge,
   listMyProjects,
   createLink,
   deleteLink,
   listMemoryEntries,
   updateMemoryEntry,
+  listSharedSkills,
   ideMe,
 } from '../api/ideClient.js';
 import { VsCodeHostAdapter } from './VsCodeHostAdapter';
@@ -58,6 +65,7 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
 
   private view?: vscode.WebviewView;
   private bridge?: MessageBridge;
+  private webviewMessageSub?: vscode.Disposable;
   private abort?: AbortController;
   private transcript = '';
   private streaming = false;
@@ -74,6 +82,8 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
   /** Bedrock conversation for multi-turn Continue / follow-ups. */
   private sessionMessages: BedrockMessage[] = [];
   private sessionTodos: AgentTodo[] = [];
+  /** Chat bubbles for reload (synced from webview). */
+  private sessionUiTurns: PersistedChatTurn[] = [];
   /** Disk session id under .walkcroach/sessions/<id>/ */
   private sessionId: string | undefined;
   private sessionCreatedAt: string | undefined;
@@ -137,13 +147,20 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
         this.pendingApproval = null;
         this.abort = undefined;
         this.host.setRunSignal(undefined);
-        void this.persistTranscript();
-        this.snapshot();
-        if (
+        // Final completion (not auto-continue): close REPLs; leave background tasks.
+        // Cancel / abort already killAll via setRunSignal listener.
+        const willAutoContinue =
           event.type === 'done' &&
           event.canContinue &&
-          AUTO_CONTINUE_REASONS.has(event.reason)
-        ) {
+          AUTO_CONTINUE_REASONS.has(event.reason);
+        if (event.type === 'done' && !willAutoContinue) {
+          this.host.killInteractiveTerminalSessions?.();
+        } else if (event.type === 'error') {
+          this.host.killAllTerminals?.();
+        }
+        void this.persistTranscript();
+        this.snapshot();
+        if (willAutoContinue) {
           this.scheduleAutoContinue(event.reason);
         } else if (event.type === 'done' && !event.canContinue) {
           this.clearAutoContinue(true);
@@ -480,6 +497,51 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  /**
+   * View-only: shared skills sync across surfaces via CockroachDB.
+   * Account-scoped (no linked project required), unlike viewMirroredMemory.
+   */
+  async viewSharedSkills(): Promise<void> {
+    const token = await this.auth.getAccessToken();
+    if (!token) {
+      void vscode.window.showWarningMessage('Sign in first.');
+      return;
+    }
+
+    let skills;
+    try {
+      skills = await listSharedSkills(token);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      void vscode.window.showErrorMessage(`Failed to list skills: ${message}`);
+      return;
+    }
+
+    if (!skills.length) {
+      void vscode.window.showInformationMessage(
+        'No shared skills yet. The agent saves one via the mirror_skill tool when you approve it.',
+      );
+      return;
+    }
+
+    const picked = await vscode.window.showQuickPick(
+      skills.map((s) => ({
+        label: s.name,
+        description: s.sourceSurface,
+        detail: s.description,
+        skill: s,
+      })),
+      { title: 'Shared skills (select to view)' },
+    );
+    if (!picked) return;
+
+    const doc = await vscode.workspace.openTextDocument({
+      content: `# ${picked.skill.name}\n\n${picked.skill.description}\n\n---\n\n${picked.skill.body}`,
+      language: 'markdown',
+    });
+    await vscode.window.showTextDocument(doc, { preview: true });
+  }
+
   resolveWebviewView(
     webviewView: vscode.WebviewView,
     _context: vscode.WebviewViewResolveContext,
@@ -496,13 +558,14 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
     };
 
     this.bridge?.dispose();
+    this.webviewMessageSub?.dispose();
     this.bridge = new MessageBridge((msg) => {
       void webview.postMessage(msg);
     });
 
     webview.html = this.getHtml(webview);
 
-    webview.onDidReceiveMessage((raw) => {
+    this.webviewMessageSub = webview.onDidReceiveMessage((raw) => {
       const msg = this.bridge?.parseIncoming(raw);
       if (!msg) {
         this.output.appendLine(
@@ -515,10 +578,25 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
   }
 
   async pingFromCommand(): Promise<void> {
-    if (!this.view) {
+    if (!this.view || !this.bridge) {
       await vscode.commands.executeCommand('walkcroach.sidebar.focus');
+      await this.waitForBridge();
     }
     await this.startTask('ping', 'ping');
+  }
+
+  /** Focus does not await resolveWebviewView — poll until the bridge exists. */
+  private async waitForBridge(timeoutMs = 5_000): Promise<void> {
+    if (this.bridge) return;
+    const start = Date.now();
+    while (!this.bridge) {
+      if (Date.now() - start > timeoutMs) {
+        throw new Error(
+          'WalkCroach sidebar did not become ready — open the WalkCroach view and try again.',
+        );
+      }
+      await new Promise((r) => setTimeout(r, 50));
+    }
   }
 
   private async refreshCredentialStatus(): Promise<void> {
@@ -538,32 +616,24 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
     this.ccloudConfigured = Boolean(ccloud?.trim() || cfg?.apiKey);
   }
 
-  /** Prefer SecretStorage Bedrock key + optional model override for this run. */
-  private async withBedrockSecretEnv<T>(fn: () => Promise<T>): Promise<T> {
+  /** Prefer SecretStorage Bedrock key + model/reasoning without mutating process.env. */
+  private async withBedrockRunOptions(): Promise<{
+    client?: ReturnType<typeof createBedrockClient>;
+    modelId?: string;
+    reasoningEffort?: 'off' | 'low' | 'medium' | 'high';
+  }> {
     const fromSecret = (
       await this.context.secrets.get(SECRET_KEYS.bedrockApiKey)
     )?.trim();
-    const prevToken = process.env.AWS_BEARER_TOKEN_BEDROCK;
-    const prevModel = process.env.BEDROCK_NOVA_MODEL_ID;
     const modelOverride = this.getBedrockModelIdOverride();
-    if (fromSecret) {
-      process.env.AWS_BEARER_TOKEN_BEDROCK = fromSecret;
-    }
-    if (modelOverride) {
-      process.env.BEDROCK_NOVA_MODEL_ID = modelOverride;
-    }
-    try {
-      return await fn();
-    } finally {
-      if (fromSecret) {
-        if (prevToken === undefined) delete process.env.AWS_BEARER_TOKEN_BEDROCK;
-        else process.env.AWS_BEARER_TOKEN_BEDROCK = prevToken;
-      }
-      if (modelOverride) {
-        if (prevModel === undefined) delete process.env.BEDROCK_NOVA_MODEL_ID;
-        else process.env.BEDROCK_NOVA_MODEL_ID = prevModel;
-      }
-    }
+    const reasoningOverride = this.getReasoningEffortOverride();
+    return {
+      client: fromSecret
+        ? createBedrockClient({ bearerToken: fromSecret })
+        : undefined,
+      modelId: modelOverride || undefined,
+      reasoningEffort: reasoningOverride || undefined,
+    };
   }
 
   private getBedrockModelIdOverride(): string {
@@ -571,6 +641,21 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
       .getConfiguration('walkcroach.ide')
       .get<string>('bedrockModelId');
     return typeof raw === 'string' ? raw.trim() : '';
+  }
+
+  /** Empty means "use the engine default" (medium). */
+  private getReasoningEffortOverride():
+    | ''
+    | 'off'
+    | 'low'
+    | 'medium'
+    | 'high' {
+    const raw = vscode.workspace
+      .getConfiguration('walkcroach.ide')
+      .get<string>('reasoningEffort');
+    const v = typeof raw === 'string' ? raw.trim() : '';
+    if (v === 'off' || v === 'low' || v === 'medium' || v === 'high') return v;
+    return '';
   }
 
   private async applySaveSettings(
@@ -599,6 +684,20 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
           .update(
             'bedrockModelId',
             msg.bedrockModelId.trim(),
+            vscode.ConfigurationTarget.Global,
+          );
+      }
+
+      if (msg.reasoningEffort === null) {
+        await vscode.workspace
+          .getConfiguration('walkcroach.ide')
+          .update('reasoningEffort', '', vscode.ConfigurationTarget.Global);
+      } else if (typeof msg.reasoningEffort === 'string') {
+        await vscode.workspace
+          .getConfiguration('walkcroach.ide')
+          .update(
+            'reasoningEffort',
+            msg.reasoningEffort,
             vscode.ConfigurationTarget.Global,
           );
       }
@@ -757,6 +856,7 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
       mcpConfigured: this.mcpConfigured,
       bedrockConfigured: this.bedrockConfigured,
       bedrockModelId: this.getBedrockModelIdOverride(),
+      reasoningEffort: this.getReasoningEffortOverride(),
       ccloudConfigured: this.ccloudConfigured,
       telemetry: this.telemetry,
       signedIn: this.signedIn,
@@ -764,6 +864,7 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
       linkedProjectName: this.linkedProjectName,
       todos: this.sessionTodos,
       hasSession: this.sessionMessages.length > 0,
+      uiTurns: this.sessionUiTurns,
     });
   }
 
@@ -794,6 +895,7 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
               this.sessionId = snap.sessionId;
               this.sessionCreatedAt = snap.createdAt;
               this.sessionMessages = snap.messages;
+              this.sessionUiTurns = snap.uiTurns ?? [];
               if (snap.transcript) {
                 this.transcript = snap.transcript;
                 await this.persistTranscript();
@@ -826,28 +928,34 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
         return;
       case 'SUBMIT_TASK':
         this.clearAutoContinue(true);
-        // Fresh user task → reset checklist (Continue keeps prior todos).
-        await this.host.clearTodos?.();
-        this.sessionTodos = [];
-        this.bridge?.onAgentEvent({ type: 'todos', todos: [] });
-        await this.startTask(msg.text, msg.mode === 'plan' ? 'plan' : 'full');
+        // Only reset checklist on a true new chat; follow-ups keep prior todos.
+        if (this.sessionMessages.length === 0) {
+          await this.host.clearTodos?.();
+          this.sessionTodos = [];
+          this.bridge?.onAgentEvent({ type: 'todos', todos: [] });
+        }
+        await this.startTask(msg.text, msg.mode === 'plan' ? 'plan' : 'full', {
+          attachments: msg.attachments,
+        });
         return;
       case 'CANCEL':
         this.clearAutoContinue(true);
         this.abort?.abort();
         this.host.killAllTerminals?.();
-        if (this.pendingApproval?.kind === 'question') {
-          this.host.resolveQuestion(
-            this.pendingApproval.stepId,
-            'reject',
-          );
-        } else {
-          this.host.resolveApproval(
-            this.pendingApproval?.stepId ?? '',
-            'reject',
-          );
+        if (this.pendingApproval) {
+          if (this.pendingApproval.kind === 'question') {
+            this.host.resolveQuestion(
+              this.pendingApproval.stepId,
+              'reject',
+            );
+          } else {
+            this.host.resolveApproval(
+              this.pendingApproval.stepId,
+              'reject',
+            );
+          }
+          this.pendingApproval = null;
         }
-        this.pendingApproval = null;
         return;
       case 'APPROVE_STEP':
         this.host.resolveApproval(msg.stepId, 'approve');
@@ -878,8 +986,10 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
         this.snapshot();
         return;
       case 'CLEAR_SESSION':
+        this.clearAutoContinue(true);
         this.sessionMessages = [];
         this.sessionTodos = [];
+        this.sessionUiTurns = [];
         this.transcript = '';
         this.sessionId = undefined;
         this.sessionCreatedAt = undefined;
@@ -888,12 +998,66 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
         await this.persistTranscript();
         this.snapshot();
         return;
+      case 'SYNC_UI_TURNS':
+        this.sessionUiTurns = msg.turns;
+        if (this.sessionId && this.sessionMessages.length > 0) {
+          void this.host
+            .persistAgentSession?.({
+              sessionId: this.sessionId,
+              messages: this.sessionMessages,
+              transcript: this.transcript,
+              uiTurns: this.sessionUiTurns,
+              createdAt: this.sessionCreatedAt,
+            })
+            .catch((err) => {
+              this.output.appendLine(
+                `UI turns persist failed: ${
+                  err instanceof Error ? err.message : String(err)
+                }`,
+              );
+            });
+        }
+        return;
       case 'CONTINUE_TASK':
         this.clearAutoContinue(false);
         await this.startTask(CONTINUE_PROMPT, this.lastLoopMode, {
           followUp: true,
         });
         return;
+      case 'REVERT_TO_TURN': {
+        const root = this.host.getWorkspaceRoot();
+        if (!root) {
+          this.bridge?.postError('Open a folder to revert changes.');
+          return;
+        }
+        const decision = await this.host.confirmCommand(
+          'Revert all file changes from this turn?',
+          { toolName: 'revert_turn', stepId: msg.turnId },
+        );
+        if (decision !== 'approve') return;
+        try {
+          const { reverted } = await revertTurn(root, this.host, msg.turnId);
+          if (reverted.length) {
+            const summary = `Reverted ${reverted.length} file${
+              reverted.length === 1 ? '' : 's'
+            } from this turn: ${reverted.join(', ')}`;
+            // this.transcript is not rendered by the webview (STATE_SNAPSHOT.transcript
+            // is intentionally ignored there — see App.tsx) — it's kept only for
+            // persistTranscript's session-restore bookkeeping. postWarning is the only
+            // channel the webview actually surfaces, so use it for user-visible feedback.
+            this.transcript += `${this.transcript ? '\n\n' : ''}${summary}`;
+            await this.persistTranscript();
+            this.bridge?.postWarning(summary);
+          } else {
+            this.bridge?.postWarning('Nothing to revert for this turn.');
+          }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          this.bridge?.postError(`Revert failed: ${message}`);
+        }
+        this.snapshot();
+        return;
+      }
       case 'SET_AUTONOMY':
         this.host.setAutonomy(msg.level);
         await this.context.workspaceState.update(AUTONOMY_KEY, msg.level);
@@ -913,7 +1077,7 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
   private async startTask(
     text: string,
     mode: 'ping' | 'full' | 'plan',
-    opts?: { followUp?: boolean },
+    opts?: { followUp?: boolean; attachments?: SubmitAttachment[] },
   ): Promise<void> {
     if (this.streaming) {
       this.bridge?.postError('A run is already in progress. Cancel it first.');
@@ -967,6 +1131,7 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
       mcpConfig?.apiKey;
 
     let projectMemory = undefined;
+    let sharedSkills = undefined;
     const token = await this.auth.getAccessToken();
     if (token && this.linkedProjectId) {
       projectMemory = createProjectMemoryBridge({
@@ -975,10 +1140,16 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
         projectName: this.linkedProjectName ?? undefined,
       });
     }
+    if (token) {
+      sharedSkills = createSharedSkillsBridge({
+        getToken: () => this.auth.getAccessToken(),
+        sourceSurface: 'ide',
+      });
+    }
 
     try {
-      await this.withBedrockSecretEnv(async () => {
-        await runAgentLoop({
+      const bedrockOpts = await this.withBedrockRunOptions();
+      await runAgentLoop({
           host: this.host,
           prompt: text,
           signal: this.abort!.signal,
@@ -990,8 +1161,18 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
           mcpConfig,
           ccloudApiKey,
           projectMemory,
+          sharedSkills,
+          client: bedrockOpts.client,
+          modelId: bedrockOpts.modelId,
+          reasoningEffort: bedrockOpts.reasoningEffort,
+          officialSkillsJsonPath: path.join(
+            this.context.extensionPath,
+            'dist',
+            'cockroachdb-official.generated.json',
+          ),
           priorMessages: hasSession ? this.sessionMessages : undefined,
           followUp: isContinue || hasSession,
+          attachments: opts?.attachments,
           onSessionMessages: (messages) => {
             this.sessionMessages = messages;
             if (!this.sessionId) {
@@ -1001,11 +1182,13 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
             const sessionId = this.sessionId;
             const createdAt = this.sessionCreatedAt;
             const transcript = this.transcript;
+            const uiTurns = this.sessionUiTurns;
             void this.host
               .persistAgentSession?.({
                 sessionId,
                 messages,
                 transcript,
+                uiTurns,
                 createdAt,
               })
               .catch((err) => {
@@ -1017,7 +1200,6 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
               });
           },
         });
-      });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.bridge?.postError(message);
@@ -1104,7 +1286,12 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
   dispose(): void {
     this.clearAutoContinue(true);
     this.abort?.abort();
+    // After a clean done, abort is already cleared — still reap leftover shells.
+    this.host.killAllTerminals?.();
+    this.webviewMessageSub?.dispose();
+    this.webviewMessageSub = undefined;
     this.bridge?.dispose();
+    this.bridge = undefined;
     this.output.dispose();
   }
 

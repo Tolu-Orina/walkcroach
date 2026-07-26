@@ -36,6 +36,7 @@ describe('protocol allowlist', () => {
       'SAVE_SETTINGS',
       'CONTINUE_TASK',
       'CLEAR_SESSION',
+      'REVERT_TO_TURN',
     ]);
   });
 
@@ -65,6 +66,42 @@ describe('protocol allowlist', () => {
     });
   });
 
+  it('parses SAVE_SETTINGS reasoningEffort override and clear', () => {
+    expect(
+      parseWebviewToHostMessage({
+        type: 'SAVE_SETTINGS',
+        reasoningEffort: 'high',
+      }),
+    ).toEqual({ type: 'SAVE_SETTINGS', reasoningEffort: 'high' });
+
+    expect(
+      parseWebviewToHostMessage({
+        type: 'SAVE_SETTINGS',
+        reasoningEffort: null,
+      }),
+    ).toEqual({ type: 'SAVE_SETTINGS', reasoningEffort: null });
+
+    expect(
+      parseWebviewToHostMessage({
+        type: 'SAVE_SETTINGS',
+        reasoningEffort: 'bogus',
+      }),
+    ).toEqual({ type: 'SAVE_SETTINGS' });
+  });
+
+  it('parses REVERT_TO_TURN, rejecting a missing/empty turnId', () => {
+    expect(
+      parseWebviewToHostMessage({ type: 'REVERT_TO_TURN', turnId: 'abc123' }),
+    ).toEqual({ type: 'REVERT_TO_TURN', turnId: 'abc123' });
+    expect(parseWebviewToHostMessage({ type: 'REVERT_TO_TURN' })).toBeNull();
+    expect(
+      parseWebviewToHostMessage({ type: 'REVERT_TO_TURN', turnId: '' }),
+    ).toBeNull();
+    expect(
+      parseWebviewToHostMessage({ type: 'REVERT_TO_TURN', turnId: 42 }),
+    ).toBeNull();
+  });
+
   it('includes Phase A host→webview approval + cache types', () => {
     expect(HOST_TO_WEBVIEW).toContain('APPROVAL_REQUEST');
     expect(HOST_TO_WEBVIEW).toContain('CACHE_USAGE');
@@ -88,6 +125,60 @@ describe('protocol allowlist', () => {
     expect(
       parseWebviewToHostMessage({ type: 'SUBMIT_TASK', text: 42 }),
     ).toBeNull();
+  });
+
+  it('parses SUBMIT_TASK attachments, round-tripping valid entries', () => {
+    const msg = parseWebviewToHostMessage({
+      type: 'SUBMIT_TASK',
+      text: 'describe this image',
+      attachments: [
+        { id: 'a1', name: 'photo.png', mime: 'image/png', contentBase64: 'YWJj' },
+        { id: 'a2', name: 'notes.txt', mime: 'text/plain', contentText: 'hello' },
+      ],
+    });
+    expect(msg).toEqual({
+      type: 'SUBMIT_TASK',
+      text: 'describe this image',
+      attachments: [
+        { id: 'a1', name: 'photo.png', mime: 'image/png', contentBase64: 'YWJj' },
+        { id: 'a2', name: 'notes.txt', mime: 'text/plain', contentText: 'hello' },
+      ],
+    });
+  });
+
+  it('drops malformed attachment entries without rejecting the whole message', () => {
+    const msg = parseWebviewToHostMessage({
+      type: 'SUBMIT_TASK',
+      text: 'hi',
+      attachments: [
+        { id: 'ok', name: 'a.txt', mime: 'text/plain', contentText: 'x' },
+        { id: 'no-content', name: 'b.txt', mime: 'text/plain' },
+        { name: 'missing-id.txt', mime: 'text/plain', contentText: 'x' },
+        'not-an-object',
+        42,
+      ],
+    });
+    expect(msg).toEqual({
+      type: 'SUBMIT_TASK',
+      text: 'hi',
+      attachments: [{ id: 'ok', name: 'a.txt', mime: 'text/plain', contentText: 'x' }],
+    });
+  });
+
+  it('omits attachments entirely when the field is absent, not an array, or empty after filtering', () => {
+    expect(
+      parseWebviewToHostMessage({ type: 'SUBMIT_TASK', text: 'hi' }),
+    ).toEqual({ type: 'SUBMIT_TASK', text: 'hi' });
+    expect(
+      parseWebviewToHostMessage({ type: 'SUBMIT_TASK', text: 'hi', attachments: 'nope' }),
+    ).toEqual({ type: 'SUBMIT_TASK', text: 'hi' });
+    expect(
+      parseWebviewToHostMessage({
+        type: 'SUBMIT_TASK',
+        text: 'hi',
+        attachments: [{ id: 'x', name: 'a', mime: 'text/plain' }],
+      }),
+    ).toEqual({ type: 'SUBMIT_TASK', text: 'hi' });
   });
 });
 

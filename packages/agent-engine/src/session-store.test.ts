@@ -53,6 +53,29 @@ describe('session-store', () => {
     expect(jsonl.trim().split('\n')).toHaveLength(2);
   });
 
+  it('persists and reloads uiTurns', async () => {
+    dir = await mkdtemp(join(tmpdir(), 'wc-sess-'));
+    const sessionId = newSessionId();
+    await persistAgentSession(dir, {
+      sessionId,
+      messages: [{ role: 'user', content: [{ text: 'hi' }] }],
+      uiTurns: [
+        { id: 't1', role: 'user', text: 'hi' },
+        {
+          id: 't2',
+          role: 'assistant',
+          text: 'hello',
+          turnId: 'turn-1',
+          tools: [{ id: 'x', name: 'read_file', status: 'done' }],
+        },
+      ],
+    });
+    const loaded = await loadAgentSession(dir);
+    expect(loaded?.uiTurns).toHaveLength(2);
+    expect(loaded?.uiTurns[1]?.turnId).toBe('turn-1');
+    expect(loaded?.uiTurns[1]?.tools?.[0]?.name).toBe('read_file');
+  });
+
   it('clears active session and deletes files', async () => {
     dir = await mkdtemp(join(tmpdir(), 'wc-sess-'));
     const sessionId = newSessionId();

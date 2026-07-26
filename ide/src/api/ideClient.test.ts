@@ -12,6 +12,8 @@ import {
   listMemoryEntries,
   updateMemoryEntry,
   createProjectMemoryBridge,
+  listSharedSkills,
+  createSharedSkillsBridge,
 } from './ideClient.js';
 
 function jsonResponse(data: unknown, status = 200) {
@@ -152,5 +154,54 @@ describe('createProjectMemoryBridge', () => {
     await expect(bridge.recall({ query: 'test' })).rejects.toThrow(
       /Not signed in/,
     );
+  });
+});
+
+describe('listSharedSkills', () => {
+  it('returns the skills array', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        skills: [
+          {
+            name: 'my-skill',
+            description: 'desc',
+            body: 'body',
+            sourceSurface: 'ide',
+            createdAt: '2026-01-01',
+            updatedAt: '2026-01-02',
+          },
+        ],
+      }),
+    );
+    const result = await listSharedSkills('tok');
+    expect(result).toHaveLength(1);
+    expect(result[0]!.name).toBe('my-skill');
+  });
+});
+
+describe('createSharedSkillsBridge', () => {
+  it('creates a bridge that can list and mirror, with no projectId', async () => {
+    const bridge = createSharedSkillsBridge({ getToken: async () => 'tok-1' });
+
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ skills: [{ name: 'a', description: 'd', body: 'b', sourceSurface: 'ide', createdAt: '1', updatedAt: '2' }] }),
+    );
+    const skills = await bridge.list();
+    expect(skills).toHaveLength(1);
+
+    fetchMock.mockResolvedValueOnce(jsonResponse({ id: 'skill-1' }));
+    const mirrored = await bridge.mirror({
+      name: 'my-skill',
+      description: 'desc',
+      body: 'body',
+    });
+    expect(mirrored.id).toBe('skill-1');
+    const mirrorCall = fetchMock.mock.calls.at(-1);
+    expect(mirrorCall?.[1]?.body).toContain('"sourceSurface":"ide"');
+  });
+
+  it('throws when not signed in', async () => {
+    const bridge = createSharedSkillsBridge({ getToken: async () => undefined });
+    await expect(bridge.list()).rejects.toThrow(/Not signed in/);
   });
 });

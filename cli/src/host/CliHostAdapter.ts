@@ -57,6 +57,7 @@ export class CliHostAdapter implements HostAdapter {
   private readonly gate: ApprovalController;
   private readonly approvals: ReturnType<typeof bindApprovals>;
   private runSignal: AbortSignal | undefined;
+  private runAbortHandler: (() => void) | undefined;
   private autonomy: AutonomyLevel;
   private readonly activePids = new Set<number>();
   private readonly bgTerminals = new BackgroundTerminalRegistry(() =>
@@ -83,19 +84,23 @@ export class CliHostAdapter implements HostAdapter {
   };
 
   setRunSignal(signal?: AbortSignal): void {
+    if (this.runSignal && this.runAbortHandler) {
+      this.runSignal.removeEventListener('abort', this.runAbortHandler);
+    }
+    this.runAbortHandler = undefined;
     this.runSignal = signal;
     if (signal?.aborted) {
       this.gate.cancelAll();
       this.killAllTerminals();
+      return;
     }
-    signal?.addEventListener(
-      'abort',
-      () => {
-        this.gate.cancelAll();
-        this.killAllTerminals();
-      },
-      { once: true },
-    );
+    if (!signal) return;
+    const onAbort = () => {
+      this.gate.cancelAll();
+      this.killAllTerminals();
+    };
+    this.runAbortHandler = onAbort;
+    signal.addEventListener('abort', onAbort, { once: true });
   }
 
   killAllTerminals(): void {
@@ -104,6 +109,10 @@ export class CliHostAdapter implements HostAdapter {
     }
     this.activePids.clear();
     this.bgTerminals.killAll();
+    this.sessions.killAll();
+  }
+
+  killInteractiveTerminalSessions(): void {
     this.sessions.killAll();
   }
 
@@ -187,6 +196,12 @@ export class CliHostAdapter implements HostAdapter {
   async applyDiff(rel: string, diff: string): Promise<void> {
     const before = await this.readFile(rel);
     await this.writeFile(rel, applyDiffString(before, diff));
+  }
+
+  /** P2 checkpoints — undo a file the agent created (revertTurn). */
+  async deleteFile(rel: string): Promise<void> {
+    const abs = this.resolvePath(rel);
+    await fs.rm(abs, { force: true });
   }
 
   async listDir(rel: string): Promise<string[]> {

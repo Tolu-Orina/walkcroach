@@ -5,7 +5,9 @@ export type TelemetryName =
   | 'skill_invoked'
   | 'skill_loaded'
   | 'memory_recall'
-  | 'memory_mirror';
+  | 'memory_mirror'
+  | 'skill_mirror'
+  | 'semantic_search';
 
 export type TelemetryCounters = Record<TelemetryName, number>;
 
@@ -18,6 +20,8 @@ export function emptyTelemetry(): TelemetryCounters {
     skill_loaded: 0,
     memory_recall: 0,
     memory_mirror: 0,
+    skill_mirror: 0,
+    semantic_search: 0,
   };
 }
 

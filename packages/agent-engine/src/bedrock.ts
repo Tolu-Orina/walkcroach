@@ -1,6 +1,7 @@
 import {
   BedrockRuntimeClient,
   ConverseStreamCommand,
+  InvokeModelCommand,
   type ContentBlock,
   type Message,
   type SystemContentBlock,
@@ -13,19 +14,88 @@ export function getNovaModelId(): string {
   );
 }
 
+export function getTitanEmbedModelId(): string {
+  return (
+    process.env.BEDROCK_TITAN_EMBED_MODEL_ID ?? 'amazon.titan-embed-text-v2:0'
+  );
+}
+
+/**
+ * Embed text with Titan Text Embeddings V2 (1024-dim), mirroring
+ * infra-backend/packages/agent-harness/src/bedrock.ts's embedText exactly
+ * (same model, same normalized-1024-dim body shape) — kept dimensionally
+ * consistent with the VECTOR(1024) convention used across the codebase's
+ * CockroachDB memory tables, even though this is a purely local index.
+ */
+export async function embedText(
+  text: string,
+  client?: BedrockRuntimeClient,
+  modelId?: string,
+): Promise<number[]> {
+  const c = client ?? createBedrockClient();
+  const model = modelId ?? getTitanEmbedModelId();
+  const res = await c.send(
+    new InvokeModelCommand({
+      modelId: model,
+      contentType: 'application/json',
+      accept: 'application/json',
+      body: JSON.stringify({ inputText: text, dimensions: 1024, normalize: true }),
+    }),
+  );
+  const parsed = JSON.parse(new TextDecoder().decode(res.body)) as {
+    embedding: number[];
+  };
+  return parsed.embedding;
+}
+
 /** Explicit output budget (Bedrock defaults to model max and can truncate silently). */
 export const DEFAULT_MAX_OUTPUT_TOKENS = 4096;
+
+/** Output budget when extended thinking is on — reasoning itself consumes output tokens. */
+export const DEFAULT_MAX_REASONING_OUTPUT_TOKENS = 30_000;
 
 /** Auto-continue rounds when stopReason is max_tokens (industry continuation pattern). */
 export const DEFAULT_MAX_OUTPUT_CONTINUATIONS = 2;
 
-export function createBedrockClient(region?: string): BedrockRuntimeClient {
+export type NovaReasoningEffort = 'low' | 'medium' | 'high' | 'off';
+
+/**
+ * Nova 2 Lite extended thinking. Default medium — same tier as Web App
+ * Builder for multi-step coding / tool loops. Set
+ * BEDROCK_NOVA_REASONING=off|low|medium|high to override, or pass
+ * `reasoningEffort` explicitly to streamConverseTurn (IDE settings do this).
+ * @see https://docs.aws.amazon.com/nova/latest/nova2-userguide/extended-thinking.html
+ */
+export function getNovaReasoningEffort(): NovaReasoningEffort {
+  const raw = (process.env.BEDROCK_NOVA_REASONING ?? 'medium')
+    .trim()
+    .toLowerCase();
+  if (raw === 'off' || raw === 'disabled' || raw === '0' || raw === 'false') {
+    return 'off';
+  }
+  if (raw === 'low' || raw === 'medium' || raw === 'high') return raw;
+  return 'medium';
+}
+
+export function createBedrockClient(
+  regionOrOpts?: string | { region?: string; bearerToken?: string },
+): BedrockRuntimeClient {
+  const opts =
+    typeof regionOrOpts === 'string'
+      ? { region: regionOrOpts }
+      : (regionOrOpts ?? {});
+  const region =
+    opts.region ??
+    process.env.BEDROCK_REGION ??
+    process.env.AWS_REGION ??
+    'eu-west-2';
+  const bearer =
+    opts.bearerToken?.trim() ||
+    process.env.AWS_BEARER_TOKEN_BEDROCK?.trim() ||
+    undefined;
   return new BedrockRuntimeClient({
-    region:
-      region ??
-      process.env.BEDROCK_REGION ??
-      process.env.AWS_REGION ??
-      'eu-west-2',
+    region,
+    ...(bearer ? { token: { token: bearer } } : {}),
   });
 }
 
@@ -70,6 +140,8 @@ export async function* streamConverseTurn(params: {
   signal?: AbortSignal;
   /** Override default output token budget. */
   maxTokens?: number;
+  /** Override extended-thinking tier (default: getNovaReasoningEffort()). */
+  reasoningEffort?: NovaReasoningEffort;
 }): AsyncGenerator<StreamDelta, ConverseTurnResult> {
   if (params.signal?.aborted) {
     throw new DOMException('Aborted', 'AbortError');
@@ -77,7 +149,25 @@ export async function* streamConverseTurn(params: {
 
   const client = params.client ?? createBedrockClient();
   const modelId = params.modelId ?? getNovaModelId();
-  const maxTokens = params.maxTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
+  const reasoningEffort = params.reasoningEffort ?? getNovaReasoningEffort();
+
+  const additionalModelRequestFields =
+    reasoningEffort === 'off'
+      ? undefined
+      : {
+          reasoningConfig: {
+            type: 'enabled',
+            maxReasoningEffort: reasoningEffort,
+          },
+        };
+
+  // Nova's "high" reasoning tier forbids temperature/topP/maxTokens entirely —
+  // leave inferenceConfig unset only in that case.
+  const maxTokens =
+    params.maxTokens ??
+    (reasoningEffort === 'off'
+      ? DEFAULT_MAX_OUTPUT_TOKENS
+      : DEFAULT_MAX_REASONING_OUTPUT_TOKENS);
 
   const command = new ConverseStreamCommand({
     modelId,
@@ -86,9 +176,8 @@ export async function* streamConverseTurn(params: {
     toolConfig: params.tools?.length
       ? { tools: params.tools }
       : undefined,
-    inferenceConfig: {
-      maxTokens,
-    },
+    ...(reasoningEffort === 'high' ? {} : { inferenceConfig: { maxTokens } }),
+    ...(additionalModelRequestFields ? { additionalModelRequestFields } : {}),
   });
 
   const response = await client.send(command, {
@@ -142,6 +231,9 @@ export async function* streamConverseTurn(params: {
         openTool.inputJson += event.contentBlockDelta.delta.toolUse.input;
       }
     }
+
+    // Extended-thinking deltas stream as reasoningContent, not text — leave
+    // them out of the chat timeline (still billed as output tokens).
 
     if (event.contentBlockStop) {
       if (openTool) {

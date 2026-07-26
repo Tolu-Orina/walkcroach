@@ -4,7 +4,7 @@
  * Layout:
  *   .walkcroach/sessions/active.json          → { sessionId, updatedAt }
  *   .walkcroach/sessions/<id>/messages.jsonl  → one Bedrock Message per line
- *   .walkcroach/sessions/<id>/ui.json         → { transcript, createdAt, updatedAt }
+ *   .walkcroach/sessions/<id>/ui.json         → { transcript, uiTurns?, createdAt, updatedAt }
  */
 
 import { mkdir, readFile, writeFile, unlink, readdir, rm } from 'node:fs/promises';
@@ -13,6 +13,10 @@ import { randomUUID } from 'node:crypto';
 import type { Message } from '@aws-sdk/client-bedrock-runtime';
 import { WALK_CROACH_DIR } from './session-fs.js';
 import { cloneMessages, trimSessionMessages } from './session.js';
+import {
+  parsePersistedChatTurns,
+  type PersistedChatTurn,
+} from './protocol.js';
 
 export const SESSIONS_REL_DIR = `${WALK_CROACH_DIR}/sessions`;
 export const ACTIVE_SESSION_REL = `${SESSIONS_REL_DIR}/active.json`;
@@ -21,6 +25,7 @@ export type AgentSessionSnapshot = {
   sessionId: string;
   messages: Message[];
   transcript: string;
+  uiTurns: PersistedChatTurn[];
   createdAt: string;
   updatedAt: string;
 };
@@ -85,15 +90,18 @@ export async function loadAgentSession(
     if (!messages.length) return null;
 
     let transcript = '';
+    let uiTurns: PersistedChatTurn[] = [];
     let createdAt = new Date().toISOString();
     let updatedAt = createdAt;
     try {
       const ui = JSON.parse(await readFile(join(dir, 'ui.json'), 'utf8')) as {
         transcript?: string;
+        uiTurns?: unknown;
         createdAt?: string;
         updatedAt?: string;
       };
       transcript = typeof ui.transcript === 'string' ? ui.transcript : '';
+      uiTurns = parsePersistedChatTurns(ui.uiTurns);
       if (ui.createdAt) createdAt = ui.createdAt;
       if (ui.updatedAt) updatedAt = ui.updatedAt;
     } catch {
@@ -104,6 +112,7 @@ export async function loadAgentSession(
       sessionId: id,
       messages: trimSessionMessages(cloneMessages(messages)),
       transcript,
+      uiTurns,
       createdAt,
       updatedAt,
     };
@@ -118,6 +127,7 @@ export async function persistAgentSession(
     sessionId: string;
     messages: Message[];
     transcript?: string;
+    uiTurns?: PersistedChatTurn[];
     createdAt?: string;
   },
   opts?: { maxSessions?: number },
@@ -128,11 +138,14 @@ export async function persistAgentSession(
   await mkdir(dir, { recursive: true });
 
   let createdAt = snapshot.createdAt ?? now;
+  let prevUiTurns: PersistedChatTurn[] = [];
   try {
     const prev = JSON.parse(await readFile(join(dir, 'ui.json'), 'utf8')) as {
       createdAt?: string;
+      uiTurns?: unknown;
     };
     if (prev.createdAt) createdAt = prev.createdAt;
+    prevUiTurns = parsePersistedChatTurns(prev.uiTurns);
   } catch {
     /* new session */
   }
@@ -143,8 +156,14 @@ export async function persistAgentSession(
     (messages.length ? '\n' : '');
   await writeFile(join(dir, 'messages.jsonl'), body, 'utf8');
 
+  const uiTurns =
+    snapshot.uiTurns !== undefined
+      ? parsePersistedChatTurns(snapshot.uiTurns)
+      : prevUiTurns;
+
   const ui = {
     transcript: snapshot.transcript ?? '',
+    uiTurns,
     createdAt,
     updatedAt: now,
     messageCount: messages.length,
@@ -165,6 +184,7 @@ export async function persistAgentSession(
     sessionId: id,
     messages,
     transcript: ui.transcript,
+    uiTurns,
     createdAt,
     updatedAt: now,
   };

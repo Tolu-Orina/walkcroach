@@ -131,7 +131,7 @@ Use covering indexes.
     const reg = new SkillsRegistry();
     await reg.init([]);
     const metas = reg.listMeta();
-    // Official cockroachlabs/cockroachdb-skills (34) + WalkCroach companion.
+    // Official cockroachlabs skills (JSON) + WalkCroach companion + coding skills.
     expect(metas.length).toBeGreaterThanOrEqual(30);
     expect(reg.catalogText()).toContain('cockroachdb-sql');
     expect(reg.catalogText()).toContain('cockroachdb-walkcroach-tools');

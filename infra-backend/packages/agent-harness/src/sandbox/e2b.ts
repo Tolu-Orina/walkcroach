@@ -13,7 +13,12 @@ type E2BSandbox = {
   files: {
     write: (path: string, content: string) => Promise<unknown>;
     read: (path: string) => Promise<string | Uint8Array>;
-    list?: (path?: string) => Promise<Array<{ name: string; type?: string }>>;
+    list?: (
+      path?: string,
+      opts?: { depth?: number },
+    ) => Promise<
+      Array<{ name: string; path?: string; type?: string | { toString(): string } }>
+    >;
   };
   commands: {
     run: (
@@ -304,18 +309,62 @@ export default defineConfig({
 
   async listFiles(root = ''): Promise<string[]> {
     const sbx = this.requireSandbox();
-    if (!sbx.files.list) {
-      const result = await this.runTerminal(
-        `find ${shellQuote(this.abs(root || '.'))} -type f | head -n 500`,
-      );
-      return result.stdout
-        .split('\n')
-        .map((l) => l.trim())
-        .filter(Boolean)
-        .map((p) => p.replace(`${this.workdir}/`, ''));
+    const skip = new Set([
+      'node_modules',
+      '.git',
+      'dist',
+      '.vite',
+      'coverage',
+      '.turbo',
+      '.next',
+    ]);
+    const absRoot = this.abs(root || '.');
+    const toRel = (absPath: string): string => {
+      const normalized = absPath.replace(/\\/g, '/');
+      const prefix = `${this.workdir.replace(/\\/g, '/')}/`;
+      return normalized.startsWith(prefix)
+        ? normalized.slice(prefix.length)
+        : normalized.replace(/^\.\//, '');
+    };
+    const shouldSkip = (rel: string): boolean =>
+      rel.split('/').some((part) => skip.has(part));
+
+    // E2B files.list defaults to depth:1 — only root names — so src/ never
+    // appeared in the Files pane. Request a deep listing and keep files only.
+    if (sbx.files.list) {
+      try {
+        const entries = await sbx.files.list(absRoot, { depth: 12 });
+        const files: string[] = [];
+        for (const e of entries) {
+          const type =
+            typeof e.type === 'string'
+              ? e.type
+              : e.type != null
+                ? String(e.type)
+                : 'file';
+          if (type === 'dir') continue;
+          const abs = (e.path ?? `${absRoot}/${e.name}`).replace(/\\/g, '/');
+          const rel = toRel(abs);
+          if (!rel || shouldSkip(rel)) continue;
+          files.push(rel);
+        }
+        if (files.length > 0) return files.slice(0, 500);
+      } catch {
+        // fall through to find
+      }
     }
-    const entries = await sbx.files.list(this.abs(root || '.'));
-    return entries.map((e) => e.name);
+
+    const result = await this.runTerminal(
+      `find ${shellQuote(absRoot)} -type f ` +
+        `! -path '*/node_modules/*' ! -path '*/.git/*' ! -path '*/dist/*' ` +
+        `! -path '*/.vite/*' ! -path '*/coverage/*' | head -n 500`,
+    );
+    return result.stdout
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .map(toRel)
+      .filter((p) => p && !shouldSkip(p));
   }
 
   getInfo(): SandboxRuntimeInfo {

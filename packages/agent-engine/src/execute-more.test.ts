@@ -1,4 +1,13 @@
-import { describe, expect, it, vi } from 'vitest';
+import { mkdtemp, mkdir, writeFile, rm, readdir } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+const mockEmbedText = vi.fn();
+vi.mock('./bedrock.js', () => ({
+  embedText: (...args: unknown[]) => mockEmbedText(...args),
+}));
+
 import { createFakeHost } from './fake-host.js';
 import { executeTool } from './tools/execute.js';
 import type { ToolExecResult } from './tools/execute.js';
@@ -306,6 +315,257 @@ describe('executeTool — load_skill', () => {
   });
 });
 
+describe('executeTool — load_rule', () => {
+  let dir: string;
+
+  afterEach(async () => {
+    if (dir) await rm(dir, { recursive: true, force: true });
+  });
+
+  it('loads a manual rule body by name', async () => {
+    dir = await mkdtemp(join(tmpdir(), 'wc-load-rule-'));
+    await mkdir(join(dir, '.walkcroach', 'rules'), { recursive: true });
+    await writeFile(
+      join(dir, '.walkcroach', 'rules', 'deploy.md'),
+      [
+        '---',
+        'name: deploy-checklist',
+        'description: Steps to run before deploying',
+        '---',
+        '',
+        '1. Run migrations.',
+      ].join('\n'),
+      'utf8',
+    );
+    const host = createFakeHost({ autoApprove: true, workspaceRoot: dir });
+
+    const result = await executeTool({
+      host,
+      tool: {
+        toolUseId: 'lr1',
+        name: 'load_rule',
+        input: { name: 'deploy-checklist' },
+      },
+    });
+    expect(result.status).toBe('success');
+    expect(result.content).toContain('deploy-checklist');
+    expect(result.content).toContain('Steps to run before deploying');
+    expect(result.content).toContain('Run migrations');
+  });
+
+  it('errors for an unknown rule name', async () => {
+    const dir2 = await mkdtemp(join(tmpdir(), 'wc-load-rule-'));
+    dir = dir2;
+    await mkdir(join(dir2, '.walkcroach', 'rules'), { recursive: true });
+    const host = createFakeHost({ autoApprove: true, workspaceRoot: dir2 });
+
+    const result = await executeTool({
+      host,
+      tool: {
+        toolUseId: 'lr2',
+        name: 'load_rule',
+        input: { name: 'nonexistent' },
+      },
+    });
+    expect(result.status).toBe('error');
+    expect(result.content).toContain('Unknown project rule');
+  });
+});
+
+describe('executeTool — mcp_call', () => {
+  it('errors when no registry is configured', async () => {
+    const host = createFakeHost({ autoApprove: true });
+    const result = await executeTool({
+      host,
+      tool: {
+        toolUseId: 'mc1',
+        name: 'mcp_call',
+        input: { server: 'github', tool: 'search_issues' },
+      },
+    });
+    expect(result.status).toBe('error');
+    expect(result.content).toContain('No additional MCP servers configured');
+  });
+
+  it('errors in read-only sub-agent mode even with a registry configured', async () => {
+    const host = createFakeHost({ autoApprove: true });
+    const mcpServers = { callTool: vi.fn() };
+    const result = await executeTool({
+      host,
+      readOnly: true,
+      mcpServers,
+      tool: {
+        toolUseId: 'mc2',
+        name: 'mcp_call',
+        input: { server: 'github', tool: 'search_issues' },
+      },
+    });
+    expect(result.status).toBe('error');
+    expect(result.content).toContain('read-only');
+    expect(mcpServers.callTool).not.toHaveBeenCalled();
+  });
+
+  it('calls the registry after approval', async () => {
+    const host = createFakeHost({ autoApprove: true });
+    const mcpServers = {
+      callTool: vi.fn().mockResolvedValue('issue #42: fix bug'),
+    };
+    const result = await executeTool({
+      host,
+      mcpServers,
+      tool: {
+        toolUseId: 'mc3',
+        name: 'mcp_call',
+        input: { server: 'github', tool: 'search_issues', arguments: { q: 'bug' } },
+      },
+    });
+    expect(result.status).toBe('success');
+    expect(result.content).toBe('issue #42: fix bug');
+    expect(mcpServers.callTool).toHaveBeenCalledWith('github', 'search_issues', {
+      q: 'bug',
+    });
+  });
+
+  it('is rejected when the user declines the confirmation', async () => {
+    const host = createFakeHost();
+    const mcpServers = { callTool: vi.fn() };
+    const p = executeTool({
+      host,
+      mcpServers,
+      tool: {
+        toolUseId: 'mc4',
+        name: 'mcp_call',
+        input: { server: 'github', tool: 'delete_issue' },
+      },
+    });
+    await vi.waitFor(() => {
+      expect(host.events.some((e) => e.type === 'approval_request')).toBe(true);
+    });
+    const req = host.events.find((e) => e.type === 'approval_request');
+    if (req?.type === 'approval_request') {
+      host.resolveApproval(req.request.stepId, 'reject');
+    }
+    const result = await p;
+    expect(result.status).toBe('rejected');
+    expect(mcpServers.callTool).not.toHaveBeenCalled();
+  });
+});
+
+describe('executeTool — semantic_search', () => {
+  let dir: string;
+
+  afterEach(async () => {
+    mockEmbedText.mockReset();
+    if (dir) await rm(dir, { recursive: true, force: true });
+  });
+
+  it('ranks results using embedText and reports the workspace file', async () => {
+    dir = await mkdtemp(join(tmpdir(), 'wc-semsearch-'));
+    await writeFile(
+      join(dir, 'fruit.ts'),
+      'export const note = "banana fruit stand";\n',
+    );
+    const host = createFakeHost({ autoApprove: true, workspaceRoot: dir });
+    mockEmbedText.mockImplementation(async (text: string) => [
+      text.toLowerCase().includes('banana') ? 1 : 0,
+    ]);
+
+    const result = await executeTool({
+      host,
+      tool: {
+        toolUseId: 's1',
+        name: 'semantic_search',
+        input: { query: 'banana' },
+      },
+    });
+
+    expect(result.status).toBe('success');
+    expect(result.content).toContain('fruit.ts');
+  });
+
+  it('rejects an empty query without needing a workspace', async () => {
+    const host = createFakeHost({ autoApprove: true });
+    const result = await executeTool({
+      host,
+      tool: { toolUseId: 's2', name: 'semantic_search', input: { query: '  ' } },
+    });
+    expect(result.status).toBe('error');
+    expect(result.content).toContain('non-empty query');
+    expect(mockEmbedText).not.toHaveBeenCalled();
+  });
+
+  it('errors when no workspace folder is open', async () => {
+    const host = {
+      ...createFakeHost({ autoApprove: true }),
+      getWorkspaceRoot: () => undefined,
+    };
+    const result = await executeTool({
+      host,
+      tool: {
+        toolUseId: 's3',
+        name: 'semantic_search',
+        input: { query: 'anything' },
+      },
+    });
+    expect(result.status).toBe('error');
+    expect(result.content).toContain('No workspace folder open');
+  });
+
+  it('refuses when index.enabled is false in settings', async () => {
+    dir = await mkdtemp(join(tmpdir(), 'wc-semsearch-'));
+    const host = createFakeHost({ autoApprove: true, workspaceRoot: dir });
+
+    const result = await executeTool({
+      host,
+      indexSettings: { enabled: false, maxFiles: 10 },
+      tool: {
+        toolUseId: 's4',
+        name: 'semantic_search',
+        input: { query: 'anything' },
+      },
+    });
+    expect(result.status).toBe('error');
+    expect(result.content).toContain('disabled');
+    expect(mockEmbedText).not.toHaveBeenCalled();
+  });
+
+  it('wraps an embedding failure with a clear Bedrock-credentials message', async () => {
+    dir = await mkdtemp(join(tmpdir(), 'wc-semsearch-'));
+    await writeFile(join(dir, 'a.ts'), 'export const a = 1;\n');
+    const host = createFakeHost({ autoApprove: true, workspaceRoot: dir });
+    mockEmbedText.mockRejectedValue(new Error('CredentialsProviderError'));
+
+    const result = await executeTool({
+      host,
+      tool: {
+        toolUseId: 's5',
+        name: 'semantic_search',
+        input: { query: 'anything' },
+      },
+    });
+    expect(result.status).toBe('error');
+    expect(result.content).toContain('Bedrock credentials');
+    expect(result.content).toContain('CredentialsProviderError');
+  });
+
+  it('reports no results without erroring when the index has no matches', async () => {
+    dir = await mkdtemp(join(tmpdir(), 'wc-semsearch-'));
+    const host = createFakeHost({ autoApprove: true, workspaceRoot: dir });
+    mockEmbedText.mockResolvedValue([1, 0]);
+
+    const result = await executeTool({
+      host,
+      tool: {
+        toolUseId: 's6',
+        name: 'semantic_search',
+        input: { query: 'anything' },
+      },
+    });
+    expect(result.status).toBe('success');
+    expect(result.content).toContain('No semantically related results found');
+  });
+});
+
 describe('executeTool — recall_project_memory', () => {
   it('recalls from project memory', async () => {
     const host = createFakeHost({ autoApprove: true });
@@ -396,6 +656,96 @@ describe('executeTool — mirror_project_memory', () => {
   });
 });
 
+describe('executeTool — mirror_skill', () => {
+  it('mirrors to the shared skill library with approval', async () => {
+    const host = createFakeHost({ autoApprove: true });
+    const mockBridge = {
+      list: vi.fn(),
+      mirror: vi.fn().mockResolvedValue({ id: 'skill-1' }),
+    };
+
+    const result = await executeTool({
+      host,
+      tool: {
+        toolUseId: 'ms1',
+        name: 'mirror_skill',
+        input: {
+          name: 'my-skill',
+          description: 'A useful recipe',
+          body: 'Do the thing.',
+        },
+      },
+      sharedSkills: mockBridge,
+      telemetry: new TelemetrySink(),
+    });
+    expect(result.status).toBe('success');
+    expect(result.content).toContain('Mirrored skill');
+    expect(mockBridge.mirror).toHaveBeenCalledWith({
+      name: 'my-skill',
+      description: 'A useful recipe',
+      body: 'Do the thing.',
+    });
+  });
+
+  it('rejects when the user declines approval', async () => {
+    const host = createFakeHost();
+    const mockBridge = {
+      list: vi.fn(),
+      mirror: vi.fn(),
+    };
+    const p = executeTool({
+      host,
+      tool: {
+        toolUseId: 'ms2',
+        name: 'mirror_skill',
+        input: { name: 'my-skill', description: 'desc', body: 'body' },
+      },
+      sharedSkills: mockBridge,
+    });
+    await vi.waitFor(() => {
+      expect(host.events.some((e) => e.type === 'approval_request')).toBe(true);
+    });
+    const req = host.events.find((e) => e.type === 'approval_request');
+    if (req?.type === 'approval_request') {
+      host.resolveApproval(req.request.stepId, 'reject');
+    }
+    const result = await p;
+    expect(result.status).toBe('rejected');
+    expect(mockBridge.mirror).not.toHaveBeenCalled();
+  });
+
+  it('errors when sharedSkills bridge is unavailable', async () => {
+    const host = createFakeHost({ autoApprove: true });
+    const result = await executeTool({
+      host,
+      tool: {
+        toolUseId: 'ms3',
+        name: 'mirror_skill',
+        input: { name: 'my-skill', description: 'desc', body: 'body' },
+      },
+      sharedSkills: null,
+    });
+    expect(result.status).toBe('error');
+    expect(result.content).toContain('unavailable');
+  });
+
+  it('errors when name is empty', async () => {
+    const host = createFakeHost({ autoApprove: true });
+    const mockBridge = { list: vi.fn(), mirror: vi.fn() };
+    const result = await executeTool({
+      host,
+      tool: {
+        toolUseId: 'ms4',
+        name: 'mirror_skill',
+        input: { name: '', description: 'desc', body: 'body' },
+      },
+      sharedSkills: mockBridge,
+    });
+    expect(result.status).toBe('error');
+    expect(result.content).toContain('required');
+  });
+});
+
 describe('executeTool — unknown tool', () => {
   it('errors for unrecognized tool name', async () => {
     const host = createFakeHost({ autoApprove: true });
@@ -420,5 +770,131 @@ describe('executeTool — abort signal', () => {
         signal: ac.signal,
       }),
     ).rejects.toThrow(/Aborted/);
+  });
+});
+
+describe('executeTool — checkpoint recording (P2)', () => {
+  let dir: string;
+
+  afterEach(async () => {
+    if (dir) await rm(dir, { recursive: true, force: true });
+  });
+
+  async function readCheckpointLines(turnId: string): Promise<unknown[]> {
+    const { readFile } = await import('node:fs/promises');
+    const { CHECKPOINTS_REL_DIR } = await import('./checkpoints.js');
+    const raw = await readFile(
+      join(dir, CHECKPOINTS_REL_DIR, `${turnId}.jsonl`),
+      'utf8',
+    );
+    return raw
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => JSON.parse(l));
+  }
+
+  it('write_file with a turnId records a created-file checkpoint', async () => {
+    dir = await mkdtemp(join(tmpdir(), 'wc-ckpt-exec-'));
+    const host = createFakeHost({ autoApprove: true, workspaceRoot: dir });
+
+    await executeTool({
+      host,
+      turnId: 'turn-1',
+      tool: {
+        toolUseId: 'w1',
+        name: 'write_file',
+        input: { path: 'new.ts', content: 'export const x = 1;\n' },
+      },
+    });
+
+    const entries = await readCheckpointLines('turn-1');
+    expect(entries).toEqual([
+      expect.objectContaining({
+        toolUseId: 'w1',
+        path: 'new.ts',
+        before: '',
+        beforeExisted: false,
+        after: 'export const x = 1;\n',
+      }),
+    ]);
+  });
+
+  it('edit_file with a turnId records beforeExisted: true', async () => {
+    dir = await mkdtemp(join(tmpdir(), 'wc-ckpt-exec-'));
+    const host = createFakeHost({
+      autoApprove: true,
+      workspaceRoot: dir,
+      files: { 'a.ts': 'export const a = 1;\n' },
+    });
+
+    await executeTool({
+      host,
+      turnId: 'turn-2',
+      tool: {
+        toolUseId: 'e1',
+        name: 'edit_file',
+        input: { path: 'a.ts', old_str: 'a = 1', new_str: 'a = 2' },
+      },
+    });
+
+    const entries = await readCheckpointLines('turn-2');
+    expect(entries).toEqual([
+      expect.objectContaining({
+        toolUseId: 'e1',
+        path: 'a.ts',
+        before: 'export const a = 1;\n',
+        beforeExisted: true,
+        after: 'export const a = 2;\n',
+      }),
+    ]);
+  });
+
+  it('update_walkcroach_md with a turnId records the prior content', async () => {
+    dir = await mkdtemp(join(tmpdir(), 'wc-ckpt-exec-'));
+    const host = createFakeHost({
+      autoApprove: true,
+      workspaceRoot: dir,
+      files: { 'WALKCROACH.md': '# WALKCROACH.md\n\nOld decision.\n' },
+    });
+
+    await executeTool({
+      host,
+      turnId: 'turn-3',
+      tool: {
+        toolUseId: 'm1',
+        name: 'update_walkcroach_md',
+        input: { append_section: '## New decision\n\nUse port 8080.\n' },
+      },
+    });
+
+    const entries = await readCheckpointLines('turn-3');
+    expect(entries).toEqual([
+      expect.objectContaining({
+        toolUseId: 'm1',
+        path: 'WALKCROACH.md',
+        before: '# WALKCROACH.md\n\nOld decision.\n',
+        beforeExisted: true,
+      }),
+    ]);
+  });
+
+  it('does not record a checkpoint when no turnId is provided', async () => {
+    dir = await mkdtemp(join(tmpdir(), 'wc-ckpt-exec-'));
+    const host = createFakeHost({ autoApprove: true, workspaceRoot: dir });
+
+    await executeTool({
+      host,
+      tool: {
+        toolUseId: 'w2',
+        name: 'write_file',
+        input: { path: 'new.ts', content: 'x' },
+      },
+    });
+
+    const { CHECKPOINTS_REL_DIR } = await import('./checkpoints.js');
+    await expect(
+      readdir(join(dir, CHECKPOINTS_REL_DIR)),
+    ).rejects.toThrow();
   });
 });

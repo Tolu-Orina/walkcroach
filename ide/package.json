@@ -35,6 +35,7 @@
     "onCommand:walkcroach.linkProject",
     "onCommand:walkcroach.unlinkProject",
     "onCommand:walkcroach.viewMirroredMemory",
+    "onCommand:walkcroach.viewSharedSkills",
     "onUri"
   ],
   "main": "./dist/extension.cjs",
@@ -60,47 +61,52 @@
     "commands": [
       {
         "command": "walkcroach.ping",
-        "title": "WalkCroach: Ping",
+        "title": "Ping",
         "category": "WalkCroach"
       },
       {
         "command": "walkcroach.openPanel",
-        "title": "WalkCroach: Open Panel",
+        "title": "Open Panel",
         "category": "WalkCroach"
       },
       {
         "command": "walkcroach.configureCockroach",
-        "title": "WalkCroach: Configure CockroachDB",
+        "title": "Configure CockroachDB",
         "category": "WalkCroach"
       },
       {
         "command": "walkcroach.signIn",
-        "title": "WalkCroach: Sign In",
+        "title": "Sign In",
         "category": "WalkCroach"
       },
       {
         "command": "walkcroach.pasteToken",
-        "title": "WalkCroach: Paste Token",
+        "title": "Paste Token",
         "category": "WalkCroach"
       },
       {
         "command": "walkcroach.signOut",
-        "title": "WalkCroach: Sign Out",
+        "title": "Sign Out",
         "category": "WalkCroach"
       },
       {
         "command": "walkcroach.linkProject",
-        "title": "WalkCroach: Link Project",
+        "title": "Link Project",
         "category": "WalkCroach"
       },
       {
         "command": "walkcroach.unlinkProject",
-        "title": "WalkCroach: Unlink Project",
+        "title": "Unlink Project",
         "category": "WalkCroach"
       },
       {
         "command": "walkcroach.viewMirroredMemory",
-        "title": "WalkCroach: View Mirrored Memory",
+        "title": "View Mirrored Memory",
+        "category": "WalkCroach"
+      },
+      {
+        "command": "walkcroach.viewSharedSkills",
+        "title": "View Shared Skills",
         "category": "WalkCroach"
       }
     ],
@@ -136,6 +142,19 @@
           "type": "string",
           "default": "",
           "description": "Optional Bedrock model ID override (e.g. global.amazon.nova-pro-v1:0). Empty uses Nova 2 Lite (global.amazon.nova-2-lite-v1:0) or BEDROCK_NOVA_MODEL_ID."
+        },
+        "walkcroach.ide.reasoningEffort": {
+          "type": "string",
+          "enum": ["", "off", "low", "medium", "high"],
+          "enumDescriptions": [
+            "Use the default (medium)",
+            "Disable extended thinking",
+            "Low effort — fastest, least reasoning",
+            "Medium effort — same tier as WalkCroach Web App Builder",
+            "High effort — slowest, most thorough (disables the output-token cap)"
+          ],
+          "default": "",
+          "description": "Nova 2 Lite extended-thinking tier for the agent loop. Empty uses the default (medium)."
         }
       }
     }

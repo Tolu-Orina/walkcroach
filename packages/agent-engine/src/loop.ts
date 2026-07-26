@@ -1,11 +1,12 @@
+import { randomUUID } from 'node:crypto';
 import type { Message } from '@aws-sdk/client-bedrock-runtime';
 import type { HostAdapter } from './host.js';
 import {
   streamConverseTurn,
   DEFAULT_MAX_OUTPUT_CONTINUATIONS,
-  DEFAULT_MAX_OUTPUT_TOKENS,
   type ConverseTurnResult,
   type ParsedToolUse,
+  type NovaReasoningEffort,
 } from './bedrock.js';
 import {
   assembleSystemBlocks,
@@ -17,13 +18,25 @@ import {
 import { toBedrockTools } from './tools/defs.js';
 import { executeTool, type ToolExecResult } from './tools/execute.js';
 import { readWalkcroachMd } from './memory-local.js';
-import { CockroachMcpClient, type McpConfig } from './mcp.js';
+import {
+  CockroachMcpClient,
+  McpServerRegistry,
+  RESERVED_COCKROACHDB_SERVER_NAME,
+  type McpConfig,
+} from './mcp.js';
 import { SkillsRegistry, defaultSkillRoots } from './skills.js';
 import { TelemetrySink } from './telemetry.js';
 import type { ProjectMemoryBridge } from './project-memory.js';
+import type { SharedSkillsBridge } from './shared-skills.js';
 import { cloneMessages, trimSessionMessages, appendUserFollowUp } from './session.js';
 import { compactSessionMessages } from './compact.js';
-import { loadWorkspaceAgentConfig } from './workspace-config.js';
+import { attachmentsToContentBlocks, redactAttachmentBlocks } from './attachments.js';
+import type { SubmitAttachment } from './protocol.js';
+import {
+  loadWorkspaceAgentConfig,
+  loadMcpServersConfig,
+  formatRuleCatalog,
+} from './workspace-config.js';
 import { WorkspacePolicy } from './workspace-policy.js';
 import { runPostToolUseHooks, runStopHooks, buildStopHookNudgePrompt } from './hooks.js';
 import type { AgentTodo } from './todos.js';
@@ -66,6 +79,7 @@ export const PARALLEL_SAFE_TOOLS = new Set([
   'list_dir',
   'search',
   'glob',
+  'semantic_search',
   'await_terminal',
   'load_skill',
   'recall_project_memory',
@@ -134,10 +148,26 @@ export type RunLoopParams = {
   includePhaseB?: boolean;
   /** Phase C — linked project memory bridge (null = unlinked). */
   projectMemory?: ProjectMemoryBridge | null;
-  /** Per-turn Bedrock output budget (default DEFAULT_MAX_OUTPUT_TOKENS). */
+  /** Cross-surface shared skill library — available whenever signed in, independent of project link. */
+  sharedSkills?: SharedSkillsBridge | null;
+  /**
+   * Path to cockroachdb-official.generated.json (IDE ships it beside extension.cjs).
+   * When unset, SkillsRegistry searches next to the engine module / cwd.
+   */
+  officialSkillsJsonPath?: string;
+  /**
+   * Per-turn Bedrock output budget. Unset picks the reasoning-tier default
+   * in streamConverseTurn (higher when extended thinking is on).
+   */
   maxTokens?: number;
   /** Auto-continue rounds on max_tokens (default DEFAULT_MAX_OUTPUT_CONTINUATIONS). */
   maxOutputContinuations?: number;
+  /** Extended-thinking tier (default: getNovaReasoningEffort(), i.e. medium). */
+  reasoningEffort?: NovaReasoningEffort;
+  /** Optional Bedrock model id override (default: getNovaModelId()). */
+  modelId?: string;
+  /** Optional preconfigured client (e.g. bearer token without mutating process.env). */
+  client?: import('@aws-sdk/client-bedrock-runtime').BedrockRuntimeClient;
   /**
    * Identical failed run_terminal/verify calls before refuse + stop
    * (default DEFAULT_IDENTICAL_FAILURE_LIMIT).
@@ -150,8 +180,12 @@ export type RunLoopParams = {
   priorMessages?: Message[];
   /** Treat prompt as a follow-up (Continue or next user message in-session). */
   followUp?: boolean;
+  /** Pasted/attached images, PDFs, docs, or text files for this turn's user message. */
+  attachments?: SubmitAttachment[];
   /** Persist full conversation after the run (including tool turns). */
   onSessionMessages?: (messages: Message[]) => void;
+  /** P2 checkpoints — id for this turn's mutating edits. Unset → runFullLoop generates one. */
+  turnId?: string;
 };
 
 function assertTrusted(host: HostAdapter): void {
@@ -166,7 +200,9 @@ function persistSession(
   params: RunLoopParams,
   messages: Message[],
 ): void {
-  params.onSessionMessages?.(trimSessionMessages(cloneMessages(messages)));
+  params.onSessionMessages?.(
+    redactAttachmentBlocks(trimSessionMessages(cloneMessages(messages))),
+  );
 }
 
 /** Mid-loop compact (when large) else pair-safe trim. */
@@ -187,6 +223,8 @@ async function runPing(params: RunLoopParams): Promise<void> {
   const gen = streamPing({
     userText: prompt.trim().toLowerCase() === 'ping' ? undefined : prompt,
     signal,
+    client: params.client,
+    modelId: params.modelId,
   });
   let result = await gen.next();
   while (!result.done) {
@@ -262,13 +300,16 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
   const includePhaseB =
     (params.includePhaseB ?? true) && depth === 0 && !params.readOnly;
   const includePhaseC = Boolean(params.projectMemory) && depth === 0;
+  const includeSharedSkills = Boolean(params.sharedSkills) && depth === 0;
   const maxIterations = params.maxIterations ?? DEFAULT_MAX_ITERATIONS;
   const maxSubagents = params.maxSubagents ?? DEFAULT_MAX_SUBAGENTS;
-  const maxTokens = params.maxTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
+  const maxTokens = params.maxTokens;
+  const reasoningEffort = params.reasoningEffort;
   const maxOutputContinuations =
     params.maxOutputContinuations ?? DEFAULT_MAX_OUTPUT_CONTINUATIONS;
   const identicalFailureLimit =
     params.identicalFailureLimit ?? DEFAULT_IDENTICAL_FAILURE_LIMIT;
+  const turnId = params.turnId ?? randomUUID();
   let subagentCount = 0;
   let toolLoopGuard: ToolLoopGuardState = emptyToolLoopGuard();
   let stuckLoopStop = false;
@@ -277,7 +318,29 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
 
   const telemetry = new TelemetrySink();
   const skills = new SkillsRegistry();
-  await skills.init(defaultSkillRoots(host.getWorkspaceRoot()));
+  await skills.init(defaultSkillRoots(host.getWorkspaceRoot()), {
+    sharedSkills: params.sharedSkills ?? undefined,
+    officialSkillsJsonPath: params.officialSkillsJsonPath,
+  });
+  if (params.officialSkillsJsonPath) {
+    const { existsSync } = await import('node:fs');
+    if (!existsSync(params.officialSkillsJsonPath)) {
+      host.emit({
+        type: 'warning',
+        message: `CockroachDB official skills file missing at ${params.officialSkillsJsonPath}. Rebuild/reinstall the extension so load_skill can use cockroachdb-* skills.`,
+      });
+    } else if (
+      !skills
+        .listMeta()
+        .some((m) => m.origin?.includes('cockroachlabs/cockroachdb-skills'))
+    ) {
+      host.emit({
+        type: 'warning',
+        message:
+          'CockroachDB official skills JSON was present but failed to load. Check the file is valid JSON.',
+      });
+    }
+  }
 
   let mcp: CockroachMcpClient | null = null;
   if (includePhaseB && params.mcpConfig?.clusterId && params.mcpConfig.apiKey) {
@@ -294,15 +357,35 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
     }
   }
 
+  let mcpServerRegistry: McpServerRegistry | null = null;
+  if (includePhaseB) {
+    const fileServers = await loadMcpServersConfig(host.getWorkspaceRoot());
+    const names = Object.keys(fileServers).filter(
+      (n) => n !== RESERVED_COCKROACHDB_SERVER_NAME,
+    );
+    if (names.length) {
+      mcpServerRegistry = new McpServerRegistry();
+      for (const n of names) mcpServerRegistry.register(n, fileServers[n]!);
+      const errors = await mcpServerRegistry.connectAll();
+      for (const [serverName, message] of errors) {
+        host.emit({
+          type: 'warning',
+          message: `MCP server "${serverName}" connect failed (continuing without it): ${message}`,
+        });
+      }
+    }
+  }
+
   const walkcroachMd = await readWalkcroachMd(host);
+  const meta = (await host.gatherMeta?.(signal)) ?? {};
   const workspaceConfig = await loadWorkspaceAgentConfig(
     host.getWorkspaceRoot(),
+    { activeFile: meta.activeFile },
   );
   const policy = new WorkspacePolicy(
     workspaceConfig.settings,
     workspaceConfig.verify,
   );
-  const meta = (await host.gatherMeta?.(signal)) ?? {};
 
   /** Live checklist — same source of truth as UI / disk. */
   let liveTodos: AgentTodo[] = [];
@@ -319,6 +402,7 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
     walkcroachMd,
     skillsCatalog: includePhaseB ? skills.catalogText() : undefined,
     rulesMd: workspaceConfig.rulesMd || undefined,
+    ruleCatalog: formatRuleCatalog(workspaceConfig.ruleCatalog) || undefined,
   });
   const tools = (
     params.readOnly
@@ -332,6 +416,7 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
             'list_dir',
             'search',
             'glob',
+            'semantic_search',
             'ask_user',
             'recall_project_memory',
           ].includes(t.toolSpec?.name ?? ''),
@@ -340,6 +425,7 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
           includeSubagents: subagentsEnabled,
           includePhaseB,
           includePhaseC,
+          includeSharedSkills,
         })
   ) as import('@aws-sdk/client-bedrock-runtime').ToolConfiguration['tools'];
 
@@ -362,13 +448,14 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
           actionBias,
         });
 
+  const attachmentBlocks = attachmentsToContentBlocks(params.attachments);
   const messages: Message[] =
     prior.length > 0
-      ? appendUserFollowUp(prior, userText)
+      ? appendUserFollowUp(prior, userText, attachmentBlocks)
       : [
           {
             role: 'user',
-            content: [{ text: userText }],
+            content: [{ text: userText }, ...attachmentBlocks],
           },
         ];
 
@@ -402,6 +489,9 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
       tools,
       signal,
       maxTokens,
+      reasoningEffort,
+      client: params.client,
+      modelId: params.modelId,
     });
     let turn = await gen.next();
     while (!turn.done) {
@@ -475,11 +565,15 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
       signal,
       readOnly: params.readOnly,
       mcp,
+      mcpServers: mcpServerRegistry,
       skills,
       telemetry,
       ccloudApiKey: params.ccloudApiKey,
       projectMemory: params.projectMemory,
+      sharedSkills: params.sharedSkills,
       policy,
+      turnId,
+      indexSettings: workspaceConfig.settings.index,
       spawnSubagent: subagentsEnabled
         ? async ({ name, prompt: subPrompt, signal: subSignal }) => {
             return runSubagent({
@@ -816,6 +910,7 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
             reason === 'incomplete' ||
             reason === 'unverified' ||
             reason === 'stop_hook_failed',
+          turnId,
         });
         return;
       }
@@ -838,6 +933,7 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
           type: 'done',
           reason: 'stuck_tool_loop',
           canContinue: false,
+          turnId,
         });
         return;
       }
@@ -860,9 +956,11 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
       type: 'done',
       reason: unverifiedAtCap ? 'unverified' : 'max_iterations',
       canContinue: true,
+      turnId,
     });
   } finally {
     await mcp?.close();
+    await mcpServerRegistry?.closeAll();
   }
 }
 
@@ -913,6 +1011,7 @@ function wrapHost(
   return {
     readFile: (p) => host.readFile(p),
     writeFile: (p, c) => host.writeFile(p, c),
+    deleteFile: host.deleteFile ? (p) => host.deleteFile!(p) : undefined,
     listDir: (p) => host.listDir(p),
     search: (p, o) => host.search(p, o),
     glob: host.glob ? (p, o) => host.glob!(p, o) : undefined,
@@ -931,6 +1030,9 @@ function wrapHost(
       : undefined,
     killAllTerminals: host.killAllTerminals
       ? () => host.killAllTerminals!()
+      : undefined,
+    killInteractiveTerminalSessions: host.killInteractiveTerminalSessions
+      ? () => host.killInteractiveTerminalSessions!()
       : undefined,
     startTerminalSession: host.startTerminalSession
       ? (p) => host.startTerminalSession!(p)
@@ -965,6 +1067,15 @@ function wrapHost(
       : undefined,
     loadTodos: host.loadTodos ? () => host.loadTodos!() : undefined,
     clearTodos: host.clearTodos ? () => host.clearTodos!() : undefined,
+    persistAgentSession: host.persistAgentSession
+      ? (s) => host.persistAgentSession!(s)
+      : undefined,
+    loadAgentSession: host.loadAgentSession
+      ? () => host.loadAgentSession!()
+      : undefined,
+    clearAgentSession: host.clearAgentSession
+      ? () => host.clearAgentSession!()
+      : undefined,
     emit,
   };
 }

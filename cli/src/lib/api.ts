@@ -1,7 +1,10 @@
 /**
  * Thin IDE BFF client for CLI (same routes as the extension).
  */
-import type { ProjectMemoryBridge } from '@walkcroach/agent-engine';
+import type {
+  ProjectMemoryBridge,
+  SharedSkillsBridge,
+} from '@walkcroach/agent-engine';
 import { loadConfig } from './config.js';
 
 export type IdeProject = {
@@ -164,7 +167,70 @@ export function createProjectMemoryBridge(params: {
       const res = await ideFetch('/ide/v1/memory/mirror', {
         method: 'POST',
         token,
-        body: { projectId, text, kind: kind ?? 'decision' },
+        body: {
+          projectId,
+          text,
+          kind: kind ?? 'decision',
+          sourceSurface: 'desktop',
+        },
+      });
+      const data = await readJson<{ id: string }>(res);
+      return { id: data.id };
+    },
+  };
+}
+
+export type SharedSkillEntry = {
+  name: string;
+  description: string;
+  body: string;
+  sourceSurface: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export async function listSharedSkills(
+  token: string,
+): Promise<SharedSkillEntry[]> {
+  const res = await ideFetch('/ide/v1/skills', { token });
+  const data = await readJson<{ skills: SharedSkillEntry[] }>(res);
+  return data.skills ?? [];
+}
+
+/**
+ * Account-scoped shared skills (same BFF as the extension).
+ * CLI labels mirrors as `desktop` so they don't look like IDE-originated.
+ */
+export function createSharedSkillsBridge(params: {
+  getToken: () => Promise<string | undefined>;
+  sourceSurface?: string;
+}): SharedSkillsBridge {
+  const { getToken, sourceSurface = 'desktop' } = params;
+
+  async function requireToken(): Promise<string> {
+    const token = await getToken();
+    if (!token) {
+      throw new Error('Not signed in — shared skills require a Cognito token.');
+    }
+    return token;
+  }
+
+  return {
+    async list() {
+      const token = await requireToken();
+      return listSharedSkills(token);
+    },
+    async mirror({ name, description, body, sourceSurface: surface }) {
+      const token = await requireToken();
+      const res = await ideFetch('/ide/v1/skills/mirror', {
+        method: 'POST',
+        token,
+        body: {
+          name,
+          description,
+          body,
+          sourceSurface: surface ?? sourceSurface,
+        },
       });
       const data = await readJson<{ id: string }>(res);
       return { id: data.id };

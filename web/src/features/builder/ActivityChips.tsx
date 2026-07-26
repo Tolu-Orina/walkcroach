@@ -8,6 +8,8 @@ type ActivityChipsProps = {
   refreshKey?: number;
   /** Max chips shown in the status bar. */
   limit?: number;
+  /** When true, show a live working cue ahead of recent chips. */
+  streaming?: boolean;
 };
 
 /**
@@ -18,6 +20,7 @@ export function ActivityChips({
   sessionId,
   refreshKey = 0,
   limit = 4,
+  streaming = false,
 }: ActivityChipsProps) {
   const [events, setEvents] = useState<ActivityEvent[]>([]);
 
@@ -44,7 +47,7 @@ export function ActivityChips({
     );
   }
 
-  if (events.length === 0) {
+  if (events.length === 0 && !streaming) {
     return (
       <p className="truncate text-[11px] text-mist">No build steps yet</p>
     );
@@ -54,6 +57,11 @@ export function ActivityChips({
 
   return (
     <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+      {streaming && (
+        <span className="inline-flex max-w-[14rem] truncate rounded-[var(--radius-control)] border border-signal/40 bg-signal/10 px-2 py-0.5 text-[11px] text-signal">
+          Working…
+        </span>
+      )}
       {recent.map((e) => (
         <span
           key={e.id}

@@ -3,6 +3,8 @@
  * Low-friction auto-approves routine local work; critical/infra always gated.
  */
 
+import { getToolDef } from './tools/defs.js';
+
 export type AutonomyLevel = 'strict' | 'low_friction';
 
 const INFRA_CMD =
@@ -70,11 +72,12 @@ export function shouldAutoApprove(params: {
 }): boolean {
   if (params.autonomy !== 'low_friction') return false;
 
-  // Cloud / MCP / subagents / memory mirror — always gated.
-  if (params.toolName === 'ccloud') return false;
+  // ToolDef.infra and always-gated tools — never low-friction auto-approve.
+  if (getToolDef(params.toolName)?.infra) return false;
   if (params.toolName === 'cockroach_mcp') return false;
   if (params.toolName === 'spawn_subagent') return false;
   if (params.toolName === 'mirror_project_memory') return false;
+  if (params.toolName === 'mirror_skill') return false;
 
   if (params.toolName === 'run_terminal') {
     const cmd = String(params.input.cmd ?? '').trim();
@@ -127,6 +130,7 @@ export function canNonInteractiveApprove(params: {
   if (toolName === 'ccloud') return false;
   if (toolName === 'cockroach_mcp') return false;
   if (toolName === 'mirror_project_memory') return false;
+  if (toolName === 'mirror_skill') return false;
   if (toolName === 'spawn_subagent') return false;
   if (toolName === 'run_terminal') return false;
   if (toolName === 'terminal_session') return false;

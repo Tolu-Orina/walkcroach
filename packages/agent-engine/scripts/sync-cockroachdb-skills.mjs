@@ -1,6 +1,6 @@
 /**
- * Sync official CockroachDB Agent Skills into this package and codegen a
- * bundlable TypeScript module (esbuild-safe for the IDE VSIX).
+ * Sync official CockroachDB Agent Skills into this package as JSON
+ * (esbuild-safe for the IDE VSIX — bodies are not inlined into extension.cjs).
  *
  * Source: https://github.com/cockroachlabs/cockroachdb-skills (Apache-2.0)
  *
@@ -25,7 +25,8 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PKG = join(__dirname, '..');
 const VENDOR = join(PKG, 'vendor', 'cockroachdb-skills');
-const OUT_TS = join(PKG, 'src', 'skills', 'cockroachdb-official.generated.ts');
+const OUT_JSON = join(PKG, 'src', 'skills', 'cockroachdb-official.generated.json');
+const LEGACY_TS = join(PKG, 'src', 'skills', 'cockroachdb-official.generated.ts');
 const NOTICE = join(PKG, 'vendor', 'cockroachdb-skills', 'NOTICE');
 
 function parseSkillMd(raw) {
@@ -109,10 +110,6 @@ async function walkSkillMarkdown(root) {
   return found;
 }
 
-function esc(s) {
-  return JSON.stringify(s);
-}
-
 async function ensureSource(srcArg) {
   if (srcArg) return srcArg;
   const tmp = join(PKG, '.tmp', 'cockroachdb-skills');
@@ -193,43 +190,24 @@ async function main() {
     return true;
   });
 
-  const lines = [];
-  lines.push('/**');
-  lines.push(' * AUTO-GENERATED — do not edit by hand.');
-  lines.push(' * Source: cockroachlabs/cockroachdb-skills (Apache-2.0)');
-  lines.push(' * Regenerate: node scripts/sync-cockroachdb-skills.mjs');
-  lines.push(` * Skills: ${unique.length}`);
-  lines.push(' */');
-  lines.push('');
-  lines.push("import type { BundledSkill } from './bundled.js';");
-  lines.push('');
-  lines.push(
-    'export const COCKROACHDB_OFFICIAL_SKILLS: BundledSkill[] = [',
+  await mkdir(dirname(OUT_JSON), { recursive: true });
+  // JSON only — do not emit a .ts module (would re-bloat the IDE JS graph if re-imported).
+  await writeFile(
+    OUT_JSON,
+    JSON.stringify(
+      unique.map((s) => ({
+        name: s.name,
+        description: s.description,
+        body: s.body,
+        ...(Object.keys(s.references).length ? { references: s.references } : {}),
+        origin: `cockroachlabs/cockroachdb-skills:${s.rel}`,
+      })),
+    ),
+    'utf8',
   );
-  for (const s of unique) {
-    lines.push('  {');
-    lines.push(`    name: ${esc(s.name)},`);
-    lines.push(`    description: ${esc(s.description)},`);
-    lines.push(`    body: ${esc(s.body)},`);
-    if (Object.keys(s.references).length) {
-      lines.push('    references: {');
-      for (const [k, v] of Object.entries(s.references).sort(([a], [b]) =>
-        a.localeCompare(b),
-      )) {
-        lines.push(`      ${esc(k)}: ${esc(v)},`);
-      }
-      lines.push('    },');
-    }
-    lines.push(`    origin: ${esc(`cockroachlabs/cockroachdb-skills:${s.rel}`)},`);
-    lines.push('  },');
-  }
-  lines.push('];');
-  lines.push('');
-
-  await mkdir(dirname(OUT_TS), { recursive: true });
-  await writeFile(OUT_TS, lines.join('\n'), 'utf8');
+  await rm(LEGACY_TS, { force: true });
   console.log(
-    `Synced ${unique.length} skills → vendor/ + ${relative(PKG, OUT_TS)}`,
+    `Synced ${unique.length} skills → vendor/ + ${relative(PKG, OUT_JSON)}`,
   );
 }
 

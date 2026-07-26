@@ -12,10 +12,12 @@ import {
   parseHooksConfig,
   type HooksConfig,
 } from './hooks.js';
+import { DEFAULT_MAX_INDEX_FILES } from './local-index.js';
 
 export const SETTINGS_REL_PATH = `${WALK_CROACH_DIR}/settings.json`;
 export const VERIFY_REL_PATH = `${WALK_CROACH_DIR}/verify.json`;
 export const RULES_REL_DIR = `${WALK_CROACH_DIR}/rules`;
+export const MCP_CONFIG_REL_PATH = `${WALK_CROACH_DIR}/mcp.json`;
 
 export const DEFAULT_TERMINAL_TIMEOUT_MS = 120_000;
 export const MAX_RULES_CHARS = 24_000;
@@ -42,6 +44,12 @@ export type WalkcroachSettings = {
     maxSessions: number;
   };
   hooks: HooksConfig;
+  /** P3 — local semantic index (semantic_search tool). */
+  index: {
+    enabled: boolean;
+    /** Cap on files considered when (re)building the index. */
+    maxFiles: number;
+  };
 };
 
 export type VerifyConfig = {
@@ -52,10 +60,26 @@ export type VerifyConfig = {
 export type WorkspaceAgentConfig = {
   settings: WalkcroachSettings;
   verify: VerifyConfig;
-  /** Concatenated rules markdown (already truncated). */
+  /** Concatenated always + glob-matched rules markdown (already truncated). */
   rulesMd: string;
-  /** Relative rule file paths loaded. */
+  /** Relative rule file paths included in rulesMd (always + matched glob). */
   ruleFiles: string[];
+  /** Manual / agent-requested / unmatched-glob rules — metadata only; load body via load_rule. */
+  ruleCatalog: RuleCatalogEntry[];
+};
+
+export type RuleFrontmatter = {
+  name?: string;
+  description?: string;
+  /** Auto-attach when the active file matches one of these patterns. */
+  globs?: string[];
+  /** Explicit true/false. Default (no frontmatter, or no globs/description) behaves as true. */
+  alwaysApply?: boolean;
+};
+
+export type RuleCatalogEntry = {
+  name: string;
+  description: string;
 };
 
 export function defaultSettings(): WalkcroachSettings {
@@ -74,6 +98,10 @@ export function defaultSettings(): WalkcroachSettings {
       maxSessions: DEFAULT_MAX_SESSIONS,
     },
     hooks: defaultHooksConfig(),
+    index: {
+      enabled: true,
+      maxFiles: DEFAULT_MAX_INDEX_FILES,
+    },
   };
 }
 
@@ -130,6 +158,15 @@ export function parseSettingsJson(raw: unknown): WalkcroachSettings {
   // Hooks live under settings.hooks (Claude-compatible nesting).
   if (o.hooks !== undefined) {
     base.hooks = parseHooksConfig({ hooks: o.hooks });
+  }
+
+  const index = o.index;
+  if (index && typeof index === 'object') {
+    const i = index as Record<string, unknown>;
+    if (typeof i.enabled === 'boolean') base.index.enabled = i.enabled;
+    if (typeof i.maxFiles === 'number' && Number.isFinite(i.maxFiles)) {
+      base.index.maxFiles = Math.max(1, Math.min(20_000, Math.floor(i.maxFiles)));
+    }
   }
 
   return base;
@@ -196,16 +233,91 @@ export function matchesDenyPattern(path: string, pattern: string): boolean {
   return new RegExp(`(^|/)${reSrc}(/|$)`).test(p) || new RegExp(`^${reSrc}$`).test(p);
 }
 
+/** Same matcher, shared name for rule-file `globs:` scoping (denyPaths and rule globs use identical semantics). */
+export const matchesGlob = matchesDenyPattern;
+
+function matchFrontField(front: string, key: string): string | undefined {
+  const lines = front.split(/\r?\n/);
+  for (const line of lines) {
+    const m = line.match(new RegExp(`^${key}:\\s*(.*)$`, 'i'));
+    if (m) return (m[1] ?? '').trim();
+  }
+  return undefined;
+}
+
+function unquote(v: string): string {
+  if (
+    (v.startsWith('"') && v.endsWith('"')) ||
+    (v.startsWith("'") && v.endsWith("'"))
+  ) {
+    return v.slice(1, -1);
+  }
+  return v;
+}
+
+/**
+ * Minimal frontmatter parser for `.walkcroach/rules/*.md` — not general YAML,
+ * just the three scalar/array fields rule files need (Cursor `.mdc`-equivalent).
+ * No leading `---` block → treated as a legacy plain rule file (empty attrs).
+ */
+export function parseRuleFrontmatter(raw: string): {
+  attrs: RuleFrontmatter;
+  body: string;
+} {
+  const trimmed = raw.replace(/^﻿/, '');
+  if (!trimmed.startsWith('---')) {
+    return { attrs: {}, body: trimmed };
+  }
+  const end = trimmed.indexOf('\n---', 3);
+  if (end < 0) return { attrs: {}, body: trimmed };
+  const front = trimmed.slice(3, end).trim();
+  const body = trimmed.slice(end + 4).replace(/^\r?\n/, '');
+
+  const attrs: RuleFrontmatter = {};
+  const name = matchFrontField(front, 'name');
+  if (name) attrs.name = unquote(name);
+  const description = matchFrontField(front, 'description');
+  if (description) attrs.description = unquote(description);
+  const globsRaw = matchFrontField(front, 'globs');
+  if (globsRaw) {
+    const globs = globsRaw
+      .replace(/^\[/, '')
+      .replace(/\]$/, '')
+      .split(',')
+      .map((g) => unquote(g.trim()))
+      .filter(Boolean);
+    if (globs.length) attrs.globs = globs;
+  }
+  const alwaysApplyRaw = matchFrontField(front, 'alwaysApply');
+  if (alwaysApplyRaw) {
+    attrs.alwaysApply = /^true$/i.test(alwaysApplyRaw);
+  }
+
+  return { attrs, body };
+}
+
+function deriveRuleName(fileName: string, attrs: RuleFrontmatter): string {
+  return attrs.name?.trim() || fileName.replace(/\.md$/i, '');
+}
+
+/** Cheap catalog text for the system prompt (mirrors SkillsRegistry.catalogText). */
+export function formatRuleCatalog(entries: RuleCatalogEntry[]): string {
+  if (!entries.length) return '';
+  return entries.map((e) => `- ${e.name}: ${e.description}`).join('\n');
+}
+
 export async function loadWorkspaceAgentConfig(
   workspaceRoot: string | undefined,
+  opts?: { activeFile?: string },
 ): Promise<WorkspaceAgentConfig> {
   const settings = defaultSettings();
   const verify: VerifyConfig = { commands: [], cwd: '.' };
   let rulesMd = '';
   const ruleFiles: string[] = [];
+  const ruleCatalog: RuleCatalogEntry[] = [];
 
   if (!workspaceRoot) {
-    return { settings, verify, rulesMd, ruleFiles };
+    return { settings, verify, rulesMd, ruleFiles, ruleCatalog };
   }
 
   try {
@@ -231,24 +343,165 @@ export async function loadWorkspaceAgentConfig(
       .filter((e) => e.isFile() && /\.md$/i.test(e.name))
       .map((e) => e.name)
       .sort((a, b) => a.localeCompare(b));
+
+    const activeFile = opts?.activeFile;
+    /** always-applied + glob-matched files, in file-sort order — candidates for the truncated rulesMd block. */
+    const included: Array<{ file: string; body: string }> = [];
+
+    for (const name of mdFiles) {
+      let raw: string;
+      try {
+        raw = await readFile(join(rulesDir, name), 'utf8');
+      } catch {
+        continue; // skip unreadable
+      }
+      const { attrs, body } = parseRuleFrontmatter(raw);
+      const relPath = `${RULES_REL_DIR}/${name}`.replace(/\\/g, '/');
+      const hasGlobs = Array.isArray(attrs.globs) && attrs.globs.length > 0;
+      const hasDescription = Boolean(attrs.description?.trim());
+
+      /**
+       * Mode resolution (Cursor `.mdc`-equivalent):
+       * - alwaysApply: true always wins, regardless of globs/description.
+       * - Else globs present → glob-scoped (auto-attach only when activeFile matches).
+       * - Else a description with no globs and no explicit alwaysApply:true → manual/agent-requested
+       *   (catalog only, full body via load_rule).
+       * - Else (no frontmatter, or frontmatter with none of the above) → always, matching the
+       *   pre-frontmatter behavior so plain legacy rule files are unaffected.
+       */
+      let mode: 'always' | 'glob' | 'manual';
+      if (attrs.alwaysApply === true) {
+        mode = 'always';
+      } else if (hasGlobs) {
+        mode = 'glob';
+      } else if (hasDescription) {
+        mode = 'manual';
+      } else {
+        mode = 'always';
+      }
+
+      const globMatched =
+        mode === 'glob' &&
+        Boolean(activeFile && attrs.globs!.some((g) => matchesGlob(activeFile, g)));
+
+      if (mode === 'always' || globMatched) {
+        included.push({ file: relPath, body });
+      } else {
+        ruleCatalog.push({
+          name: deriveRuleName(name, attrs),
+          description:
+            attrs.description?.trim() ||
+            (hasGlobs
+              ? `Applies to files matching: ${attrs.globs!.join(', ')}`
+              : `Rule from ${relPath}`),
+        });
+      }
+    }
+
     const chunks: string[] = [];
     let used = 0;
-    for (const name of mdFiles) {
+    for (const { file, body } of included) {
       if (used >= MAX_RULES_CHARS) break;
-      try {
-        const body = await readFile(join(rulesDir, name), 'utf8');
-        const slice = body.slice(0, MAX_RULES_CHARS - used);
-        chunks.push(`## ${name}\n\n${slice.trim()}`);
-        used += slice.length;
-        ruleFiles.push(`${RULES_REL_DIR}/${name}`.replace(/\\/g, '/'));
-      } catch {
-        /* skip unreadable */
-      }
+      const slice = body.slice(0, MAX_RULES_CHARS - used);
+      chunks.push(`## ${file}\n\n${slice.trim()}`);
+      used += slice.length;
+      ruleFiles.push(file);
     }
     rulesMd = chunks.join('\n\n').trim();
   } catch {
     /* no rules dir */
   }
 
-  return { settings, verify, rulesMd, ruleFiles };
+  return { settings, verify, rulesMd, ruleFiles, ruleCatalog };
+}
+
+/** On-demand full body for a manual/agent-requested rule (load_rule tool). */
+export async function loadRuleBody(
+  workspaceRoot: string | undefined,
+  name: string,
+): Promise<{ name: string; description?: string; body: string } | null> {
+  if (!workspaceRoot) return null;
+  const rulesDir = join(workspaceRoot, RULES_REL_DIR);
+  let entries;
+  try {
+    entries = await readdir(rulesDir, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  const mdFiles = entries.filter((e) => e.isFile() && /\.md$/i.test(e.name));
+  for (const e of mdFiles) {
+    let raw: string;
+    try {
+      raw = await readFile(join(rulesDir, e.name), 'utf8');
+    } catch {
+      continue;
+    }
+    const { attrs, body } = parseRuleFrontmatter(raw);
+    const ruleName = deriveRuleName(e.name, attrs);
+    if (ruleName === name) {
+      return { name: ruleName, description: attrs.description, body };
+    }
+  }
+  return null;
+}
+
+/** One entry from `.walkcroach/mcp.json`'s `mcpServers` map. */
+export type McpServerFileConfig = {
+  url: string;
+  headers?: Record<string, string>;
+};
+
+/** Interpolates `${env:VAR_NAME}` in header values so secrets stay out of the committed file. */
+function interpolateEnvVars(value: string): string {
+  return value.replace(
+    /\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g,
+    (_match, varName: string) => process.env[varName] ?? '',
+  );
+}
+
+/**
+ * Parse the `{ mcpServers: { name: { url, headers } } }` shape (Cursor's `.cursor/mcp.json`
+ * format). Unknown/malformed entries are skipped rather than throwing — a typo in one
+ * server should not break the whole config.
+ */
+export function parseMcpServersJson(
+  raw: unknown,
+): Record<string, McpServerFileConfig> {
+  const out: Record<string, McpServerFileConfig> = {};
+  if (!raw || typeof raw !== 'object') return out;
+  const servers = (raw as Record<string, unknown>).mcpServers;
+  if (!servers || typeof servers !== 'object') return out;
+
+  for (const [name, value] of Object.entries(servers as Record<string, unknown>)) {
+    if (!value || typeof value !== 'object') continue;
+    const v = value as Record<string, unknown>;
+    if (typeof v.url !== 'string' || !v.url.trim()) continue;
+
+    const headers: Record<string, string> = {};
+    if (v.headers && typeof v.headers === 'object') {
+      for (const [hk, hv] of Object.entries(v.headers as Record<string, unknown>)) {
+        if (typeof hv === 'string') headers[hk] = interpolateEnvVars(hv);
+      }
+    }
+
+    out[name] = {
+      url: v.url.trim(),
+      ...(Object.keys(headers).length ? { headers } : {}),
+    };
+  }
+
+  return out;
+}
+
+/** Loads and parses `.walkcroach/mcp.json`; missing/invalid file → no additional servers. */
+export async function loadMcpServersConfig(
+  workspaceRoot: string | undefined,
+): Promise<Record<string, McpServerFileConfig>> {
+  if (!workspaceRoot) return {};
+  try {
+    const raw = await readFile(join(workspaceRoot, MCP_CONFIG_REL_PATH), 'utf8');
+    return parseMcpServersJson(JSON.parse(raw));
+  } catch {
+    return {};
+  }
 }

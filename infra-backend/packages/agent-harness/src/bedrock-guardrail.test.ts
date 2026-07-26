@@ -1,9 +1,30 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, afterEach } from 'vitest';
 import {
+  getNovaReasoningEffort,
   tagLatestUserMessageForGuardrail,
   wrapUserTextForGuardrail,
 } from './bedrock.js';
 import type { Message } from '@aws-sdk/client-bedrock-runtime';
+
+describe('getNovaReasoningEffort', () => {
+  afterEach(() => {
+    delete process.env.BEDROCK_NOVA_REASONING;
+  });
+
+  it('defaults to medium for App Builder coding loops', () => {
+    delete process.env.BEDROCK_NOVA_REASONING;
+    expect(getNovaReasoningEffort()).toBe('medium');
+  });
+
+  it('accepts off / low / high overrides', () => {
+    process.env.BEDROCK_NOVA_REASONING = 'off';
+    expect(getNovaReasoningEffort()).toBe('off');
+    process.env.BEDROCK_NOVA_REASONING = 'low';
+    expect(getNovaReasoningEffort()).toBe('low');
+    process.env.BEDROCK_NOVA_REASONING = 'HIGH';
+    expect(getNovaReasoningEffort()).toBe('high');
+  });
+});
 
 describe('guardrail content tagging', () => {
   it('wraps text blocks as guardContent', () => {

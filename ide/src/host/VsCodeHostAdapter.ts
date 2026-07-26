@@ -8,6 +8,7 @@ import type {
   BackgroundTerminalStart,
   HostAdapter,
   HostSecrets,
+  PersistedChatTurn,
   SearchHit,
   TerminalChunk,
 } from '@walkcroach/agent-engine';
@@ -37,6 +38,7 @@ export class VsCodeHostAdapter implements HostAdapter {
   private readonly gate: ApprovalController;
   private readonly approvals: ReturnType<typeof bindApprovals>;
   private runSignal: AbortSignal | undefined;
+  private runAbortHandler: (() => void) | undefined;
   private secretStore: vscode.SecretStorage | undefined;
   private readonly activePids = new Set<number>();
   private readonly bgTerminals = new BackgroundTerminalRegistry(() =>
@@ -68,19 +70,23 @@ export class VsCodeHostAdapter implements HostAdapter {
   };
 
   setRunSignal(signal?: AbortSignal): void {
+    if (this.runSignal && this.runAbortHandler) {
+      this.runSignal.removeEventListener('abort', this.runAbortHandler);
+    }
+    this.runAbortHandler = undefined;
     this.runSignal = signal;
     if (signal?.aborted) {
       this.gate.cancelAll();
       this.killAllTerminals();
+      return;
     }
-    signal?.addEventListener(
-      'abort',
-      () => {
-        this.gate.cancelAll();
-        this.killAllTerminals();
-      },
-      { once: true },
-    );
+    if (!signal) return;
+    const onAbort = () => {
+      this.gate.cancelAll();
+      this.killAllTerminals();
+    };
+    this.runAbortHandler = onAbort;
+    signal.addEventListener('abort', onAbort, { once: true });
   }
 
   killAllTerminals(): void {
@@ -89,6 +95,10 @@ export class VsCodeHostAdapter implements HostAdapter {
     }
     this.activePids.clear();
     this.bgTerminals.killAll();
+    this.sessions.killAll();
+  }
+
+  killInteractiveTerminalSessions(): void {
     this.sessions.killAll();
   }
 
@@ -179,6 +189,13 @@ export class VsCodeHostAdapter implements HostAdapter {
     const before = await this.readFile(rel);
     const after = applyDiffString(before, diff);
     await this.writeFile(rel, after);
+  }
+
+  /** P2 checkpoints — undo a file the agent created (revertTurn). */
+  async deleteFile(rel: string): Promise<void> {
+    this.assertTrustedTools();
+    const abs = this.resolvePath(rel);
+    await fs.rm(abs, { force: true });
   }
 
   async listDir(rel: string): Promise<string[]> {
@@ -369,6 +386,7 @@ export class VsCodeHostAdapter implements HostAdapter {
   }
 
   async listTerminalSessions() {
+    this.assertTrustedTools();
     return this.sessions.list();
   }
 
@@ -394,6 +412,7 @@ export class VsCodeHostAdapter implements HostAdapter {
     sessionId: string;
     messages: BedrockMessage[];
     transcript?: string;
+    uiTurns?: PersistedChatTurn[];
     createdAt?: string;
   }): Promise<{ sessionId: string }> {
     const root = this.requireRoot();
@@ -421,9 +440,10 @@ export class VsCodeHostAdapter implements HostAdapter {
 
   async gatherMeta(
     signal?: AbortSignal,
-  ): Promise<{ gitStatus?: string }> {
+  ): Promise<{ gitStatus?: string; activeFile?: string }> {
     const root = this.getWorkspaceRoot();
     if (!root) return {};
+    const activeFile = this.getActiveFileRelative(root);
     try {
       // Quiet: do not open/spam the WalkCroach shell tab for meta gather.
       let out = '';
@@ -436,10 +456,19 @@ export class VsCodeHostAdapter implements HostAdapter {
       })) {
         out += chunk.text;
       }
-      return { gitStatus: out.trim() };
+      return { gitStatus: out.trim(), activeFile };
     } catch {
-      return {};
+      return { activeFile };
     }
+  }
+
+  /** Relative path of the active editor's file, for rule glob-scoping — undefined if none/outside workspace. */
+  private getActiveFileRelative(root: string): string | undefined {
+    const uri = vscode.window.activeTextEditor?.document.uri;
+    if (!uri || uri.scheme !== 'file') return undefined;
+    const abs = uri.fsPath;
+    if (!isPathInsideWorkspace(root, abs)) return undefined;
+    return path.relative(root, abs).replace(/\\/g, '/');
   }
 
   private requireRoot(): string {

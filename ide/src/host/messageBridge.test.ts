@@ -114,6 +114,14 @@ describe('MessageBridge', () => {
     expect(posted.some((m) => m.type === 'TELEMETRY')).toBe(true);
   });
 
+  it('flushes buffered tokens on dispose before sealing', () => {
+    bridge.onAgentEvent({ type: 'token_delta', text: 'pending' });
+    bridge.dispose();
+    expect(posted).toHaveLength(1);
+    expect(posted[0]!.type).toBe('TOKEN_DELTA');
+    expect((posted[0] as { text: string }).text).toBe('pending');
+  });
+
   it('ignores events after dispose', async () => {
     bridge.dispose();
     bridge.onAgentEvent({ type: 'token_delta', text: 'late' });

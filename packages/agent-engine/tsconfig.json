@@ -18,5 +18,9 @@
     "rootDir": "src"
   },
   "include": ["src/**/*"],
-  "exclude": ["src/**/*.test.ts", "src/smoke-*.ts"]
+  "exclude": [
+    "src/**/*.test.ts",
+    "src/smoke-*.ts",
+    "src/skills/cockroachdb-official.generated.ts"
+  ]
 }

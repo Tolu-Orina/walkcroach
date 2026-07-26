@@ -4,10 +4,19 @@ import { getVsCodeApi } from './vscodeApi';
 type Props = {
   bedrockConfigured: boolean;
   bedrockModelId: string;
+  reasoningEffort: string;
   mcpConfigured: boolean;
   ccloudConfigured: boolean;
   onBack: () => void;
 };
+
+const REASONING_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: '', label: 'Default (medium)' },
+  { value: 'off', label: 'Off' },
+  { value: 'low', label: 'Low' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'high', label: 'High' },
+];
 
 /**
  * Credentials page — secrets go to the host SecretStorage only.
@@ -16,12 +25,14 @@ type Props = {
 export function SettingsView({
   bedrockConfigured,
   bedrockModelId,
+  reasoningEffort,
   mcpConfigured,
   ccloudConfigured,
   onBack,
 }: Props) {
   const [bedrockKey, setBedrockKey] = useState('');
   const [modelId, setModelId] = useState(bedrockModelId);
+  const [effort, setEffort] = useState(reasoningEffort);
   const [mcpSnippet, setMcpSnippet] = useState('');
   const [clusterId, setClusterId] = useState('');
   const [mcpApiKey, setMcpApiKey] = useState('');
@@ -31,6 +42,10 @@ export function SettingsView({
   useEffect(() => {
     setModelId(bedrockModelId);
   }, [bedrockModelId]);
+
+  useEffect(() => {
+    setEffort(reasoningEffort);
+  }, [reasoningEffort]);
 
   const saveBedrock = useCallback(() => {
     const token = bedrockKey.trim();
@@ -63,6 +78,19 @@ export function SettingsView({
     });
     setBusy(false);
   }, [modelId]);
+
+  const saveEffort = useCallback(
+    (value: string) => {
+      setEffort(value);
+      setBusy(true);
+      getVsCodeApi().postMessage({
+        type: 'SAVE_SETTINGS',
+        reasoningEffort: value || null,
+      });
+      setBusy(false);
+    },
+    [],
+  );
 
   const saveMcpSnippet = useCallback(() => {
     if (!mcpSnippet.trim()) return;
@@ -204,6 +232,28 @@ export function SettingsView({
             </button>
           ) : null}
         </div>
+
+        <label className="label" htmlFor="reasoning-effort">
+          Extended thinking
+        </label>
+        <p className="settings-hint">
+          Nova reasoning tier for the agent loop. Medium is the default — same
+          tier as WalkCroach Web App Builder. High disables the output-token
+          cap and is slower.
+        </p>
+        <select
+          id="reasoning-effort"
+          className="field"
+          value={effort}
+          disabled={busy}
+          onChange={(e) => saveEffort(e.target.value)}
+        >
+          {REASONING_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
       </section>
 
       <section className="settings-card" aria-labelledby="mcp-h">

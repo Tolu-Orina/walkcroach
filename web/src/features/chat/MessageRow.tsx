@@ -14,7 +14,7 @@ type MessageRowProps = {
 
 function ToolCard({ msg }: { msg: ChatMessage }) {
   const label = msg.tool ?? msg.content.split(' ')[0] ?? 'tool';
-  const awaiting = msg.awaitResult || msg.content.includes('(await)');
+  const awaiting = Boolean(msg.awaitResult);
 
   return (
     <details className="group rounded-[var(--radius-control)] border border-signal/25 bg-signal/5">
@@ -24,7 +24,11 @@ function ToolCard({ msg }: { msg: ChatMessage }) {
             tool
           </span>
           <span>{label}</span>
-          {awaiting && <span className="normal-case text-mist">running…</span>}
+          {awaiting ? (
+            <span className="normal-case text-mist">running…</span>
+          ) : (
+            <span className="normal-case text-mist/70">done</span>
+          )}
         </span>
       </summary>
       <div className="border-t border-signal/15 px-3 py-2 font-mono text-[11px] text-mist">

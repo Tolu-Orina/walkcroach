@@ -53,3 +53,7 @@ See `../cli/README.md`.
 ## Urgent — later
 
 **Native PTY for `terminal_session` (Tier C):** Sessions already work on the **pipe** backend (line REPLs). True PTY (`backend: pty`) needs optional `node-pty` to compile. Python alone is not enough on Windows — install **Visual Studio Build Tools** with the **Desktop development with C++** workload, then reinstall optional deps in `packages/agent-engine` so `node-pty` lands in `node_modules`. Prefer PTY for full-screen TUIs; pipe is fine until then.
+
+**Bundle size (done 2026-07-26):** Extension JS is minified; Cockroach official skill bodies load from `dist/cockroachdb-official.generated.json` instead of being inlined in `extension.cjs`. Keep new heavy content out of the JS graph (assets / lazy JSON), not by raising `check:bundle` casually.
+
+**Proactive re-indexing for `semantic_search` (P3):** the local index (`packages/agent-engine/src/local-index.ts`) is rebuilt lazily — incrementally, but only when a `semantic_search` call happens. A `vscode.workspace.createFileSystemWatcher`-driven incremental updater in `VsCodeHostAdapter` would keep it warm between calls; no file watcher exists anywhere in `ide/src` today, so this is new infrastructure, not required for v1.

@@ -17,10 +17,34 @@ type PendingConnect = {
 
 const IDE_AUTH_PATH = 'walkcroach.walkcroach-ide/auth';
 
+/** Fallback TTL when a pasted JWT has no readable `exp` (55 minutes). */
+const PASTE_TOKEN_FALLBACK_TTL_SEC = 55 * 60;
+
 /** Platform-aware deep link: vscode://, cursor://, vscode-insiders://, etc. */
 export function ideRedirectUri(uriScheme = vscode.env.uriScheme): string {
   const scheme = (uriScheme || 'vscode').trim() || 'vscode';
   return `${scheme}://${IDE_AUTH_PATH}`;
+}
+
+/**
+ * Read JWT `exp` without verifying the signature — used only to set local TTL.
+ * Returns seconds until expiry, or undefined if unreadable / already expired.
+ */
+export function jwtExpiresInSeconds(token: string): number | undefined {
+  try {
+    const parts = token.split('.');
+    if (parts.length < 2 || !parts[1]) return undefined;
+    const json = Buffer.from(
+      parts[1].replace(/-/g, '+').replace(/_/g, '/'),
+      'base64',
+    ).toString('utf8');
+    const payload = JSON.parse(json) as { exp?: unknown };
+    if (typeof payload.exp !== 'number') return undefined;
+    const secs = Math.floor(payload.exp - Date.now() / 1000);
+    return secs > 0 ? secs : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -48,7 +72,9 @@ export class AuthService {
       this.secrets.get(SECRET_KEYS.cognitoExpiresAt),
     );
     const expiresAt = expiresAtRaw ? Number(expiresAtRaw) : NaN;
-    if (Number.isFinite(expiresAt) && Date.now() > expiresAt - 60_000) {
+    // Missing TTL (legacy paste) or near expiry → refresh or clear — never
+    // keep a forever "signed in" dead credential.
+    if (!Number.isFinite(expiresAt) || Date.now() > expiresAt - 60_000) {
       return this.refreshIfPossible();
     }
     return token;
@@ -106,7 +132,11 @@ export class AuthService {
       ignoreFocusOut: true,
     });
     if (!token?.trim()) return false;
-    await this.storeAccessToken(token.trim());
+    // Drop any prior refresh/id so we don't mix pasted access with stale OAuth.
+    await this.signOut();
+    const expiresIn =
+      jwtExpiresInSeconds(token.trim()) ?? PASTE_TOKEN_FALLBACK_TTL_SEC;
+    await this.storeAccessToken(token.trim(), { expiresIn });
     return true;
   }
 
@@ -226,15 +256,13 @@ export class AuthService {
           this.secrets.get(SECRET_KEYS.cognitoRefreshToken),
         );
         if (!refreshToken) {
-          return Promise.resolve(
-            this.secrets.get(SECRET_KEYS.cognitoAccessToken),
-          );
+          await this.signOut();
+          return undefined;
         }
         const cfg = getCognitoConfig();
         if (!cfg.clientId || !cfg.region) {
-          return Promise.resolve(
-            this.secrets.get(SECRET_KEYS.cognitoAccessToken),
-          );
+          await this.signOut();
+          return undefined;
         }
         const tokens = await refreshWithSpaClient({
           region: cfg.region,
@@ -248,9 +276,8 @@ export class AuthService {
         });
         return tokens.id_token ?? tokens.access_token;
       } catch {
-        return Promise.resolve(
-          this.secrets.get(SECRET_KEYS.cognitoAccessToken),
-        );
+        await this.signOut();
+        return undefined;
       } finally {
         this.refreshInFlight = null;
       }

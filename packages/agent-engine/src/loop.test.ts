@@ -6,10 +6,12 @@ const mockStreamConverseTurn = vi.fn();
 
 vi.mock('./bedrock.js', () => ({
   getNovaModelId: () => 'test-model',
+  getNovaReasoningEffort: () => 'medium',
   createBedrockClient: vi.fn(),
   streamConverseTurn: (...args: unknown[]) => mockStreamConverseTurn(...args),
   streamPing: (...args: unknown[]) => mockStreamPing(...args),
   DEFAULT_MAX_OUTPUT_TOKENS: 4096,
+  DEFAULT_MAX_REASONING_OUTPUT_TOKENS: 30_000,
   DEFAULT_MAX_OUTPUT_CONTINUATIONS: 2,
 }));
 
@@ -129,6 +131,110 @@ describe('runAgentLoop — end_turn without tools', () => {
     expect(host.events.some(e => e.type === 'done')).toBe(true);
     const doneEvent = host.events.find(e => e.type === 'done') as any;
     expect(doneEvent.reason).toBe('end_turn');
+  });
+});
+
+describe('runAgentLoop — attachments', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function endTurnImpl() {
+    return (async function* () {
+      yield { type: 'token' as const, text: 'ok' };
+      yield { type: 'usage' as const, cacheReadInputTokens: 0, cacheWriteInputTokens: 0 };
+      return {
+        stopReason: 'end_turn',
+        assistantContent: [{ text: 'ok' }],
+        toolUses: [],
+        text: 'ok',
+        cacheReadInputTokens: 0,
+        cacheWriteInputTokens: 0,
+      };
+    })();
+  }
+
+  it('includes attachment content blocks in a fresh turn', async () => {
+    // `messages` is a shared array the loop keeps pushing to after this call
+    // resolves (e.g. the assistant's own reply gets appended) — snapshot the
+    // first call's content synchronously, before any of that later mutation.
+    let snapshot: { role?: string; content?: unknown[] } | undefined;
+    mockStreamConverseTurn.mockImplementation((params: { messages: Array<{ role?: string; content?: unknown[] }> }) => {
+      if (!snapshot) {
+        const first = params.messages[0]!;
+        snapshot = { role: first.role, content: first.content ? [...first.content] : [] };
+      }
+      return endTurnImpl();
+    });
+    const host = makeHost();
+
+    await runAgentLoop({
+      host,
+      prompt: 'what is in this image?',
+      mode: 'full',
+      attachments: [
+        { id: 'a1', name: 'photo.png', mime: 'image/png', contentBase64: 'YWJj' },
+      ],
+    });
+
+    expect(snapshot?.role).toBe('user');
+    expect(snapshot?.content).toEqual(
+      expect.arrayContaining([
+        { image: { format: 'png', source: { bytes: expect.any(Uint8Array) } } },
+      ]),
+    );
+  });
+
+  it('includes attachment content blocks on a follow-up turn (priorMessages set)', async () => {
+    let snapshot: { role?: string; content?: unknown[] } | undefined;
+    mockStreamConverseTurn.mockImplementation((params: { messages: Array<{ role?: string; content?: unknown[] }> }) => {
+      if (!snapshot) {
+        // priorMessages ends in 'assistant', so appendUserFollowUp pushes a new
+        // trailing user message — index 2 (prior 2 entries + this new one).
+        const followUp = params.messages[2]!;
+        snapshot = { role: followUp.role, content: followUp.content ? [...followUp.content] : [] };
+      }
+      return endTurnImpl();
+    });
+    const host = makeHost();
+
+    await runAgentLoop({
+      host,
+      prompt: 'and this one?',
+      mode: 'full',
+      followUp: true,
+      priorMessages: [
+        { role: 'user', content: [{ text: 'first message' }] },
+        { role: 'assistant', content: [{ text: 'first reply' }] },
+      ],
+      attachments: [
+        { id: 'a2', name: 'notes.txt', mime: 'text/plain', contentText: 'hello' },
+      ],
+    });
+
+    expect(snapshot?.role).toBe('user');
+    expect(
+      snapshot?.content?.some(
+        (b) => (b as { document?: { format?: string } }).document?.format === 'txt',
+      ),
+    ).toBe(true);
+  });
+
+  it('omits attachment blocks entirely when none are provided (no regression)', async () => {
+    let snapshot: { role?: string; content?: unknown[] } | undefined;
+    mockStreamConverseTurn.mockImplementation((params: { messages: Array<{ role?: string; content?: unknown[] }> }) => {
+      if (!snapshot) {
+        const first = params.messages[0]!;
+        snapshot = { role: first.role, content: first.content ? [...first.content] : [] };
+      }
+      return endTurnImpl();
+    });
+    const host = makeHost();
+
+    await runAgentLoop({ host, prompt: 'plain task', mode: 'full' });
+
+    expect(snapshot?.role).toBe('user');
+    expect(snapshot?.content).toEqual([{ text: expect.any(String) }]);
   });
 });
 
