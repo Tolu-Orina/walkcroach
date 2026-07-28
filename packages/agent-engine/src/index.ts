@@ -152,6 +152,9 @@ export {
   getNovaModelId,
   getNovaReasoningEffort,
   getTitanEmbedModelId,
+  getBedrockRegion,
+  normalizeBedrockApiKey,
+  formatBedrockAuthError,
   embedText,
   streamConverseTurn,
   streamPing,
@@ -254,6 +257,7 @@ export {
   trimSessionMessages,
   cloneMessages,
   appendUserFollowUp,
+  sanitizeConverseMessages,
   DEFAULT_MAX_SESSION_MESSAGES,
 } from './session.js';
 export {

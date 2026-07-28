@@ -4,11 +4,24 @@ import { getVsCodeApi } from './vscodeApi';
 type Props = {
   bedrockConfigured: boolean;
   bedrockModelId: string;
+  bedrockRegion: string;
   reasoningEffort: string;
   mcpConfigured: boolean;
   ccloudConfigured: boolean;
   onBack: () => void;
 };
+
+const REGION_OPTIONS = [
+  'us-east-1',
+  'us-east-2',
+  'us-west-2',
+  'eu-west-1',
+  'eu-west-2',
+  'eu-central-1',
+  'ap-northeast-1',
+  'ap-southeast-1',
+  'ap-southeast-2',
+];
 
 const REASONING_OPTIONS: Array<{ value: string; label: string }> = [
   { value: '', label: 'Default (medium)' },
@@ -25,6 +38,7 @@ const REASONING_OPTIONS: Array<{ value: string; label: string }> = [
 export function SettingsView({
   bedrockConfigured,
   bedrockModelId,
+  bedrockRegion,
   reasoningEffort,
   mcpConfigured,
   ccloudConfigured,
@@ -32,6 +46,7 @@ export function SettingsView({
 }: Props) {
   const [bedrockKey, setBedrockKey] = useState('');
   const [modelId, setModelId] = useState(bedrockModelId);
+  const [region, setRegion] = useState(bedrockRegion || 'eu-west-2');
   const [effort, setEffort] = useState(reasoningEffort);
   const [mcpSnippet, setMcpSnippet] = useState('');
   const [clusterId, setClusterId] = useState('');
@@ -42,6 +57,10 @@ export function SettingsView({
   useEffect(() => {
     setModelId(bedrockModelId);
   }, [bedrockModelId]);
+
+  useEffect(() => {
+    setRegion(bedrockRegion || 'eu-west-2');
+  }, [bedrockRegion]);
 
   useEffect(() => {
     setEffort(reasoningEffort);
@@ -68,6 +87,20 @@ export function SettingsView({
     setBedrockKey('');
     setBusy(false);
   }, []);
+
+  const saveRegion = useCallback(
+    (value: string) => {
+      const next = value.trim() || 'eu-west-2';
+      setRegion(next);
+      setBusy(true);
+      getVsCodeApi().postMessage({
+        type: 'SAVE_SETTINGS',
+        bedrockRegion: next,
+      });
+      setBusy(false);
+    },
+    [],
+  );
 
   const saveModelId = useCallback(() => {
     setBusy(true);
@@ -153,7 +186,9 @@ export function SettingsView({
         </div>
         <p className="settings-hint">
           Paste a Bedrock API key, or rely on AWS credentials already available
-          to this IDE process.
+          to this IDE process. Short-term keys only work in the AWS region where
+          you created them — set that region below (console default is often{' '}
+          <code>us-east-1</code>).
         </p>
         <label className="label" htmlFor="bedrock-key">
           Bedrock API key
@@ -188,6 +223,31 @@ export function SettingsView({
             </button>
           ) : null}
         </div>
+
+        <label className="label" htmlFor="bedrock-region">
+          Bedrock region
+        </label>
+        <p className="settings-hint">
+          Must match the region of your API key. Mismatch causes
+          &quot;Authentication failed: Please make sure your API Key is
+          valid.&quot;
+        </p>
+        <select
+          id="bedrock-region"
+          className="field"
+          value={region}
+          disabled={busy}
+          onChange={(e) => saveRegion(e.target.value)}
+        >
+          {REGION_OPTIONS.map((r) => (
+            <option key={r} value={r}>
+              {r}
+            </option>
+          ))}
+          {!REGION_OPTIONS.includes(region) ? (
+            <option value={region}>{region}</option>
+          ) : null}
+        </select>
 
         <label className="label" htmlFor="bedrock-model">
           Model ID (optional override)

@@ -7,6 +7,44 @@ function roleOf(m: Message): string {
   return m.role ?? '';
 }
 
+function isNonEmptyContentBlock(block: unknown): boolean {
+  if (!block || typeof block !== 'object') return false;
+  const b = block as Record<string, unknown>;
+  if ('text' in b) return true;
+  if ('toolUse' in b) return true;
+  if ('toolResult' in b) return true;
+  if ('image' in b) return true;
+  if ('document' in b) return true;
+  if ('cachePoint' in b) return true;
+  return Object.keys(b).length > 0;
+}
+
+/**
+ * Bedrock Converse requires every Message.content to be a non-empty array of
+ * ContentBlock. Empty arrays (e.g. reasoning-only assistant turns, corrupt
+ * jsonl) fail Continue with:
+ * "The content field in the Message object at messages.N is empty".
+ */
+export function sanitizeConverseMessages(messages: Message[]): Message[] {
+  const out: Message[] = [];
+  for (const m of messages) {
+    const role = roleOf(m);
+    if (role !== 'user' && role !== 'assistant') continue;
+    const raw = Array.isArray(m.content) ? m.content : [];
+    const content = raw.filter(isNonEmptyContentBlock) as ContentBlock[];
+    if (content.length === 0) {
+      // Keep turn order / tool pairing; never send [].
+      out.push({
+        role: role as 'user' | 'assistant',
+        content: [{ text: '(empty turn — recovered)' }],
+      });
+      continue;
+    }
+    out.push({ role: role as 'user' | 'assistant', content });
+  }
+  return out;
+}
+
 /**
  * True if this user message is a tool-result turn (must stay paired with the
  * preceding assistant toolUse message).
@@ -27,28 +65,29 @@ export function trimSessionMessages(
   messages: Message[],
   max = DEFAULT_MAX_SESSION_MESSAGES,
 ): Message[] {
-  if (messages.length <= max) return messages;
+  const sanitized = sanitizeConverseMessages(messages);
+  if (sanitized.length <= max) return sanitized;
 
-  let start = messages.length - max;
+  let start = sanitized.length - max;
   // If we would start on a tool-result user turn, include the prior assistant.
-  while (start > 0 && isToolResultUserTurn(messages[start]!)) {
+  while (start > 0 && isToolResultUserTurn(sanitized[start]!)) {
     start -= 1;
   }
   // If first kept message is assistant without its preceding user, nudge back.
   while (
     start > 0 &&
-    roleOf(messages[start]!) === 'assistant' &&
-    roleOf(messages[start - 1]!) === 'user'
+    roleOf(sanitized[start]!) === 'assistant' &&
+    roleOf(sanitized[start - 1]!) === 'user'
   ) {
     // Prefer keeping the pair; may exceed max by 1 — acceptable.
-    if (messages.length - (start - 1) <= max + 2) {
+    if (sanitized.length - (start - 1) <= max + 2) {
       start -= 1;
     }
     break;
   }
 
-  const tail = messages.slice(start);
-  const first = messages[0];
+  const tail = sanitized.slice(start);
+  const first = sanitized[0];
   if (first && tail[0] !== first && roleOf(first) === 'user') {
     // Avoid consecutive user if first + tail[0] are both user.
     if (roleOf(tail[0]!) === 'user') {
@@ -76,7 +115,7 @@ export function appendUserFollowUp(
   text: string,
   extraBlocks: ContentBlock[] = [],
 ): Message[] {
-  const messages = cloneMessages(prior);
+  const messages = sanitizeConverseMessages(cloneMessages(prior));
   const newBlocks: ContentBlock[] = [{ text }, ...extraBlocks];
   const last = messages[messages.length - 1];
   if (last && roleOf(last) === 'user') {

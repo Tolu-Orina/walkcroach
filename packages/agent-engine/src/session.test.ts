@@ -3,6 +3,7 @@ import type { Message } from '@aws-sdk/client-bedrock-runtime';
 import {
   appendUserFollowUp,
   cloneMessages,
+  sanitizeConverseMessages,
   trimSessionMessages,
 } from './session.js';
 
@@ -69,6 +70,14 @@ describe('cloneMessages / trimSessionMessages (regression coverage)', () => {
 
   it('keeps all messages when under the max', () => {
     const messages: Message[] = [{ role: 'user', content: [{ text: 'a' }] }];
-    expect(trimSessionMessages(messages, 10)).toBe(messages);
+    expect(trimSessionMessages(messages, 10)).toEqual(messages);
+  });
+
+  it('fills empty content arrays so Bedrock Continue does not 400', () => {
+    const fixed = sanitizeConverseMessages([
+      { role: 'user', content: [{ text: 'hi' }] },
+      { role: 'assistant', content: [] },
+    ]);
+    expect(fixed[1]!.content).toEqual([{ text: '(empty turn — recovered)' }]);
   });
 });

@@ -129,6 +129,26 @@ describe('createBedrockClient', () => {
   });
 });
 
+describe('normalizeBedrockApiKey + formatBedrockAuthError', () => {
+  it('strips Bearer prefix and quotes', async () => {
+    const { normalizeBedrockApiKey } = await import('./bedrock.js');
+    expect(normalizeBedrockApiKey('  Bearer abc.def  ')).toBe('abc.def');
+    expect(normalizeBedrockApiKey('"abc.def"')).toBe('abc.def');
+  });
+
+  it('appends region hint for API key auth failures', async () => {
+    const { formatBedrockAuthError } = await import('./bedrock.js');
+    const msg = formatBedrockAuthError(
+      new Error(
+        'Authentication failed: Please make sure your API Key is valid.',
+      ),
+      'eu-west-2',
+    );
+    expect(msg).toContain('eu-west-2');
+    expect(msg).toMatch(/region/i);
+  });
+});
+
 describe('getTitanEmbedModelId', () => {
   const orig = process.env.BEDROCK_TITAN_EMBED_MODEL_ID;
   afterEach(() => {

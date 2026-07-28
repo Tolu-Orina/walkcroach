@@ -138,6 +138,7 @@ export class MessageBridge {
     mcpConfigured?: boolean;
     bedrockConfigured?: boolean;
     bedrockModelId?: string;
+    bedrockRegion?: string;
     reasoningEffort?: string;
     ccloudConfigured?: boolean;
     telemetry?: Record<string, number>;
@@ -159,6 +160,7 @@ export class MessageBridge {
       mcpConfigured: params.mcpConfigured,
       bedrockConfigured: params.bedrockConfigured,
       bedrockModelId: params.bedrockModelId,
+      bedrockRegion: params.bedrockRegion,
       reasoningEffort: params.reasoningEffort,
       ccloudConfigured: params.ccloudConfigured,
       telemetry: params.telemetry,

@@ -13,7 +13,7 @@ import {
   normalizeLocalRepoKey,
   CONTINUE_PROMPT,
   revertTurn,
-  createBedrockClient,
+  normalizeBedrockApiKey,
   type AgentTodo,
   type BedrockMessage,
   type PersistedChatTurn,
@@ -616,22 +616,39 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
     this.ccloudConfigured = Boolean(ccloud?.trim() || cfg?.apiKey);
   }
 
-  /** Prefer SecretStorage Bedrock key + model/reasoning without mutating process.env. */
-  private async withBedrockRunOptions(): Promise<{
-    client?: ReturnType<typeof createBedrockClient>;
-    modelId?: string;
-    reasoningEffort?: 'off' | 'low' | 'medium' | 'high';
-  }> {
+  /** Prefer SecretStorage Bedrock key via AWS_BEARER_TOKEN_BEDROCK for this run. */
+  private async withBedrockSecretEnv<T>(fn: () => Promise<T>): Promise<T> {
     const fromSecret = (
       await this.context.secrets.get(SECRET_KEYS.bedrockApiKey)
     )?.trim();
+    const normalized = fromSecret
+      ? normalizeBedrockApiKey(fromSecret)
+      : '';
+    const prevToken = process.env.AWS_BEARER_TOKEN_BEDROCK;
+    if (normalized) {
+      process.env.AWS_BEARER_TOKEN_BEDROCK = normalized;
+    }
+    try {
+      return await fn();
+    } finally {
+      if (normalized) {
+        if (prevToken === undefined) delete process.env.AWS_BEARER_TOKEN_BEDROCK;
+        else process.env.AWS_BEARER_TOKEN_BEDROCK = prevToken;
+      }
+    }
+  }
+
+  private async withBedrockRunOptions(): Promise<{
+    modelId?: string;
+    region?: string;
+    reasoningEffort?: 'off' | 'low' | 'medium' | 'high';
+  }> {
     const modelOverride = this.getBedrockModelIdOverride();
+    const regionOverride = this.getBedrockRegionOverride();
     const reasoningOverride = this.getReasoningEffortOverride();
     return {
-      client: fromSecret
-        ? createBedrockClient({ bearerToken: fromSecret })
-        : undefined,
       modelId: modelOverride || undefined,
+      region: regionOverride || undefined,
       reasoningEffort: reasoningOverride || undefined,
     };
   }
@@ -640,6 +657,13 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
     const raw = vscode.workspace
       .getConfiguration('walkcroach.ide')
       .get<string>('bedrockModelId');
+    return typeof raw === 'string' ? raw.trim() : '';
+  }
+
+  private getBedrockRegionOverride(): string {
+    const raw = vscode.workspace
+      .getConfiguration('walkcroach.ide')
+      .get<string>('bedrockRegion');
     return typeof raw === 'string' ? raw.trim() : '';
   }
 
@@ -670,8 +694,22 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
       } else if (msg.bedrockApiKey?.trim()) {
         await this.context.secrets.store(
           SECRET_KEYS.bedrockApiKey,
-          msg.bedrockApiKey.trim(),
+          normalizeBedrockApiKey(msg.bedrockApiKey),
         );
+      }
+
+      if (msg.bedrockRegion === null) {
+        await vscode.workspace
+          .getConfiguration('walkcroach.ide')
+          .update('bedrockRegion', 'eu-west-2', vscode.ConfigurationTarget.Global);
+      } else if (typeof msg.bedrockRegion === 'string' && msg.bedrockRegion.trim()) {
+        await vscode.workspace
+          .getConfiguration('walkcroach.ide')
+          .update(
+            'bedrockRegion',
+            msg.bedrockRegion.trim(),
+            vscode.ConfigurationTarget.Global,
+          );
       }
 
       if (msg.bedrockModelId === null) {
@@ -856,6 +894,7 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
       mcpConfigured: this.mcpConfigured,
       bedrockConfigured: this.bedrockConfigured,
       bedrockModelId: this.getBedrockModelIdOverride(),
+      bedrockRegion: this.getBedrockRegionOverride() || 'eu-west-2',
       reasoningEffort: this.getReasoningEffortOverride(),
       ccloudConfigured: this.ccloudConfigured,
       telemetry: this.telemetry,
@@ -1149,7 +1188,8 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
 
     try {
       const bedrockOpts = await this.withBedrockRunOptions();
-      await runAgentLoop({
+      await this.withBedrockSecretEnv(async () => {
+        await runAgentLoop({
           host: this.host,
           prompt: text,
           signal: this.abort!.signal,
@@ -1162,8 +1202,8 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
           ccloudApiKey,
           projectMemory,
           sharedSkills,
-          client: bedrockOpts.client,
           modelId: bedrockOpts.modelId,
+          region: bedrockOpts.region,
           reasoningEffort: bedrockOpts.reasoningEffort,
           officialSkillsJsonPath: path.join(
             this.context.extensionPath,
@@ -1200,6 +1240,7 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
               });
           },
         });
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.bridge?.postError(message);

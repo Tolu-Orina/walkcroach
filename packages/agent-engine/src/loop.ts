@@ -3,6 +3,7 @@ import type { Message } from '@aws-sdk/client-bedrock-runtime';
 import type { HostAdapter } from './host.js';
 import {
   streamConverseTurn,
+  createBedrockClient,
   DEFAULT_MAX_OUTPUT_CONTINUATIONS,
   type ConverseTurnResult,
   type ParsedToolUse,
@@ -28,7 +29,7 @@ import { SkillsRegistry, defaultSkillRoots } from './skills.js';
 import { TelemetrySink } from './telemetry.js';
 import type { ProjectMemoryBridge } from './project-memory.js';
 import type { SharedSkillsBridge } from './shared-skills.js';
-import { cloneMessages, trimSessionMessages, appendUserFollowUp } from './session.js';
+import { cloneMessages, trimSessionMessages, appendUserFollowUp, sanitizeConverseMessages } from './session.js';
 import { compactSessionMessages } from './compact.js';
 import { attachmentsToContentBlocks, redactAttachmentBlocks } from './attachments.js';
 import type { SubmitAttachment } from './protocol.js';
@@ -166,6 +167,8 @@ export type RunLoopParams = {
   reasoningEffort?: NovaReasoningEffort;
   /** Optional Bedrock model id override (default: getNovaModelId()). */
   modelId?: string;
+  /** Bedrock Runtime region (default: getBedrockRegion()). Critical for API keys. */
+  region?: string;
   /** Optional preconfigured client (e.g. bearer token without mutating process.env). */
   client?: import('@aws-sdk/client-bedrock-runtime').BedrockRuntimeClient;
   /**
@@ -207,40 +210,47 @@ function persistSession(
 
 /** Mid-loop compact (when large) else pair-safe trim. */
 function prepareMessagesInPlace(messages: Message[]): void {
+  const cleaned = sanitizeConverseMessages(messages);
   const { messages: compacted, compacted: didCompact } =
-    compactSessionMessages(messages);
-  const next = didCompact ? compacted : trimSessionMessages(messages);
-  if (next.length === messages.length && next === messages) return;
+    compactSessionMessages(cleaned);
+  const next = didCompact ? compacted : trimSessionMessages(cleaned);
   messages.length = 0;
   messages.push(...next);
 }
 
 async function runPing(params: RunLoopParams): Promise<void> {
-  const { streamPing } = await import('./bedrock.js');
+  const { streamPing, createBedrockClient, formatBedrockAuthError, getBedrockRegion } =
+    await import('./bedrock.js');
   const { host, prompt, signal } = params;
+  const region = getBedrockRegion(params.region);
   host.emit({ type: 'phase', phase: 'gather' });
   host.emit({ type: 'phase', phase: 'act' });
-  const gen = streamPing({
-    userText: prompt.trim().toLowerCase() === 'ping' ? undefined : prompt,
-    signal,
-    client: params.client,
-    modelId: params.modelId,
-  });
-  let result = await gen.next();
-  while (!result.done) {
-    const ev = result.value;
-    if (ev.type === 'token') host.emit({ type: 'token_delta', text: ev.text });
-    if (ev.type === 'usage') {
-      host.emit({
-        type: 'cache_usage',
-        cacheReadInputTokens: ev.cacheReadInputTokens,
-        cacheWriteInputTokens: ev.cacheWriteInputTokens,
-      });
+  try {
+    const gen = streamPing({
+      userText: prompt.trim().toLowerCase() === 'ping' ? undefined : prompt,
+      signal,
+      client: params.client ?? createBedrockClient({ region }),
+      modelId: params.modelId,
+    });
+    let result = await gen.next();
+    while (!result.done) {
+      const ev = result.value;
+      if (ev.type === 'token') host.emit({ type: 'token_delta', text: ev.text });
+      if (ev.type === 'usage') {
+        host.emit({
+          type: 'cache_usage',
+          cacheReadInputTokens: ev.cacheReadInputTokens,
+          cacheWriteInputTokens: ev.cacheWriteInputTokens,
+        });
+      }
+      result = await gen.next();
     }
-    result = await gen.next();
+    host.emit({ type: 'phase', phase: 'verify' });
+    host.emit({ type: 'done', reason: result.value.stopReason || 'complete' });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') throw err;
+    throw new Error(formatBedrockAuthError(err, region));
   }
-  host.emit({ type: 'phase', phase: 'verify' });
-  host.emit({ type: 'done', reason: result.value.stopReason || 'complete' });
 }
 
 /**
@@ -277,7 +287,13 @@ export async function runAgentLoop(params: RunLoopParams): Promise<void> {
       host.emit({ type: 'done', reason: 'cancelled' });
       return;
     }
-    const message = err instanceof Error ? err.message : String(err);
+    const { formatBedrockAuthError, getBedrockRegion } = await import(
+      './bedrock.js'
+    );
+    const message = formatBedrockAuthError(
+      err,
+      getBedrockRegion(params.region),
+    );
     host.emit({ type: 'error', message, fatal: true });
     host.emit({ type: 'done', reason: 'error' });
   }
@@ -490,7 +506,7 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
       signal,
       maxTokens,
       reasoningEffort,
-      client: params.client,
+      client: params.client ?? createBedrockClient({ region: params.region }),
       modelId: params.modelId,
     });
     let turn = await gen.next();

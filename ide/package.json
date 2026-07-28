@@ -138,6 +138,11 @@
           "default": "eu-west-2_iKk1NYkcQ",
           "description": "Cognito user pool ID."
         },
+        "walkcroach.ide.bedrockRegion": {
+          "type": "string",
+          "default": "eu-west-2",
+          "description": "AWS region for Bedrock Runtime. Short-term Bedrock API keys only work in the region where they were created (often us-east-1). Must match that region."
+        },
         "walkcroach.ide.bedrockModelId": {
           "type": "string",
           "default": "",

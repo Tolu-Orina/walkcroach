@@ -7,6 +7,10 @@ import {
 } from './attachment-content.js';
 import {
   streamConverseTurn,
+  getNovaModelId,
+  getBedrockRegion,
+  formatBedrockModelErrorForLogs,
+  formatBedrockErrorForUser,
   type ParsedToolUse,
 } from './bedrock.js';
 import { recallProjectMemory, writeMemoryEntry } from './memory.js';
@@ -865,11 +869,18 @@ export async function* runPromptTurn(params: {
         webSearchEnabled,
       });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      // Full diagnostic (model id, region, raw AWS text) goes to server
+      // logs only — never into the user-visible chat transcript, since it
+      // names internal infra the end user can't act on.
+      console.error(
+        'runPromptTurn: model turn failed —',
+        formatBedrockModelErrorForLogs(err, getNovaModelId(), getBedrockRegion()),
+      );
+      const userMsg = formatBedrockErrorForUser(err);
       await appendMessage(params.db, params.sessionId, 'assistant', [
-        { text: `Sorry — the model failed on this turn: ${msg}` },
+        { text: `Sorry — the model failed on this turn: ${userMsg}` },
       ]);
-      yield { type: 'error', message: msg };
+      yield { type: 'error', message: userMsg };
       yield { type: 'done', reason: 'complete' };
     }
   } finally {

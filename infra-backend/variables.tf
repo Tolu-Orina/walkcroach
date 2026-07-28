@@ -95,7 +95,7 @@ variable "bedrock_region" {
 variable "nova_model_id" {
   type        = string
   description = "Bedrock Nova model ID"
-  default     = "eu.amazon.nova-2-lite-v1:0"
+  default     = "global.amazon.nova-2-lite-v1:0"
 }
 
 variable "titan_embed_model_id" {

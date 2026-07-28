@@ -77,25 +77,71 @@ export function getNovaReasoningEffort(): NovaReasoningEffort {
   return 'medium';
 }
 
+/**
+ * Normalize a pasted Bedrock API key: trim, strip accidental `Bearer ` prefix
+ * and surrounding quotes (common when copying from docs/console).
+ */
+export function normalizeBedrockApiKey(raw: string): string {
+  let key = raw.trim();
+  if (
+    (key.startsWith('"') && key.endsWith('"')) ||
+    (key.startsWith("'") && key.endsWith("'"))
+  ) {
+    key = key.slice(1, -1).trim();
+  }
+  key = key.replace(/^Bearer\s+/i, '').trim();
+  return key;
+}
+
+export function getBedrockRegion(override?: string): string {
+  const fromOverride = override?.trim();
+  if (fromOverride) return fromOverride;
+  return (
+    process.env.BEDROCK_REGION?.trim() ||
+    process.env.AWS_REGION?.trim() ||
+    'eu-west-2'
+  );
+}
+
+/**
+ * Append a region-mismatch hint when AWS rejects a Bedrock API key.
+ * That exact AccessDeniedException body is AWS's (not ours).
+ */
+export function formatBedrockAuthError(
+  err: unknown,
+  region: string,
+): string {
+  const message = err instanceof Error ? err.message : String(err);
+  const looksLikeApiKeyReject =
+    /please make sure your api key is valid/i.test(message) ||
+    (/authentication failed/i.test(message) && /api key/i.test(message));
+  if (!looksLikeApiKeyReject) return message;
+  return (
+    `${message}\n\n` +
+    `WalkCroach is calling Bedrock in region "${region}". ` +
+    `Short-term Bedrock API keys only work in the region where they were created — ` +
+    `open Setup and set Bedrock region to match your AWS console region (often us-east-1), ` +
+    `or regenerate the key while the console is on ${region}.`
+  );
+}
+
 export function createBedrockClient(
-  regionOrOpts?: string | { region?: string; bearerToken?: string },
+  regionOrOpts?: string | { region?: string },
 ): BedrockRuntimeClient {
   const opts =
     typeof regionOrOpts === 'string'
       ? { region: regionOrOpts }
       : (regionOrOpts ?? {});
-  const region =
-    opts.region ??
-    process.env.BEDROCK_REGION ??
-    process.env.AWS_REGION ??
-    'eu-west-2';
-  const bearer =
-    opts.bearerToken?.trim() ||
-    process.env.AWS_BEARER_TOKEN_BEDROCK?.trim() ||
-    undefined;
+  const region = getBedrockRegion(opts.region);
+  // Bedrock API keys authenticate via AWS_BEARER_TOKEN_BEDROCK (SDK auto-detect).
+  // Prefer bearer when the env var is set so a broken AWS profile does not steal SigV4.
+  // Do not pass keys as Smithy `token` — that uses a different auth scheme.
+  const hasBearer = Boolean(process.env.AWS_BEARER_TOKEN_BEDROCK?.trim());
   return new BedrockRuntimeClient({
     region,
-    ...(bearer ? { token: { token: bearer } } : {}),
+    ...(hasBearer
+      ? { authSchemePreference: ['httpBearerAuth'] as string[] }
+      : {}),
   });
 }
 
@@ -276,6 +322,14 @@ export async function* streamConverseTurn(params: {
   }
 
   flushText();
+
+  // Bedrock rejects Message.content === [] ("content field … is empty").
+  // Reasoning-only / malformed turns can produce no text and no toolUse.
+  if (assistantContent.length === 0) {
+    assistantContent.push({
+      text: text.trim() || '(no model text)',
+    });
+  }
 
   yield {
     type: 'usage',

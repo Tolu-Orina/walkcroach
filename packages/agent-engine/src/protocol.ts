@@ -99,6 +99,8 @@ export type WebviewToHostMessage =
       type: 'SAVE_SETTINGS';
       /** Set to store; empty string ignored; null clears. */
       bedrockApiKey?: string | null;
+      /** Bedrock Runtime region; null resets to default. */
+      bedrockRegion?: string | null;
       /** Optional Bedrock model ID override; null clears to default. */
       bedrockModelId?: string | null;
       /** Extended-thinking tier override; null clears to default (medium). */
@@ -194,6 +196,7 @@ export type HostToWebviewMessage =
       mcpConfigured?: boolean;
       bedrockConfigured?: boolean;
       bedrockModelId?: string;
+      bedrockRegion?: string;
       reasoningEffort?: string;
       ccloudConfigured?: boolean;
       telemetry?: Record<string, number>;
@@ -379,6 +382,10 @@ export function parseWebviewToHostMessage(
       if (msg.bedrockApiKey === null) out.bedrockApiKey = null;
       else if (typeof msg.bedrockApiKey === 'string') {
         out.bedrockApiKey = msg.bedrockApiKey;
+      }
+      if (msg.bedrockRegion === null) out.bedrockRegion = null;
+      else if (typeof msg.bedrockRegion === 'string') {
+        out.bedrockRegion = msg.bedrockRegion;
       }
       if (msg.bedrockModelId === null) out.bedrockModelId = null;
       else if (typeof msg.bedrockModelId === 'string') {

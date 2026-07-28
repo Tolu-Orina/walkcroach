@@ -97,6 +97,7 @@ type HostMessage =
       mcpConfigured?: boolean;
       bedrockConfigured?: boolean;
       bedrockModelId?: string;
+      bedrockRegion?: string;
       reasoningEffort?: string;
       ccloudConfigured?: boolean;
       telemetry?: Record<string, number>;
@@ -235,6 +236,7 @@ export function App() {
   const [mcpConfigured, setMcpConfigured] = useState(false);
   const [bedrockConfigured, setBedrockConfigured] = useState(false);
   const [bedrockModelId, setBedrockModelId] = useState('');
+  const [bedrockRegion, setBedrockRegion] = useState('eu-west-2');
   const [reasoningEffort, setReasoningEffort] = useState('');
   const [ccloudConfigured, setCcloudConfigured] = useState(false);
   const [signedIn, setSignedIn] = useState(false);
@@ -325,6 +327,11 @@ export function App() {
           setBedrockConfigured(Boolean(msg.bedrockConfigured));
           setBedrockModelId(
             typeof msg.bedrockModelId === 'string' ? msg.bedrockModelId : '',
+          );
+          setBedrockRegion(
+            typeof msg.bedrockRegion === 'string' && msg.bedrockRegion
+              ? msg.bedrockRegion
+              : 'eu-west-2',
           );
           setReasoningEffort(
             typeof msg.reasoningEffort === 'string' ? msg.reasoningEffort : '',
@@ -714,6 +721,7 @@ export function App() {
       <SettingsView
         bedrockConfigured={bedrockConfigured}
         bedrockModelId={bedrockModelId}
+        bedrockRegion={bedrockRegion}
         reasoningEffort={reasoningEffort}
         mcpConfigured={mcpConfigured}
         ccloudConfigured={ccloudConfigured}

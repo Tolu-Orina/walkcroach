@@ -8,10 +8,14 @@ import {
 import type { AgentEvent } from './types.js';
 import type { toBedrockTools } from './tools.js';
 
+export function getBedrockRegion(): string {
+  return process.env.BEDROCK_REGION ?? process.env.AWS_REGION ?? 'eu-west-2';
+}
+
 function getClient() {
   // Lambda: IAM via execution role. Local: optional AWS_BEARER_TOKEN_BEDROCK from .env.
   return new BedrockRuntimeClient({
-    region: process.env.BEDROCK_REGION ?? process.env.AWS_REGION ?? 'eu-west-2',
+    region: getBedrockRegion(),
   });
 }
 
@@ -21,6 +25,57 @@ export function getNovaModelId(): string {
     process.env.NOVA_MODEL_ID ??
     'global.amazon.nova-2-lite-v1:0'
   );
+}
+
+/**
+ * True when a Bedrock error is the "unresolvable model id/inference profile"
+ * class (e.g. ValidationException: "The provided model identifier is
+ * invalid") rather than a transient/other failure.
+ */
+export function isInvalidModelError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return (
+    /provided model identifier is invalid/i.test(message) ||
+    /model.*not (found|supported|accessible)/i.test(message)
+  );
+}
+
+/**
+ * Operator-facing diagnostic for CloudWatch/server logs only — includes the
+ * requested model id/region so an invalid-model-id class failure is
+ * self-diagnosing from logs. Never show this to end users: it names internal
+ * infra (AWS Bedrock console, regions) that isn't actionable by them and
+ * shouldn't be exposed in a user-visible chat transcript.
+ */
+export function formatBedrockModelErrorForLogs(
+  err: unknown,
+  modelId: string,
+  region: string,
+): string {
+  const message = err instanceof Error ? err.message : String(err);
+  if (!isInvalidModelError(err)) return message;
+  return (
+    `${message} | requested model="${modelId}" region="${region}" — ` +
+    `confirm model access is enabled for this model in the AWS Bedrock console for ` +
+    `region ${region}, and that any cross-region inference profile prefix (e.g. ` +
+    `"global."/"us."/"eu.") matches a profile actually available from that region.`
+  );
+}
+
+/**
+ * User-facing message for chat — deliberately generic. Never includes the
+ * raw AWS error text or infra details (model id, region, console
+ * instructions); that's for formatBedrockModelErrorForLogs / server logs only.
+ */
+export function formatBedrockErrorForUser(err: unknown): string {
+  if (isInvalidModelError(err)) {
+    return (
+      'the AI model is temporarily misconfigured on our end. ' +
+      "We've been notified and are looking into it — please try again shortly."
+    );
+  }
+  const message = err instanceof Error ? err.message : String(err);
+  return message;
 }
 
 export type NovaReasoningEffort = 'low' | 'medium' | 'high' | 'off';

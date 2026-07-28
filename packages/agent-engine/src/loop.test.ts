@@ -8,6 +8,9 @@ vi.mock('./bedrock.js', () => ({
   getNovaModelId: () => 'test-model',
   getNovaReasoningEffort: () => 'medium',
   createBedrockClient: vi.fn(),
+  getBedrockRegion: (override?: string) => override || 'eu-west-2',
+  formatBedrockAuthError: (err: unknown) =>
+    err instanceof Error ? err.message : String(err),
   streamConverseTurn: (...args: unknown[]) => mockStreamConverseTurn(...args),
   streamPing: (...args: unknown[]) => mockStreamPing(...args),
   DEFAULT_MAX_OUTPUT_TOKENS: 4096,

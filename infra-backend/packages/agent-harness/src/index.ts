@@ -3,6 +3,9 @@ export {
   streamConverseTurn,
   embedText,
   getNovaModelId,
+  getBedrockRegion,
+  formatBedrockModelErrorForLogs,
+  formatBedrockErrorForUser,
   getNovaReasoningEffort,
   getGuardrailConfig,
 } from './bedrock.js';
