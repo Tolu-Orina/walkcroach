@@ -31,10 +31,48 @@ export type OauthPending = {
   createdAt: number;
 };
 
+/** Outcome of starting sign-in — see `startWebSignIn`. */
+export type SignInOutcome =
+  /** launchWebAuthFlow ran to completion inside the panel. */
+  | { kind: 'completed'; session: StoredSession }
+  /** Fell back to a tab; auth.html finishes the exchange. */
+  | { kind: 'delegated'; url: string };
+
 let ensureInFlight: Promise<StoredSession> | null = null;
 
+/**
+ * Extension ID, validated.
+ *
+ * `chrome.runtime.id` being empty or malformed used to produce redirect URIs like
+ * `chrome-extension://invalid/auth.html`, which the BFF allowlist rejects with an
+ * opaque error. Fail loudly and early instead.
+ */
+export function extensionId(): string {
+  const id = chrome.runtime?.id;
+  if (!id || !/^[a-p]{32}$/.test(id)) {
+    throw new Error(
+      'Extension ID is unavailable or non-standard. Reload the extension; if you are running unpacked, pin it with a manifest "key" (see VERSIONING.md).',
+    );
+  }
+  return id;
+}
+
+/** Legacy tab-redirect target. Requires auth.html in web_accessible_resources. */
 export function chromeRedirectUri(): string {
-  return `chrome-extension://${chrome.runtime.id}/auth.html`;
+  return `chrome-extension://${extensionId()}/auth.html`;
+}
+
+/**
+ * Preferred redirect (Phase B1): Chrome intercepts this host during
+ * launchWebAuthFlow, so nothing is ever navigated to and no web-accessible
+ * resource is involved. Cancellation is observable, unlike the tab flow.
+ */
+export function identityRedirectUri(): string {
+  return `https://${extensionId()}.chromiumapp.org/auth`;
+}
+
+function supportsLaunchWebAuthFlow(): boolean {
+  return typeof chrome.identity?.launchWebAuthFlow === 'function';
 }
 
 export function generateOAuthState(): string {
@@ -191,15 +229,88 @@ export async function ensureDeviceSession(
   return ensureInFlight;
 }
 
+/** Build the /connect/chrome URL for a given redirect target. */
+export function buildConnectUrl(
+  webAppUrl: string,
+  state: string,
+  redirectUri: string,
+): string {
+  const authUrl = new URL('/connect/chrome', webAppUrl.replace(/\/$/, ''));
+  authUrl.searchParams.set('state', state);
+  authUrl.searchParams.set('redirect_uri', redirectUri);
+  return authUrl.toString();
+}
+
+/** Pull `code` + `state` out of the URL Chrome hands back from the auth flow. */
+export function parseAuthCallback(
+  callbackUrl: string,
+): { code: string; state: string } {
+  const parsed = new URL(callbackUrl);
+  // Cognito-style errors can arrive in either the query or the fragment.
+  const params = new URLSearchParams(parsed.search);
+  const hash = new URLSearchParams(parsed.hash.replace(/^#/, ''));
+  const err = params.get('error') ?? hash.get('error');
+  if (err) throw new Error(`Sign-in failed: ${err}`);
+  const code = params.get('code') ?? hash.get('code');
+  const state = params.get('state') ?? hash.get('state');
+  if (!code || !state) {
+    throw new Error('Sign-in did not return a connect code. Please try again.');
+  }
+  return { code, state };
+}
+
 /**
- * Open WalkCroach Web /connect/chrome (same pattern as IDE).
- * Returns after the connect tab is opened; completion happens on auth.html.
+ * Start sign-in against WalkCroach Web /connect/chrome (same custom Cognito
+ * pages as Web and IDE — no Hosted UI, no Amplify).
+ *
+ * Prefers `chrome.identity.launchWebAuthFlow` (Phase B1): the redirect lands on
+ * `https://<id>.chromiumapp.org/auth`, which Chrome intercepts, so we never
+ * depend on a navigation into an extension page. Falls back to the tab +
+ * auth.html flow (kept working by the Phase A4 web_accessible_resources fix)
+ * where `identity` is unavailable.
  */
-export async function startWebSignIn(webAppUrl = WEB_APP_URL): Promise<string> {
+export async function startWebSignIn(
+  webAppUrl = WEB_APP_URL,
+): Promise<SignInOutcome> {
   if (!webAppUrl) {
     throw new Error('WalkCroach Web URL is not configured.');
   }
   const state = generateOAuthState();
+
+  if (supportsLaunchWebAuthFlow()) {
+    const redirectUri = identityRedirectUri();
+    const pending: OauthPending = {
+      state,
+      redirectUri,
+      createdAt: Date.now(),
+    };
+    await chrome.storage.session.set({ [OAUTH_PENDING]: pending });
+
+    let callbackUrl: string | undefined;
+    try {
+      callbackUrl = await chrome.identity.launchWebAuthFlow({
+        url: buildConnectUrl(webAppUrl, state, redirectUri),
+        interactive: true,
+      });
+    } catch (err) {
+      await chrome.storage.session.remove(OAUTH_PENDING);
+      const message = err instanceof Error ? err.message : String(err);
+      // Chrome's copy for "user closed the window" varies; normalise it.
+      if (/did not approve|canceled|cancelled|closed/i.test(message)) {
+        throw new Error('Sign-in cancelled.');
+      }
+      throw new Error(message || 'Sign-in failed.');
+    }
+    if (!callbackUrl) {
+      await chrome.storage.session.remove(OAUTH_PENDING);
+      throw new Error('Sign-in cancelled.');
+    }
+
+    const { code, state: returnedState } = parseAuthCallback(callbackUrl);
+    const session = await completeWebSignIn(code, returnedState);
+    return { kind: 'completed', session };
+  }
+
   const redirectUri = chromeRedirectUri();
   const pending: OauthPending = {
     state,
@@ -207,12 +318,9 @@ export async function startWebSignIn(webAppUrl = WEB_APP_URL): Promise<string> {
     createdAt: Date.now(),
   };
   await chrome.storage.session.set({ [OAUTH_PENDING]: pending });
-
-  const authUrl = new URL('/connect/chrome', webAppUrl.replace(/\/$/, ''));
-  authUrl.searchParams.set('state', state);
-  authUrl.searchParams.set('redirect_uri', redirectUri);
-  await chrome.tabs.create({ url: authUrl.toString() });
-  return authUrl.toString();
+  const url = buildConnectUrl(webAppUrl, state, redirectUri);
+  await chrome.tabs.create({ url });
+  return { kind: 'delegated', url };
 }
 
 /**
@@ -226,14 +334,14 @@ export async function completeWebSignIn(
   const raw = await chrome.storage.session.get(OAUTH_PENDING);
   const pending = raw[OAUTH_PENDING] as OauthPending | undefined;
   if (!pending?.state || !pending.redirectUri) {
-    throw new Error('Sign-in session expired. Open Trust and try again.');
+    throw new Error('Sign-in session expired. Open Account & Sites and try again.');
   }
   if (pending.state !== state) {
     throw new Error('Invalid callback (state mismatch).');
   }
   if (Date.now() - pending.createdAt > 5 * 60_000) {
     await chrome.storage.session.remove(OAUTH_PENDING);
-    throw new Error('Sign-in timed out. Open Trust and try again.');
+    throw new Error('Sign-in timed out. Open Account & Sites and try again.');
   }
 
   const tokens = await exchangeOauthToken({

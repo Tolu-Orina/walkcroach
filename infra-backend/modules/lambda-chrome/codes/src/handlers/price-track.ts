@@ -9,12 +9,47 @@ import {
   updateMirroredCaptureMemory,
 } from './link.js';
 
+export type PricePoint = { price: number; currency: string; at: string };
+
 type PriceFields = {
   price: number;
   currency: string;
   productName?: string;
-  history: Array<{ price: number; currency: string; at: string }>;
+  history: PricePoint[];
 };
+
+/** Oldest points are dropped past this. */
+export const MAX_HISTORY_POINTS = 100;
+
+/**
+ * Append a check to price history only when it says something new (Phase D2).
+ *
+ * Previously every visit appended unconditionally, so re-opening a product page
+ * five times wrote five identical points. That flattened the sparkline into a
+ * meaningless straight line, made "12 checks" a measure of browsing rather than
+ * of price movement, and burned the 100-point cap with duplicates so genuine
+ * older movement was evicted.
+ *
+ * An unchanged price still matters — it is evidence the price held — so the last
+ * point's timestamp moves forward instead. Currency changes always append: the
+ * same number in a different currency is a different price.
+ */
+export function nextPriceHistory(
+  previous: PricePoint[] | undefined,
+  point: PricePoint,
+): { history: PricePoint[]; changed: boolean } {
+  const history = Array.isArray(previous) ? [...previous] : [];
+  const last = history[history.length - 1];
+
+  if (last && last.price === point.price && last.currency === point.currency) {
+    history[history.length - 1] = { ...last, at: point.at };
+    return { history, changed: false };
+  }
+
+  history.push(point);
+  while (history.length > MAX_HISTORY_POINTS) history.shift();
+  return { history, changed: true };
+}
 
 /**
  * FR-C13: upsert price track by workspace + url.
@@ -104,9 +139,11 @@ export async function handlePriceTrack(
     if (existing.rows[0]) {
       const row = existing.rows[0];
       const prev = (row.structured_fields ?? {}) as Partial<PriceFields>;
-      const history = Array.isArray(prev.history) ? [...prev.history] : [];
-      history.push({ price: priceNum, currency, at: now });
-      while (history.length > 100) history.shift();
+      const { history, changed } = nextPriceHistory(prev.history, {
+        price: priceNum,
+        currency,
+        at: now,
+      });
       const fields: PriceFields = {
         price: priceNum,
         currency,
@@ -156,11 +193,14 @@ export async function handlePriceTrack(
       }
       metricLog('chrome.capture.price_append', {
         historyLen: history.length,
+        changed,
         linked: Boolean(linkedProjectId),
       });
       return jsonResponse(200, {
         captureId: row.id,
         appended: true,
+        /** False when the price was identical to the previous check. */
+        priceChanged: changed,
         structuredFields: fields,
         linkedProjectId,
         availableInWebProject: Boolean(linkedProjectId),
@@ -232,15 +272,51 @@ export async function handlePriceTrack(
   }
 }
 
-function coercePrice(raw: unknown): number | null {
+/**
+ * Parse a price string into a number, honouring both decimal conventions.
+ *
+ * Stripping all commas — the previous behaviour — turns the European "45,50"
+ * into 4550, a hundredfold error recorded as a real price and plotted on the
+ * user's history. Which separator is decimal is decided by position, the same
+ * way a person reads it:
+ *
+ *   "1,299.00" → both present, dot is last  → dot is decimal   → 1299.00
+ *   "1.299,00" → both present, comma last   → comma is decimal → 1299.00
+ *   "45,50"    → comma with exactly 2 after → decimal          → 45.50
+ *   "1,299"    → comma with 3 after         → thousands        → 1299
+ *
+ * "1.299" stays 1.299: a lone dot is read as decimal, because our target markets
+ * write it that way and a bare three-digit group is genuinely ambiguous.
+ */
+export function coercePrice(raw: unknown): number | null {
   if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
   if (typeof raw !== 'string') return null;
-  const cleaned = raw.replace(/[^0-9.,]/g, '').replace(/,/g, '');
-  const n = Number.parseFloat(cleaned);
+
+  const digits = raw.replace(/[^0-9.,]/g, '');
+  if (!/[0-9]/.test(digits)) return null;
+
+  const lastDot = digits.lastIndexOf('.');
+  const lastComma = digits.lastIndexOf(',');
+  let normalized: string;
+
+  if (lastDot >= 0 && lastComma >= 0) {
+    const decimalIsComma = lastComma > lastDot;
+    normalized = decimalIsComma
+      ? digits.replace(/\./g, '').replace(',', '.')
+      : digits.replace(/,/g, '');
+  } else if (lastComma >= 0) {
+    normalized = /,[0-9]{2}$/.test(digits)
+      ? digits.replace(/,/g, '.')
+      : digits.replace(/,/g, '');
+  } else {
+    normalized = digits;
+  }
+
+  const n = Number.parseFloat(normalized);
   return Number.isFinite(n) ? n : null;
 }
 
-function extractPriceFromText(text: string | undefined): string | null {
+export function extractPriceFromText(text: string | undefined): string | null {
   if (!text) return null;
   const m = text.match(
     /(?:USD|GBP|EUR|\$|£|€)\s?([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]{2})?|[0-9]+(?:\.[0-9]{2})?)/i,

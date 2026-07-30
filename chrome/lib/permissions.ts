@@ -1,26 +1,166 @@
 /**
- * activeTab-only model (v0.1.3): no chrome.permissions host grants.
- * Kept as thin helpers so call sites stay stable.
+ * Optional host permissions (v0.2.0 — Phase A1).
+ *
+ * Why this file came back: `activeTab` is only activated by a toolbar action
+ * click, a context-menu item, a commands shortcut, or an omnibox suggestion.
+ * A click *inside the side panel* is none of those, so the v0.1.3 activeTab-only
+ * model could never satisfy "open the panel once, then Summarize as you browse".
+ *
+ * The manifest therefore declares `optional_host_permissions` for http(s) and we
+ * request a single origin from the button click that needs it — `permissions.request`
+ * itself counts as a qualifying user gesture. Install stays warning-free, and the
+ * Sites list in the panel becomes a real capability again (grant + revoke).
+ *
+ * Every function here is safe to call from the side panel; `request()` in particular
+ * MUST be called from the panel (a gesture-bearing context), never from the worker.
  */
 
-export async function originFromUrl(url: string): Promise<string> {
+import { API_BASE } from './api';
+
+/** Schemes no extension can script, regardless of permissions. */
+const RESTRICTED_SCHEMES = [
+  'chrome:',
+  'chrome-extension:',
+  'chrome-untrusted:',
+  'chrome-search:',
+  'chrome-devtools:',
+  'devtools:',
+  'about:',
+  'edge:',
+  'brave:',
+  'opera:',
+  'vivaldi:',
+  'view-source:',
+  'data:',
+  'blob:',
+  'javascript:',
+  'filesystem:',
+];
+
+/** Hosts Chrome blocks extension scripting on even over https. */
+const RESTRICTED_HOSTS = [
+  'chrome.google.com',
+  'chromewebstore.google.com',
+];
+
+export type RestrictedReason =
+  | 'scheme'
+  | 'webstore'
+  | 'local-file'
+  | 'unparseable';
+
+/**
+ * Why a URL can never be read, or `null` when it is readable in principle
+ * (it may still need a grant — see `hasOriginPermission`).
+ */
+export function restrictedReason(url: string): RestrictedReason | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return 'unparseable';
+  }
+  if (parsed.protocol === 'file:') return 'local-file';
+  if (RESTRICTED_SCHEMES.includes(parsed.protocol)) return 'scheme';
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return 'scheme';
+  }
+  if (RESTRICTED_HOSTS.includes(parsed.hostname)) return 'webstore';
+  return null;
+}
+
+export function isSupportedPageUrl(url: string): boolean {
+  return restrictedReason(url) === null;
+}
+
+/**
+ * `https://www.example.com/a?b=1` → `https://www.example.com/*`.
+ * Returns null for anything we could never be granted access to.
+ *
+ * Deliberately host-exact (not wildcard-subdomain): the user grants the site
+ * they are looking at, not `*.example.com`.
+ */
+export function originPatternFromUrl(url: string): string | null {
+  if (!isSupportedPageUrl(url)) return null;
   const u = new URL(url);
   return `${u.protocol}//${u.host}/*`;
 }
 
-/** Always true — page access uses activeTab + scripting on user gesture. */
-export async function ensureOriginPermission(_pageUrl: string): Promise<boolean> {
-  return true;
+/** `https://www.example.com/*` → `www.example.com` (for user-facing copy). */
+export function originLabel(originPattern: string): string {
+  return originPattern.replace(/^\w+:\/\//, '').replace(/\/\*$/, '');
 }
 
-export async function hasOriginPermission(_originPattern: string): Promise<boolean> {
-  return false;
+/** Install-time API host grant — never shown or revokable in the Sites list. */
+function apiOriginPattern(): string | null {
+  try {
+    const u = new URL(API_BASE);
+    return `${u.protocol}//${u.host}/*`;
+  } catch {
+    return null;
+  }
 }
 
+export async function hasOriginPermission(
+  originPattern: string,
+): Promise<boolean> {
+  try {
+    return await chrome.permissions.contains({ origins: [originPattern] });
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Prompt for a single origin. Must be called synchronously enough after a click
+ * that Chrome still considers it a user gesture — i.e. do not `await` network
+ * calls before this.
+ *
+ * Resolves false when the user declines; only throws on a malformed pattern.
+ */
+export async function requestOriginPermission(
+  originPattern: string,
+): Promise<boolean> {
+  try {
+    return await chrome.permissions.request({ origins: [originPattern] });
+  } catch {
+    return false;
+  }
+}
+
+/** Grant the origin for `pageUrl` if we do not already hold it. */
+export async function ensureOriginPermission(
+  pageUrl: string,
+): Promise<boolean> {
+  const pattern = originPatternFromUrl(pageUrl);
+  if (!pattern) return false;
+  if (await hasOriginPermission(pattern)) return true;
+  return requestOriginPermission(pattern);
+}
+
+/**
+ * Origins the user has granted, excluding the install-time API host.
+ * Sorted for a stable Sites list.
+ */
 export async function listGrantedOrigins(): Promise<string[]> {
-  return [];
+  try {
+    const all = await chrome.permissions.getAll();
+    const api = apiOriginPattern();
+    return (all.origins ?? [])
+      .filter((o) => o !== api)
+      .filter((o) => o !== 'http://*/*' && o !== 'https://*/*')
+      .sort((a, b) => originLabel(a).localeCompare(originLabel(b)));
+  } catch {
+    return [];
+  }
 }
 
-export async function revokeOrigin(_origin: string): Promise<boolean> {
-  return false;
+export async function revokeOrigin(originPattern: string): Promise<boolean> {
+  const api = apiOriginPattern();
+  if (originPattern === api) return false;
+  try {
+    return await chrome.permissions.remove({ origins: [originPattern] });
+  } catch {
+    return false;
+  }
 }

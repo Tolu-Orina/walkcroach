@@ -182,6 +182,60 @@ export function useAgentSession(
           setPendingPlan((prev) =>
             prev?.planId === event.planId ? prev : { planId: event.planId, files: [] },
           );
+        } else if (event.type === 'image_generated') {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: uid(),
+              role: 'assistant' as const,
+              content: `Here is the image (remaining today: ${event.remainingToday}/${event.dailyLimit}).`,
+              image: {
+                assetId: event.assetId,
+                prompt: event.prompt,
+                dataUrl: event.dataUrl,
+                storageKey: event.storageKey,
+                width: event.width,
+                height: event.height,
+                remainingToday: event.remainingToday,
+                dailyLimit: event.dailyLimit,
+              },
+            },
+          ]);
+        } else if (event.type === 'image_credit_required') {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: uid(),
+              role: 'system' as const,
+              content: `This image costs ${event.credits} credits on the paid plan. Reply "confirm" to approve the spend.`,
+            },
+          ]);
+        } else if (event.type === 'creative_brief_ready') {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: uid(),
+              role: 'system' as const,
+              content: `Slide brief ready (${event.credits} credits). Confirm in Chat to render.`,
+            },
+          ]);
+        } else if (event.type === 'creative_asset_ready') {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: uid(),
+              role: 'assistant' as const,
+              content: `Deck ready: ${event.downloadName} (${event.slideCount} slides).`,
+              deck: {
+                assetId: event.assetId,
+                downloadName: event.downloadName,
+                slideCount: event.slideCount,
+                creditsCharged: event.creditsCharged,
+                previewUrl: event.previewDataUrl ?? null,
+                downloadUrl: null,
+              },
+            },
+          ]);
         } else if (event.type === 'tool_call') {
           // Finalize in-progress assistant text so the caret doesn't look stuck
           // while client tools (ls, npm, …) run in the background.

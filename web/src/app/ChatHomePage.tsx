@@ -9,6 +9,8 @@ import {
 import { useAuth } from '../auth/useAuth';
 import { ChatComposer } from '../features/chat/ChatComposer';
 import { CHAT_TEMPLATES } from '../features/chat/chatTemplates';
+import { CreativeConfirmCard } from '../features/chat/CreativeConfirmCard';
+import { ImageQuotaPill } from '../features/chat/ImageQuotaPill';
 import { MessageRow, StreamingSkeleton } from '../features/chat/MessageRow';
 import { useChatSession } from '../hooks/useChatSession';
 import { useShell } from '../hooks/useShell';
@@ -44,6 +46,10 @@ export function ChatHomePage() {
     sessionId,
     openSession,
     cancelGeneration,
+    pendingCreative,
+    creativeBusy,
+    confirmCreative,
+    declineCreative,
   } = useChatSession();
 
   const [draft, setDraft] = useState<string | undefined>(undefined);
@@ -229,6 +235,7 @@ export function ChatHomePage() {
               </button>
             ))}
           </div>
+          <ImageQuotaPill />
         </div>
       )}
 
@@ -314,6 +321,19 @@ export function ChatHomePage() {
               <div ref={bottomRef} />
             </div>
           </div>
+
+          {pendingCreative && (
+            <div className="shrink-0 border-t border-line/80 bg-ink/90 px-4 py-3 backdrop-blur-md sm:px-8">
+              <div className="mx-auto max-w-3xl">
+                <CreativeConfirmCard
+                  pending={pendingCreative}
+                  busy={creativeBusy}
+                  onConfirm={() => void confirmCreative()}
+                  onDecline={declineCreative}
+                />
+              </div>
+            </div>
+          )}
 
           <div className="shrink-0 border-t border-line/80 bg-ink/80 px-4 py-4 backdrop-blur-md sm:px-8">
             <div className="mx-auto max-w-3xl">

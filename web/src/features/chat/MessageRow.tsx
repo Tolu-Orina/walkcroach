@@ -1,5 +1,6 @@
 import type { ChatMessage } from '../../api/types';
 import { MemoryRecallCard } from '../memory/MemoryRecallCard';
+import { CreativeDeckCard } from './CreativeDeckCard';
 import { MarkdownContent } from './markdown';
 
 type MessageRowProps = {
@@ -95,6 +96,24 @@ export function MessageRow({ msg, streaming, saveContext }: MessageRowProps) {
           streaming={isStreaming}
           saveContext={isStreaming ? undefined : saveContext}
         />
+        {msg.image && (
+          <div className="mt-3 max-w-md overflow-hidden rounded-[var(--radius-surface)] border border-line">
+            <img
+              src={msg.image.dataUrl}
+              alt={msg.image.prompt}
+              className="block w-full"
+            />
+            <div className="flex items-center justify-between gap-2 border-t border-line/60 bg-raised/60 px-3 py-2">
+              <span className="truncate font-mono text-[11px] text-mist">
+                {msg.image.width}×{msg.image.height} · {msg.image.assetId.slice(0, 8)}
+              </span>
+              <span className="shrink-0 rounded-[0.3rem] bg-signal/15 px-1.5 py-0.5 font-mono text-[10px] text-signal">
+                {msg.image.remainingToday}/{msg.image.dailyLimit} today
+              </span>
+            </div>
+          </div>
+        )}
+        {msg.deck && <CreativeDeckCard asset={msg.deck} />}
       </div>
     </div>
   );

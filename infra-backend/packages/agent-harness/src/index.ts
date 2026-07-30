@@ -3,6 +3,7 @@ export {
   streamConverseTurn,
   embedText,
   getNovaModelId,
+  getNovaCanvasModelId,
   getBedrockRegion,
   formatBedrockModelErrorForLogs,
   formatBedrockErrorForUser,
@@ -14,7 +15,25 @@ export {
   continueAfterTool,
   continueAfterPlanDecision,
   type LoopMode,
+  type CreativeLimits,
+  defaultCreativeLimits,
 } from './loop.js';
+export {
+  invokeRenderPptx,
+  invokeRunSkillScript,
+  type CreativeRenderResult,
+  type SkillScriptResult,
+} from './creative-client.js';
+export {
+  generateCreativeBrief,
+  getNovaProModelId,
+  type CreativeBrief,
+} from './creative-brief.js';
+export {
+  listWebSkillMetas,
+  loadWebSkill,
+  webSkillsCatalogText,
+} from './web-skills.js';
 export {
   recallProjectMemory,
   writeMemoryEntry,

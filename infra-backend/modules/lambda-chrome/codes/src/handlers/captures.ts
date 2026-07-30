@@ -1,6 +1,7 @@
 import { createDbClient } from '@walkcroach/db';
 import type { AuthContext } from '../auth.js';
 import { jsonResponse } from '../http.js';
+import { removeScreenshot } from './screenshot.js';
 import { embedText, formatVector } from './llm.js';
 import { metricLog, parseJsonBody, truncateExtract } from '../util.js';
 import {
@@ -273,8 +274,12 @@ export async function handleDeleteCapture(
 ): Promise<ReturnType<typeof jsonResponse>> {
   const db = createDbClient();
   try {
-    const existing = await db.query<{ id: string; project_id: string | null }>(
-      `SELECT id, project_id FROM page_captures
+    const existing = await db.query<{
+      id: string;
+      project_id: string | null;
+      screenshot_s3_key: string | null;
+    }>(
+      `SELECT id, project_id, screenshot_s3_key FROM page_captures
        WHERE id = $1::uuid AND owner_id = $2`,
       [id, auth.ownerId],
     );
@@ -284,6 +289,9 @@ export async function handleDeleteCapture(
       existing.rows[0].id,
       existing.rows[0].project_id,
     );
+    // Delete the image too. A user deleting a capture expects the screenshot to
+    // go with it, not to linger until bucket lifecycle expiry.
+    await removeScreenshot(auth.ownerId, existing.rows[0].screenshot_s3_key);
     await db.query(
       `DELETE FROM page_captures
        WHERE id = $1::uuid AND owner_id = $2`,

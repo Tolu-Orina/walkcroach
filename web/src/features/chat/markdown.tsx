@@ -6,11 +6,10 @@ import {
   useTransition,
 } from 'react';
 import { Link } from 'react-router-dom';
-import { Lexer } from 'marked';
 import ReactMarkdown, { type Components } from 'react-markdown';
-import remend from 'remend';
 import remarkGfm from 'remark-gfm';
 import { createCodeArtefact } from '../../api/client';
+import { prepareMarkdown, splitIntoBlocks } from './markdownPrepare';
 
 const SAVE_MIN_CHARS = 40;
 const SAVE_MIN_LINES = 3;
@@ -29,47 +28,6 @@ type MarkdownContentProps = {
   /** When set, substantial code blocks offer “Save as code”. */
   saveContext?: SaveContext;
 };
-
-/**
- * Close an odd number of ``` / ~~~ fences so mid-stream code still renders.
- * Must run after remend (which is fence-aware) so we don't "complete" syntax
- * that belongs inside an open fence.
- */
-function closeUnclosedFences(text: string): string {
-  let open = false;
-  for (const line of text.split('\n')) {
-    if (/^ {0,3}(`{3,}|~{3,})/.test(line)) open = !open;
-  }
-  return open ? `${text}\n\`\`\`` : text;
-}
-
-/** Self-heal incomplete markdown while tokens are still arriving. */
-function prepareMarkdown(text: string, streaming: boolean): string {
-  if (!streaming) return text;
-  return closeUnclosedFences(
-    remend(text, {
-      katex: false,
-      inlineKatex: false,
-    }),
-  );
-}
-
-/**
- * Split into top-level blocks via marked's lexer so completed blocks can be
- * memoized while only the tail block re-parses on each token.
- */
-function splitIntoBlocks(markdown: string): string[] {
-  if (!markdown) return [];
-  try {
-    const tokens = Lexer.lex(markdown, { gfm: true });
-    const blocks = tokens
-      .map((t) => ('raw' in t && typeof t.raw === 'string' ? t.raw : ''))
-      .filter((raw) => raw.length > 0);
-    return blocks.length > 0 ? blocks : [markdown];
-  } catch {
-    return [markdown];
-  }
-}
 
 function isSubstantial(text: string): boolean {
   return (
@@ -329,12 +287,5 @@ export function MarkdownContent({
     </div>
   );
 }
-
-/** @internal exported for unit tests */
-export const __markdownTestUtils = {
-  prepareMarkdown,
-  splitIntoBlocks,
-  closeUnclosedFences,
-};
 
 export type { MarkdownContentProps, SaveContext };

@@ -5,10 +5,26 @@ import {
   getLatestSession,
   getSession,
   listChatSessions,
+  confirmCreativeRender,
   streamPrompt,
 } from '../api/client';
 import type { AgentEvent, ChatMessage } from '../api/types';
 import type { ChatAttachment } from '../features/chat/ChatComposer';
+
+export type PendingCreativeBrief = {
+  assetId: string;
+  kind: 'slide_deck';
+  brief: {
+    title?: string;
+    subtitle?: string;
+    slides?: Array<{ title?: string; bullets?: string[] }>;
+  };
+  credits: number;
+  estimatedImages: number;
+  remainingImages: number;
+  imageDailyLimit: number;
+  stub?: boolean;
+};
 
 function uid(): string {
   return crypto.randomUUID();
@@ -114,6 +130,9 @@ export function useChatSession(opts?: {
     [],
   );
   const [webSearch, setWebSearch] = useState(true);
+  const [pendingCreative, setPendingCreative] =
+    useState<PendingCreativeBrief | null>(null);
+  const [creativeBusy, setCreativeBusy] = useState(false);
   const assistantBuf = useRef('');
   const abortRef = useRef<AbortController | null>(null);
 
@@ -157,6 +176,59 @@ export function useChatSession(opts?: {
               role: 'system',
               content: event.message,
             },
+          ]);
+        } else if (event.type === 'creative_brief_ready') {
+          setPendingCreative({
+            assetId: event.assetId,
+            kind: event.kind,
+            brief: event.brief as PendingCreativeBrief['brief'],
+            credits: event.credits,
+            estimatedImages: event.estimatedImages,
+            remainingImages: event.remainingImages,
+            imageDailyLimit: event.imageDailyLimit,
+            stub: event.stub,
+          });
+        } else if (event.type === 'creative_asset_ready') {
+          setPendingCreative(null);
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: uid(),
+              role: 'assistant',
+              content: `Your deck is ready (${event.slideCount} slides).`,
+              deck: {
+                assetId: event.assetId,
+                downloadName: event.downloadName,
+                slideCount: event.slideCount,
+                creditsCharged: event.creditsCharged,
+                previewUrl: event.previewDataUrl ?? null,
+                downloadUrl: null,
+              },
+            },
+          ]);
+        } else if (event.type === 'image_generated') {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: uid(),
+              role: 'assistant',
+              content: `Here is the image (remaining today: ${event.remainingToday}/${event.dailyLimit}).`,
+              image: {
+                assetId: event.assetId,
+                prompt: event.prompt,
+                dataUrl: event.dataUrl,
+                storageKey: event.storageKey,
+                width: event.width,
+                height: event.height,
+                remainingToday: event.remainingToday,
+                dailyLimit: event.dailyLimit,
+              },
+            },
+          ]);
+        } else if (event.type === 'warning') {
+          setMessages((prev) => [
+            ...prev,
+            { id: uid(), role: 'system', content: event.message },
           ]);
         } else if (event.type === 'done') {
           const finalText = assistantBuf.current;
@@ -400,6 +472,61 @@ export function useChatSession(opts?: {
     ]);
   }, []);
 
+  const confirmCreative = useCallback(async () => {
+    if (!pendingCreative || creativeBusy) return;
+    setCreativeBusy(true);
+    try {
+      const result = await confirmCreativeRender(pendingCreative.assetId);
+      if (!result.ok && result.error) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: uid(),
+            role: 'system',
+            content: `Could not render deck: ${result.error}`,
+          },
+        ]);
+        return;
+      }
+      setPendingCreative(null);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: uid(),
+          role: 'assistant',
+          content: `Your deck is ready${result.slideCount ? ` (${result.slideCount} slides)` : ''}.`,
+          deck: {
+            assetId: result.assetId,
+            downloadName: result.downloadName ?? 'deck.pptx',
+            slideCount: result.slideCount ?? 0,
+            creditsCharged: pendingCreative.credits,
+            previewUrl: result.previewUrl ?? null,
+            downloadUrl: result.downloadUrl ?? null,
+          },
+        },
+      ]);
+    } catch (err) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: uid(),
+          role: 'system',
+          content: err instanceof Error ? err.message : String(err),
+        },
+      ]);
+    } finally {
+      setCreativeBusy(false);
+    }
+  }, [pendingCreative, creativeBusy]);
+
+  const declineCreative = useCallback(() => {
+    setPendingCreative(null);
+    setMessages((prev) => [
+      ...prev,
+      { id: uid(), role: 'system', content: 'Deck cancelled — no credits charged.' },
+    ]);
+  }, []);
+
   const hasUserMessages = messages.some((m) => m.role === 'user');
 
   return {
@@ -417,5 +544,9 @@ export function useChatSession(opts?: {
     newChat,
     openSession,
     cancelGeneration,
+    pendingCreative,
+    creativeBusy,
+    confirmCreative,
+    declineCreative,
   };
 }

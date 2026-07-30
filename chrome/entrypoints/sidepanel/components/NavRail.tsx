@@ -1,0 +1,75 @@
+import {
+  IconAccount,
+  IconPage,
+  IconRecall,
+  IconSaved,
+} from './icons';
+
+export type TabId = 'page' | 'recall' | 'saved' | 'account';
+
+const TABS: Array<{
+  id: TabId;
+  label: string;
+  Icon: (p: { className?: string }) => React.ReactElement;
+}> = [
+  { id: 'page', label: 'Page', Icon: IconPage },
+  { id: 'recall', label: 'Recall', Icon: IconRecall },
+  { id: 'saved', label: 'Saved', Icon: IconSaved },
+  { id: 'account', label: 'Account', Icon: IconAccount },
+];
+
+/**
+ * Secondary navigation, pinned to the bottom (plan §3.2).
+ *
+ * Below the content on purpose: the panel's job on open is "act on this page",
+ * so Recall / Saved / Account must not compete with it for the first glance.
+ * Labels are hidden by CSS under ~340px and returned by a container query —
+ * width-driven, so it responds to the panel the user dragged rather than to
+ * their monitor.
+ *
+ * `tablist` semantics rather than links: this switches panes in place, and a
+ * reader should hear "tab 2 of 4", not "link".
+ */
+export function NavRail({
+  active,
+  onSelect,
+}: {
+  active: TabId;
+  onSelect: (id: TabId) => void;
+}) {
+  return (
+    <nav className="wc-rail" role="tablist" aria-label="WalkCroach sections">
+      {TABS.map(({ id, label, Icon }) => {
+        const selected = active === id;
+        return (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            id={`wc-tab-${id}`}
+            aria-selected={selected}
+            aria-controls={`wc-pane-${id}`}
+            aria-current={selected ? 'page' : undefined}
+            tabIndex={selected ? 0 : -1}
+            className="wc-rail__item"
+            onClick={() => onSelect(id)}
+            onKeyDown={(e) => {
+              // Roving tabindex: arrows move between tabs, as ARIA expects.
+              const i = TABS.findIndex((t) => t.id === active);
+              if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+                e.preventDefault();
+                onSelect(TABS[(i + 1) % TABS.length]!.id);
+              } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+                e.preventDefault();
+                onSelect(TABS[(i - 1 + TABS.length) % TABS.length]!.id);
+              }
+            }}
+          >
+            <Icon className="wc-rail__icon" />
+            <span className="wc-rail__label">{label}</span>
+          </button>
+        );
+      })}
+    </nav>
+  );
+}

@@ -5,11 +5,20 @@ import { jsonResponse } from '../http.js';
 import { metricLog, parseJsonBody } from '../util.js';
 
 /**
- * Chrome extension redirect only.
- * Must stay in sync with web ConnectChromePage + chrome client.
+ * Chrome extension redirects only.
+ * Must stay in sync with web ConnectChromePage + chrome client (lib/auth.ts).
+ *
+ * Two accepted shapes:
+ *  - `https://<id>.chromiumapp.org/auth` — chrome.identity.launchWebAuthFlow
+ *    (preferred; Chrome intercepts the navigation, nothing is ever loaded).
+ *  - `chrome-extension://<id>/auth.html` — legacy tab redirect, retained as a
+ *    rollout fallback for builds without the `identity` permission.
+ *
+ * Both bind the redirect to a 32-char [a-p] extension ID, so a third party
+ * cannot register an arbitrary destination for a one-time connect code.
  */
 export const CHROME_REDIRECT_PATTERN =
-  /^chrome-extension:\/\/[a-p]{32}\/auth\.html$/;
+  /^(?:chrome-extension:\/\/[a-p]{32}\/auth\.html|https:\/\/[a-p]{32}\.chromiumapp\.org\/auth)$/;
 
 const CODE_TTL_MS = 5 * 60_000;
 

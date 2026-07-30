@@ -1,6 +1,21 @@
 import type { AgentEvent } from '@walkcroach/agent-harness';
 import { requireAuth, type AuthContext } from '../auth.js';
 import { handleDeviceSession } from './device-session.js';
+import { handleSiteProfiles } from './site-profiles.js';
+import {
+  handleDeclineRun,
+  handleDisconnectConnector,
+  handleExecuteRun,
+  handleListConnectors,
+  handleListRuns,
+  handleProposeAction,
+} from './connectors.js';
+import {
+  handleScreenshotCommit,
+  handleScreenshotPresign,
+  handleScreenshotUpload,
+  handleScreenshotUrl,
+} from './screenshot.js';
 import {
   handleCreateWorkspace,
   handleDeleteWorkspace,
@@ -38,10 +53,15 @@ import {
   streamDraft,
   streamSummarize,
 } from './llm.js';
-import { streamRecall } from './recall.js';
+import { streamRecall,
+  type RecallSourcesEvent,
+} from './recall.js';
 import { streamPropose, type ProposeBody, type ProposalEvent } from './propose.js';
 
-export type ChromeStreamEvent = AgentEvent | ProposalEvent;
+export type ChromeStreamEvent =
+  | AgentEvent
+  | ProposalEvent
+  | RecallSourcesEvent;
 
 export function normalizeChromePath(path: string): string {
   return path.replace(/^\/v1(?=\/)/, '');
@@ -102,6 +122,11 @@ export async function handleChromeRest(
       service: 'walkcroach-chrome',
       version: '0.1.5',
     });
+  }
+
+  // Public: signed site-profile bundle (data only, never executed).
+  if (req.method === 'GET' && /\/chrome\/v1\/site-profiles\/?$/.test(path)) {
+    return handleSiteProfiles();
   }
 
   if (
@@ -203,6 +228,58 @@ export async function handleChromeRest(
   }
   if (req.method === 'POST' && /\/chrome\/v1\/captures\/?$/.test(path)) {
     return handleCreateCapture(auth, req.body);
+  }
+
+  // ── Connectors (Phase E1) ──────────────────────────────────────────
+  // Longest paths first so /connectors/runs is not eaten by /connectors/:provider.
+  if (req.method === 'GET' && /\/chrome\/v1\/connectors\/runs\/?$/.test(path)) {
+    return handleListRuns(auth, req.queryStringParameters.limit);
+  }
+  const runAction = path.match(
+    /\/chrome\/v1\/connectors\/runs\/([^/]+)\/(execute|decline)\/?$/,
+  );
+  if (req.method === 'POST' && runAction) {
+    if (!isUuid(runAction[1])) return jsonResponse(400, { error: 'invalid id' });
+    return runAction[2] === 'execute'
+      ? handleExecuteRun(auth, runAction[1]!)
+      : handleDeclineRun(auth, runAction[1]!);
+  }
+  if (
+    req.method === 'POST' &&
+    /\/chrome\/v1\/connectors\/propose\/?$/.test(path)
+  ) {
+    return handleProposeAction(auth, req.body);
+  }
+  if (req.method === 'GET' && /\/chrome\/v1\/connectors\/?$/.test(path)) {
+    return handleListConnectors(auth);
+  }
+  const connectorMatch = path.match(/\/chrome\/v1\/connectors\/([^/]+)\/?$/);
+  if (req.method === 'DELETE' && connectorMatch) {
+    return handleDisconnectConnector(auth, connectorMatch[1]!);
+  }
+
+  // Screenshot-to-memory (Phase D4). Declared before the bare /captures/:id
+  // routes so the longer paths are not swallowed by them.
+  const shotMatch = path.match(
+    /\/chrome\/v1\/captures\/([^/]+)\/screenshot(?:\/(presign|commit))?\/?$/,
+  );
+  if (shotMatch) {
+    const captureId = shotMatch[1]!;
+    const action = shotMatch[2];
+    if (!isUuid(captureId)) return jsonResponse(400, { error: 'invalid id' });
+    if (req.method === 'POST' && action === 'presign') {
+      return handleScreenshotPresign(auth, captureId);
+    }
+    if (req.method === 'POST' && action === 'commit') {
+      return handleScreenshotCommit(auth, captureId);
+    }
+    if (req.method === 'POST' && !action) {
+      return handleScreenshotUpload(auth, captureId, req.body);
+    }
+    if (req.method === 'GET' && !action) {
+      return handleScreenshotUrl(auth, captureId);
+    }
+    return jsonResponse(405, { error: 'method not allowed' });
   }
 
   const capMatch = path.match(/\/chrome\/v1\/captures\/([^/]+)\/?$/);

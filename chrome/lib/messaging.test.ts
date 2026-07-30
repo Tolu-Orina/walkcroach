@@ -48,3 +48,25 @@ describe('isTrustedSender', () => {
     expect(isTrustedSender(sender)).toBe(false);
   });
 });
+
+describe('message contract', () => {
+  it('keeps the page-access messages the side panel depends on', () => {
+    // Renaming or dropping one of these silently breaks the panel: sendMessage
+    // to an unknown type is rejected by the worker with { ok: false }.
+    for (const required of [
+      'GET_PAGE_CONTEXT',
+      'WARM_PAGE_CONTEXT',
+      'GET_ACTIVE_EXTRACT',
+      'GET_GRANTED_ORIGINS',
+      'REVOKE_ORIGIN',
+      'CLEAR_PAGE_CACHE',
+    ]) {
+      expect(MESSAGE_TYPES as readonly string[]).toContain(required);
+    }
+  });
+
+  it('still rejects anything outside the allowlist', () => {
+    expect(isAllowedMessage({ type: 'GET_PAGE_CONTEXT_EVIL' })).toBe(false);
+    expect(isAllowedMessage({ type: 'executeScript' })).toBe(false);
+  });
+});

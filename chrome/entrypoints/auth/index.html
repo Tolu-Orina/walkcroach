@@ -4,34 +4,130 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>WalkCroach Sign-in</title>
+    <!--
+      Graphite Lumen, inlined for this one page (Phase C1). Inline rather than a
+      shared stylesheet because this is the last thing a user sees during the
+      sign-in handoff and it must be correct on first paint — a flash of the old
+      green would undercut the whole flow.
+
+      System font stack on purpose: pulling three woff2 families onto a page that
+      lives for about a second would show a FOUT, not a brand.
+    -->
     <style>
+      :root {
+        --ink: #0b0c0f;
+        --panel: #14161b;
+        --line: #2e333c;
+        --mist: #9198a4;
+        --paper: #f2f3f5;
+        --signal: #f0b429;
+        --steel: #6b9eff;
+        --ember: #f07167;
+        --canvas-glow-a: #1a2440;
+        --canvas-glow-b: #2a2218;
+        --canvas-base: #0e1014;
+        color-scheme: dark;
+      }
+
+      @media (prefers-color-scheme: light) {
+        :root {
+          --ink: #f4f5f7;
+          --panel: #ffffff;
+          --line: #d0d4dc;
+          --mist: #5c6470;
+          --paper: #12141a;
+          --signal: #c48a0a;
+          --steel: #3b6fd4;
+          --ember: #c2410c;
+          --canvas-glow-a: #dce4f5;
+          --canvas-glow-b: #f0e8dc;
+          --canvas-base: #f7f8fa;
+          color-scheme: light;
+        }
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
       body {
-        font-family: system-ui, sans-serif;
-        margin: 2rem;
-        color: #1a2e1a;
-        background: #f4f7f4;
-      }
-      .card {
-        max-width: 28rem;
-        margin: 0 auto;
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
         padding: 1.5rem;
-        background: #fff;
-        border: 1px solid #d5e0d5;
-        border-radius: 8px;
+        background:
+          radial-gradient(
+            700px 380px at 12% -10%,
+            var(--canvas-glow-a) 0%,
+            transparent 58%
+          ),
+          radial-gradient(
+            600px 320px at 90% 0%,
+            var(--canvas-glow-b) 0%,
+            transparent 52%
+          ),
+          linear-gradient(180deg, var(--canvas-base) 0%, var(--ink) 46%);
+        background-attachment: fixed;
+        color: var(--paper);
+        font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+        line-height: 1.5;
+        letter-spacing: -0.01em;
+        -webkit-font-smoothing: antialiased;
       }
-      .err {
-        color: #b42318;
+
+      .card {
+        width: 100%;
+        max-width: 26rem;
+        padding: 1.75rem;
+        background: color-mix(in oklab, var(--panel) 88%, transparent);
+        border: 1px solid var(--line);
+        border-radius: 0.75rem;
+        box-shadow: 0 18px 44px rgb(0 0 0 / 22%);
       }
-      .ok {
-        color: #1a7f37;
+
+      h1 {
+        margin: 0 0 0.2rem;
+        font-size: 1.35rem;
+        font-weight: 700;
+        letter-spacing: -0.035em;
+      }
+
+      .dot {
+        color: var(--signal);
+      }
+
+      .eyebrow {
+        margin: 0 0 1rem;
+        font-size: 0.68rem;
+        font-weight: 600;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--steel);
+      }
+
+      #status {
+        margin: 0;
+        font-size: 0.9rem;
+        color: var(--mist);
+      }
+
+      #status.ok {
+        color: var(--steel);
+      }
+
+      #status.err {
+        color: var(--ember);
       }
     </style>
   </head>
   <body>
-    <div class="card">
-      <h1>WalkCroach</h1>
-      <p id="status">Finishing sign-in…</p>
-    </div>
+    <main class="card">
+      <h1>WalkCroach<span class="dot">.</span></h1>
+      <p class="eyebrow">Connecting Chrome</p>
+      <!-- Announced: the text is replaced asynchronously once the code lands. -->
+      <p id="status" role="status" aria-live="polite">Finishing sign-in…</p>
+    </main>
     <script type="module" src="./main.ts"></script>
   </body>
 </html>

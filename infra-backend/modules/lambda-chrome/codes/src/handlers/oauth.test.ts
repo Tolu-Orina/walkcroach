@@ -26,3 +26,48 @@ describe('CHROME_REDIRECT_PATTERN', () => {
     ).toBe(false);
   });
 });
+
+describe('CHROME_REDIRECT_PATTERN — launchWebAuthFlow (Phase B2)', () => {
+  it('accepts the chromiumapp.org redirect for a valid extension ID', () => {
+    expect(
+      CHROME_REDIRECT_PATTERN.test(
+        'https://abcdefghijklmnopabcdefghijklmnop.chromiumapp.org/auth',
+      ),
+    ).toBe(true);
+  });
+
+  it('still binds the redirect to a well-formed extension ID', () => {
+    // An attacker must not be able to point a one-time connect code anywhere.
+    expect(
+      CHROME_REDIRECT_PATTERN.test('https://evil.chromiumapp.org/auth'),
+    ).toBe(false);
+    expect(
+      CHROME_REDIRECT_PATTERN.test(
+        'https://abcdefghijklmnopqrstuvwxyzabcdef.chromiumapp.org/auth',
+      ),
+    ).toBe(false);
+    expect(
+      CHROME_REDIRECT_PATTERN.test(
+        'https://ABCDEFGHIJKLMNOPABCDEFGHIJKLMNOP.chromiumapp.org/auth',
+      ),
+    ).toBe(false);
+  });
+
+  it('rejects look-alike hosts and extra path segments', () => {
+    expect(
+      CHROME_REDIRECT_PATTERN.test(
+        'https://abcdefghijklmnopabcdefghijklmnop.chromiumapp.org.evil.test/auth',
+      ),
+    ).toBe(false);
+    expect(
+      CHROME_REDIRECT_PATTERN.test(
+        'https://abcdefghijklmnopabcdefghijklmnop.chromiumapp.org/auth/../x',
+      ),
+    ).toBe(false);
+    expect(
+      CHROME_REDIRECT_PATTERN.test(
+        'http://abcdefghijklmnopabcdefghijklmnop.chromiumapp.org/auth',
+      ),
+    ).toBe(false);
+  });
+});

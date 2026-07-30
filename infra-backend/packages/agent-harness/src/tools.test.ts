@@ -50,6 +50,23 @@ describe('tools', () => {
     expect(names).not.toContain('run_terminal');
   });
 
+  it('Phase A: chat includes load_skill and generate_image as server tools', () => {
+    const chat = toBedrockTools('chat');
+    const names = chat.map((t) => t.toolSpec.name);
+    expect(names).toContain('load_skill');
+    expect(names).toContain('generate_image');
+    expect(getToolKind('load_skill')).toBe('server');
+    expect(getToolKind('generate_image')).toBe('server');
+    expect(toolAwaitResult('generate_image')).toBe(false);
+  });
+
+  it('Phase A: builder and plan do not expose creative tools', () => {
+    const build = toBedrockTools('build');
+    const plan = toBedrockTools('plan');
+    expect(build.map((t) => t.toolSpec.name)).not.toContain('generate_image');
+    expect(plan.map((t) => t.toolSpec.name)).not.toContain('generate_image');
+  });
+
   it('omits web tools when webSearchEnabled is false', () => {
     const chat = toBedrockTools('chat', { webSearchEnabled: false });
     const names = chat.map((t) => t.toolSpec.name);

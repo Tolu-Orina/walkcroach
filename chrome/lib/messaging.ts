@@ -3,11 +3,21 @@
  */
 
 export const MESSAGE_TYPES = [
-  'GET_ACTIVE_TAB_INFO',
+  /** Classify the focused tab. Never returns page content. */
+  'GET_PAGE_CONTEXT',
+  /** Best-effort: extract + cache if we already have access. Never prompts. */
+  'WARM_PAGE_CONTEXT',
+  /** Extract the focused tab (cache-first). Requires an explicit user action. */
   'GET_ACTIVE_EXTRACT',
+  'GET_ACTIVE_TAB_INFO',
   'INSERT_DRAFT',
   'GET_GRANTED_ORIGINS',
   'REVOKE_ORIGIN',
+  'CLEAR_PAGE_CACHE',
+  /** Read + clear a selection captured from the context menu (Phase D3). */
+  'TAKE_PENDING_SELECTION',
+  /** Capture + downscale the visible tab (Phase D4). Requires page access. */
+  'CAPTURE_SCREENSHOT',
   'PING',
 ] as const;
 

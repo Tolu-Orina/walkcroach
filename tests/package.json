@@ -9,6 +9,8 @@
     "test:e2e": "playwright test",
     "test:e2e:web": "playwright test e2e/web",
     "test:e2e:chrome": "playwright test e2e/chrome",
+    "build:chrome:fixture": "node scripts/build-chrome-fixture.mjs",
+    "test:e2e:chrome:fixture": "npm run build:chrome:fixture && playwright test e2e/chrome",
     "install:browsers": "playwright install chromium --with-deps"
   },
   "devDependencies": {

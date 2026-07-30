@@ -4,8 +4,16 @@ import { loadStoredAuth } from '../../auth/storage';
 import { useAuth } from '../../auth/useAuth';
 import { AuthCard, AuthError, AuthLink } from '../../components/auth/AuthCard';
 
-/** Must stay in sync with Chrome BFF oauth redirect allowlist. */
-const REDIRECT_PATTERN = /^chrome-extension:\/\/[a-p]{32}\/auth\.html$/;
+/**
+ * Must stay in sync with the Chrome BFF oauth redirect allowlist
+ * (`lambda-chrome/.../handlers/oauth.ts` CHROME_REDIRECT_PATTERN) and the
+ * extension's `lib/auth.ts`.
+ *
+ * `chromiumapp.org` is the chrome.identity.launchWebAuthFlow target (preferred);
+ * `chrome-extension://…/auth.html` is the legacy tab redirect kept as fallback.
+ */
+const REDIRECT_PATTERN =
+  /^(?:chrome-extension:\/\/[a-p]{32}\/auth\.html|https:\/\/[a-p]{32}\.chromiumapp\.org\/auth)$/;
 
 function chromeApiBase(): string {
   return String(import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');

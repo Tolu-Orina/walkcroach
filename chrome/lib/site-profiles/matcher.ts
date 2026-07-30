@@ -28,7 +28,32 @@ export type SiteProfilesBundle = {
   profiles: SiteProfile[];
 };
 
+/** The bundle shipped inside the extension package — the always-available floor. */
 export const SITE_PROFILES = profilesJson as SiteProfilesBundle;
+
+/**
+ * The bundle currently in force. Starts as the packaged one and may be swapped
+ * for a newer signed bundle (see `remote.ts`).
+ *
+ * Mutable module state rather than a parameter because `matchSiteProfile` is
+ * called from render paths and must stay synchronous — threading an async load
+ * through every call site would turn a sector chip into a loading state.
+ */
+let activeBundle: SiteProfilesBundle = SITE_PROFILES;
+
+/** Swap in a validated bundle. Callers must validate before calling. */
+export function installProfiles(bundle: SiteProfilesBundle): void {
+  activeBundle = bundle;
+}
+
+/** Restore the packaged profiles. Used by tests and as a safety valve. */
+export function resetProfiles(): void {
+  activeBundle = SITE_PROFILES;
+}
+
+export function activeProfiles(): SiteProfilesBundle {
+  return activeBundle;
+}
 
 function hostMatches(hostname: string, suffix: string): boolean {
   const h = hostname.toLowerCase();
@@ -51,7 +76,7 @@ export function matchSiteProfile(
     return null;
   }
 
-  for (const profile of SITE_PROFILES.profiles) {
+  for (const profile of activeBundle.profiles) {
     const hostOk = profile.match.hostSuffix.some((s) =>
       hostMatches(url.hostname, s),
     );
@@ -83,5 +108,5 @@ export function matchSiteProfile(
 }
 
 export function profilesVersion(): number {
-  return SITE_PROFILES.version;
+  return activeBundle.version;
 }

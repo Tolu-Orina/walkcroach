@@ -321,7 +321,11 @@ describe('startWebSignIn', () => {
 
   it('stores pending oauth and opens WalkCroach connect tab', async () => {
     const { startWebSignIn } = await import('./auth');
-    const url = await startWebSignIn('https://walkcroach.example');
+    // No chrome.identity in this mock, so we take the tab fallback and the
+    // exchange is completed later by auth.html.
+    const outcome = await startWebSignIn('https://walkcroach.example');
+    expect(outcome.kind).toBe('delegated');
+    const url = outcome.kind === 'delegated' ? outcome.url : '';
     expect(url).toContain('/connect/chrome?');
     expect(url).toContain('state=');
     expect(url).toContain(
@@ -369,5 +373,129 @@ describe('upgradeToCognito', () => {
     expect(session.ownerId).toBe('cognito-sub');
     expect(session.deviceKey).toBe('dk');
     expect(session.expiresAt).toBeGreaterThan(Date.now());
+  });
+});
+
+describe('redirect URIs (Phase A5 / B1)', () => {
+  const ID = 'abcdefghijklmnopabcdefghijklmnop';
+
+  it('builds the launchWebAuthFlow redirect from the extension ID', async () => {
+    const { identityRedirectUri } = await import('./auth');
+    expect(identityRedirectUri()).toBe(`https://${ID}.chromiumapp.org/auth`);
+  });
+
+  it('builds the legacy auth.html redirect', async () => {
+    const { chromeRedirectUri } = await import('./auth');
+    expect(chromeRedirectUri()).toBe(`chrome-extension://${ID}/auth.html`);
+  });
+
+  it('both forms satisfy the BFF allowlist pattern', async () => {
+    // Mirrors CHROME_REDIRECT_PATTERN in lambda-chrome oauth.ts and
+    // REDIRECT_PATTERN in web ConnectChromePage.tsx.
+    const pattern =
+      /^(?:chrome-extension:\/\/[a-p]{32}\/auth\.html|https:\/\/[a-p]{32}\.chromiumapp\.org\/auth)$/;
+    const { chromeRedirectUri, identityRedirectUri } = await import('./auth');
+    expect(pattern.test(chromeRedirectUri())).toBe(true);
+    expect(pattern.test(identityRedirectUri())).toBe(true);
+  });
+
+  it('refuses to build a URI from a missing or malformed runtime id', async () => {
+    // This is what produced `chrome-extension://invalid/auth.html` and an
+    // opaque "redirectUri is not allowed" from the BFF.
+    const { extensionId } = await import('./auth');
+    (globalThis.chrome as unknown as { runtime: { id?: string } }).runtime.id =
+      undefined;
+    expect(() => extensionId()).toThrow(/Extension ID is unavailable/);
+    (globalThis.chrome as unknown as { runtime: { id?: string } }).runtime.id =
+      'ZZZZ';
+    expect(() => extensionId()).toThrow(/Extension ID is unavailable/);
+  });
+});
+
+describe('buildConnectUrl', () => {
+  it('targets /connect/chrome with state and redirect_uri', async () => {
+    const { buildConnectUrl } = await import('./auth');
+    const url = new URL(
+      buildConnectUrl('https://web.test/', 'st8', 'https://x.chromiumapp.org/auth'),
+    );
+    expect(url.origin + url.pathname).toBe('https://web.test/connect/chrome');
+    expect(url.searchParams.get('state')).toBe('st8');
+    expect(url.searchParams.get('redirect_uri')).toBe(
+      'https://x.chromiumapp.org/auth',
+    );
+  });
+});
+
+describe('parseAuthCallback', () => {
+  it('reads code and state from the query', async () => {
+    const { parseAuthCallback } = await import('./auth');
+    expect(
+      parseAuthCallback('https://x.chromiumapp.org/auth?code=c1&state=s1'),
+    ).toEqual({ code: 'c1', state: 's1' });
+  });
+
+  it('reads code and state from the fragment', async () => {
+    const { parseAuthCallback } = await import('./auth');
+    expect(
+      parseAuthCallback('https://x.chromiumapp.org/auth#code=c2&state=s2'),
+    ).toEqual({ code: 'c2', state: 's2' });
+  });
+
+  it('surfaces a provider error instead of a generic failure', async () => {
+    const { parseAuthCallback } = await import('./auth');
+    expect(() =>
+      parseAuthCallback('https://x.chromiumapp.org/auth?error=access_denied'),
+    ).toThrow(/access_denied/);
+  });
+
+  it('rejects a callback with no code', async () => {
+    const { parseAuthCallback } = await import('./auth');
+    expect(() =>
+      parseAuthCallback('https://x.chromiumapp.org/auth?state=s'),
+    ).toThrow(/connect code/);
+  });
+});
+
+describe('startWebSignIn', () => {
+  it('falls back to the auth.html tab flow when identity is unavailable', async () => {
+    const { startWebSignIn } = await import('./auth');
+    const outcome = await startWebSignIn('https://web.test');
+    expect(outcome.kind).toBe('delegated');
+    expect(chrome.tabs.create).toHaveBeenCalledOnce();
+
+    const pending = storage['wc_oauth_pending'] as { redirectUri: string };
+    expect(pending.redirectUri).toBe(
+      'chrome-extension://abcdefghijklmnopabcdefghijklmnop/auth.html',
+    );
+  });
+
+  it('uses launchWebAuthFlow when identity is available', async () => {
+    const launchWebAuthFlow = vi.fn(
+      async (_opts: { url: string; interactive: boolean }) =>
+        undefined as string | undefined,
+    );
+    (globalThis.chrome as unknown as { identity: unknown }).identity = {
+      launchWebAuthFlow,
+    };
+
+    const { startWebSignIn } = await import('./auth');
+    // Undefined callback == user closed the window.
+    await expect(startWebSignIn('https://web.test')).rejects.toThrow(
+      /cancelled/i,
+    );
+    expect(chrome.tabs.create).not.toHaveBeenCalled();
+
+    const call = launchWebAuthFlow.mock.calls[0]![0];
+    expect(call.interactive).toBe(true);
+    expect(new URL(call.url).searchParams.get('redirect_uri')).toBe(
+      'https://abcdefghijklmnopabcdefghijklmnop.chromiumapp.org/auth',
+    );
+    // Pending state must not linger after a cancel.
+    expect(storage['wc_oauth_pending']).toBeUndefined();
+  });
+
+  it('throws when the Web URL is not configured', async () => {
+    const { startWebSignIn } = await import('./auth');
+    await expect(startWebSignIn('')).rejects.toThrow(/not configured/);
   });
 });

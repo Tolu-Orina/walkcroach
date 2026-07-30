@@ -68,6 +68,8 @@ module "lambda_agent" {
   memory_mb                 = var.lambda_memory_mb
   bedrock_region            = var.bedrock_region
   nova_model_id             = var.nova_model_id
+  nova_canvas_model_id      = var.nova_canvas_model_id
+  nova_pro_model_id         = var.nova_pro_model_id
   titan_embed_model_id      = var.titan_embed_model_id
   bedrock_guardrail_id      = module.bedrock_guardrails.guardrail_id
   bedrock_guardrail_version = module.bedrock_guardrails.guardrail_version
@@ -85,7 +87,20 @@ module "lambda_agent" {
   cors_allow_origin         = var.web_app_url != "" ? var.web_app_url : "*"
   allow_github_pat          = var.allow_github_pat
   github_ssm_prefix         = var.github_ssm_prefix
+  creative_lambda_arn       = module.lambda_creative.function_arn
+  creative_lambda_name      = module.lambda_creative.function_name
   tags                      = local.tags
+}
+
+module "lambda_creative" {
+  source = "./modules/lambda-creative"
+
+  name_prefix           = local.name_prefix
+  environment           = var.environment
+  artefacts_bucket_arn  = module.artefacts.bucket_arn
+  artefacts_bucket_name = module.artefacts.bucket_id
+  image_uri             = var.creative_lambda_image_uri
+  tags                  = local.tags
 }
 
 module "lambda_chrome" {

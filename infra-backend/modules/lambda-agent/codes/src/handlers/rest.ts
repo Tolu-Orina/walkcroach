@@ -19,6 +19,16 @@ import {
 } from './projectArtifacts.js';
 import { getUsageSummary } from './billing.js';
 import {
+  getEntitlement,
+  peekHardQuota,
+  HARD_QUOTAS,
+} from './billing.js';
+import {
+  handleConfirmCreativeRender,
+  handleCreativeDownloadUrl,
+  handleListCreativeAssets,
+} from './creative.js';
+import {
   handleListDeployments,
   handleTriggerDeploy,
 } from './deploy.js';
@@ -1111,6 +1121,89 @@ export async function handleRest(
     try {
       const usage = await getUsageSummary(db, authResult.ownerId);
       return jsonResponse(200, usage);
+    } finally {
+      await db.close();
+    }
+  }
+
+  if (
+    method === 'GET' &&
+    (path === '/me/creative-quota' || path.endsWith('/me/creative-quota'))
+  ) {
+    const authResult = await requireAuth(headers);
+    if ('error' in authResult) {
+      return jsonResponse(authResult.status, { error: authResult.error });
+    }
+    const db = createDbClient();
+    try {
+      const [plan, image] = await Promise.all([
+        getEntitlement(db, authResult.ownerId),
+        peekHardQuota(db, authResult.ownerId, 'image_gen_daily'),
+      ]);
+      return jsonResponse(200, {
+        plan,
+        image: { ...image, unit: 'day' },
+        video: { ...HARD_QUOTAS.video_gen_3day, unit: '3 days' },
+      });
+    } finally {
+      await db.close();
+    }
+  }
+
+  if (
+    method === 'GET' &&
+    (path === '/creative-assets' || path.endsWith('/creative-assets'))
+  ) {
+    const authResult = await requireAuth(headers);
+    if ('error' in authResult) {
+      return jsonResponse(authResult.status, { error: authResult.error });
+    }
+    const db = createDbClient();
+    try {
+      const qs = new URLSearchParams(queryString);
+      return await handleListCreativeAssets(db, authResult, {
+        limit: Number(qs.get('limit') ?? 20),
+      });
+    } finally {
+      await db.close();
+    }
+  }
+
+  const creativeConfirmMatch = path.match(
+    /\/creative-assets\/([^/]+)\/confirm\/?$/,
+  );
+  if (method === 'POST' && creativeConfirmMatch?.[1]) {
+    const authResult = await requireAuth(headers);
+    if ('error' in authResult) {
+      return jsonResponse(authResult.status, { error: authResult.error });
+    }
+    const db = createDbClient();
+    try {
+      return await handleConfirmCreativeRender(
+        db,
+        authResult,
+        creativeConfirmMatch[1],
+      );
+    } finally {
+      await db.close();
+    }
+  }
+
+  const creativeDownloadMatch = path.match(
+    /\/creative-assets\/([^/]+)\/download\/?$/,
+  );
+  if (method === 'GET' && creativeDownloadMatch?.[1]) {
+    const authResult = await requireAuth(headers);
+    if ('error' in authResult) {
+      return jsonResponse(authResult.status, { error: authResult.error });
+    }
+    const db = createDbClient();
+    try {
+      return await handleCreativeDownloadUrl(
+        db,
+        authResult,
+        creativeDownloadMatch[1],
+      );
     } finally {
       await db.close();
     }

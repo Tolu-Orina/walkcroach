@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { __markdownTestUtils } from './markdown';
-
-const { prepareMarkdown, splitIntoBlocks, closeUnclosedFences } =
-  __markdownTestUtils;
+import {
+  closeUnclosedFences,
+  prepareMarkdown,
+  splitIntoBlocks,
+} from './markdownPrepare';
 
 describe('prepareMarkdown', () => {
   it('leaves finished markdown alone when not streaming', () => {

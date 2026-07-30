@@ -1,0 +1,135 @@
+/*
+  WalkCroach Chrome — Graphite Lumen tokens (Phase C1)
+
+  Values are lifted verbatim from web/src/index.css `@theme` so the two surfaces
+  cannot drift. Web is a Tailwind v4 project; the panel is hand-authored CSS
+  because a 250–500px surface does not need a utility framework and the panel
+  has a hard interactive budget (<300ms after open, plan G4).
+
+  Token naming follows Web's inversion trick: `--ink` is always the canvas and
+  `--paper` is always the text, so component rules never branch on theme. Only
+  the values swap.
+
+  Colour mode follows the browser (`prefers-color-scheme`), mirroring Web's own
+  `resolveTheme()`. A side panel is framed by browser chrome that is itself light
+  or dark, so a hard-coded slab reads as broken next to half the pages on the
+  web. `[data-theme]` on <html> wins over the media query in both directions,
+  which is what lets a future in-panel override work without touching this file.
+*/
+
+:root {
+  /* ---- Dark (Web default) ---- */
+  --ink: #0b0c0f;
+  --panel: #14161b;
+  --raised: #1c1f26;
+  --line: #2e333c;
+  --mist: #9198a4;
+  --paper: #f2f3f5;
+  /* Amber gold — premium CTA, used sparingly (≤10% of surface) */
+  --signal: #f0b429;
+  /* Steel blue — memory, recall, eyebrows */
+  --steel: #6b9eff;
+  --ember: #f07167;
+  /* Focus ring, kept as its own token so it can meet 3:1 independently of the
+     CTA colour — see the contrast test in tokens.test.ts. */
+  --focus: #f0b429;
+
+  --canvas-glow-a: #1a2440;
+  --canvas-glow-b: #2a2218;
+  --canvas-base: #0e1014;
+
+  --shadow-soft:
+    0 1px 0 color-mix(in oklab, white 6%, transparent),
+    0 18px 40px color-mix(in oklab, black 45%, transparent);
+  --hairline: inset 0 1px 0 color-mix(in oklab, white 10%, transparent);
+
+  /* ---- Type ---- */
+  --font-display: 'Bricolage Grotesque', ui-sans-serif, system-ui, sans-serif;
+  --font-sans: 'Source Sans 3', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  /* ---- Shape & rhythm ---- */
+  --radius-control: 0.5rem;
+  --radius-surface: 0.75rem;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+
+  /* ---- Motion ---- */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur-fast: 140ms;
+  --dur-mid: 260ms;
+
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --ink: #f4f5f7;
+    --panel: #ffffff;
+    --raised: #ebeef2;
+    --line: #d0d4dc;
+    --mist: #5c6470;
+    --paper: #12141a;
+    /* Darkened amber — #f0b429 on paper fails AA for text and focus rings */
+    --signal: #c48a0a;
+    /* Web ships #3b6fd4 here, which lands at 4.48:1 on this canvas — just under
+       AA for the 10.5px eyebrow text this colour is used for. Same hue and
+       saturation, 0.02 darker, 4.95:1. */
+    --steel: #3067d2;
+    /* Web's #c2410c is 4.45:1 on --raised. Effectively the same colour, over the
+       line on every surface in the system. */
+    --ember: #c0400c;
+    /* #c48a0a as a focus ring is only 2.83:1 against paper, under the 3:1 that
+       non-text UI requires. */
+    --focus: #b47f09;
+
+    --canvas-glow-a: #dce4f5;
+    --canvas-glow-b: #f0e8dc;
+    --canvas-base: #f7f8fa;
+
+    --shadow-soft:
+      0 1px 0 color-mix(in oklab, black 4%, transparent),
+      0 18px 40px color-mix(in oklab, #1a2440 12%, transparent);
+    --hairline: inset 0 1px 0 color-mix(in oklab, white 70%, transparent);
+
+    color-scheme: light;
+  }
+}
+
+/* Explicit override beats the media query in both directions. */
+:root[data-theme='dark'] {
+  --ink: #0b0c0f;
+  --panel: #14161b;
+  --raised: #1c1f26;
+  --line: #2e333c;
+  --mist: #9198a4;
+  --paper: #f2f3f5;
+  --signal: #f0b429;
+  --steel: #6b9eff;
+  --ember: #f07167;
+  --focus: #f0b429;
+  --canvas-glow-a: #1a2440;
+  --canvas-glow-b: #2a2218;
+  --canvas-base: #0e1014;
+  color-scheme: dark;
+}
+
+:root[data-theme='light'] {
+  --ink: #f4f5f7;
+  --panel: #ffffff;
+  --raised: #ebeef2;
+  --line: #d0d4dc;
+  --mist: #5c6470;
+  --paper: #12141a;
+  --signal: #c48a0a;
+  --steel: #3067d2;
+  --ember: #c0400c;
+  --focus: #b47f09;
+  --canvas-glow-a: #dce4f5;
+  --canvas-glow-b: #f0e8dc;
+  --canvas-base: #f7f8fa;
+  color-scheme: light;
+}

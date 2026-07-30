@@ -87,6 +87,40 @@ export type AgentEvent =
     }
   | { type: 'plan_preview'; planId: string; files: PlanFile[] }
   | { type: 'plan_awaiting_approval'; planId: string }
+  | {
+      type: 'image_generated';
+      assetId: string;
+      prompt: string;
+      dataUrl: string;
+      storageKey?: string;
+      width?: number;
+      height?: number;
+      remainingToday: number;
+      dailyLimit: number;
+    }
+  | { type: 'image_credit_required'; credits: number; prompt: string }
+  | {
+      type: 'creative_brief_ready';
+      assetId: string;
+      kind: 'slide_deck';
+      brief: Record<string, unknown>;
+      credits: number;
+      estimatedImages: number;
+      remainingImages: number;
+      imageDailyLimit: number;
+      stub?: boolean;
+    }
+  | {
+      type: 'creative_asset_ready';
+      assetId: string;
+      kind: 'slide_deck';
+      downloadName: string;
+      s3Key: string;
+      previewS3Key?: string | null;
+      previewDataUrl?: string;
+      slideCount: number;
+      creditsCharged: number;
+    }
   | { type: 'checkpoint_created'; checkpointId: string; summary: string }
   | { type: 'warning'; message: string }
   | {
@@ -126,4 +160,24 @@ export type ChatMessage = {
     text: string;
     sourceSurface?: string;
   }>;
+  /** Inline image artifact payload (image_generated event). */
+  image?: {
+    assetId: string;
+    prompt: string;
+    dataUrl: string;
+    storageKey?: string;
+    width?: number;
+    height?: number;
+    remainingToday: number;
+    dailyLimit: number;
+  };
+  /** Finished slide deck artefact. */
+  deck?: {
+    assetId: string;
+    downloadName: string;
+    slideCount: number;
+    creditsCharged: number;
+    previewUrl?: string | null;
+    downloadUrl?: string | null;
+  };
 };

@@ -34,6 +34,30 @@ variable "nova_model_id" {
   type = string
 }
 
+variable "nova_canvas_model_id" {
+  type        = string
+  description = "Bedrock Nova Canvas model ID (image generation)"
+  default     = "amazon.nova-canvas-v1:0"
+}
+
+variable "nova_pro_model_id" {
+  type        = string
+  description = "Bedrock Nova Pro model ID (paid creative orchestration)"
+  default     = "amazon.nova-pro-v1:0"
+}
+
+variable "creative_lambda_arn" {
+  type        = string
+  description = "ARN of lambda-creative (empty until image is pushed)"
+  default     = ""
+}
+
+variable "creative_lambda_name" {
+  type        = string
+  description = "Name of lambda-creative function"
+  default     = ""
+}
+
 variable "titan_embed_model_id" {
   type = string
 }
@@ -178,6 +202,15 @@ data "aws_iam_policy_document" "lambda" {
     resources = ["*"]
   }
 
+  dynamic "statement" {
+    for_each = var.creative_lambda_arn != "" ? [1] : []
+    content {
+      sid       = "InvokeCreative"
+      actions   = ["lambda:InvokeFunction"]
+      resources = [var.creative_lambda_arn]
+    }
+  }
+
   statement {
     sid = "Artefacts"
     actions = [
@@ -253,6 +286,9 @@ resource "aws_lambda_function" "agent" {
       ENVIRONMENT               = var.environment
       BEDROCK_REGION            = var.bedrock_region
       NOVA_MODEL_ID             = var.nova_model_id
+      NOVA_CANVAS_MODEL_ID      = var.nova_canvas_model_id
+      NOVA_PRO_MODEL_ID         = var.nova_pro_model_id
+      CREATIVE_LAMBDA_NAME      = var.creative_lambda_name
       TITAN_EMBED_MODEL_ID      = var.titan_embed_model_id
       BEDROCK_GUARDRAIL_ID      = var.bedrock_guardrail_id
       BEDROCK_GUARDRAIL_VERSION = var.bedrock_guardrail_version

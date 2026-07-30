@@ -53,11 +53,30 @@ export type Capture = {
   captured_at: string;
 };
 
+/**
+ * A capture the recall answer was built from (Phase D5).
+ *
+ * Emitted before the prose so the panel can show its working: which saved pages
+ * the answer came from, what kind they are, and whether they are also visible in
+ * a linked WalkCroach Web project.
+ */
+export type RecallSource = {
+  captureId: string;
+  url: string;
+  title: string | null;
+  captureType: string;
+  workspace: string | null;
+  inWebProject: boolean;
+  capturedAt: string;
+  distance: number;
+};
+
 export type AgentEvent =
   | { type: 'token'; text: string }
   | { type: 'done'; reason: string }
   | { type: 'error'; message: string }
   | { type: 'memory_recalled'; count: number; kinds?: string[] }
+  | { type: 'recall_sources'; sources: RecallSource[] }
   | {
       type: 'proposal';
       captureType: string;
@@ -220,6 +239,249 @@ export function streamRecall(
   return streamRoute('/recall', token, body, signal);
 }
 
+export type CreditBalance = {
+  /** Credits left in the current period. */
+  remaining: number;
+  /** Period allowance, for the meter denominator. */
+  allowance: number;
+  /** ISO date the allowance resets, when the plan has one. */
+  resetsAt?: string;
+  plan?: string;
+};
+
+/**
+ * Shared Web/Chrome credit ledger (master plan Part 1 §4).
+ *
+ * The endpoint does not exist yet. Returning `null` rather than throwing means
+ * the meter simply does not render until the backend ships — and then lights up
+ * with no client change. Deliberately never invents a number: a fabricated
+ * balance in a trust-first product is worse than no balance.
+ */
+export async function fetchCredits(
+  token: string,
+): Promise<CreditBalance | null> {
+  try {
+    const res = await fetch(chromePath('/credits'), {
+      headers: authHeaders(token),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as Partial<CreditBalance>;
+    if (
+      typeof data.remaining !== 'number' ||
+      typeof data.allowance !== 'number' ||
+      data.allowance <= 0
+    ) {
+      return null;
+    }
+    return {
+      remaining: data.remaining,
+      allowance: data.allowance,
+      resetsAt: data.resetsAt,
+      plan: data.plan,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export type ScreenshotTarget =
+  | { mode: 'put'; key: string; uploadUrl: string; contentType: string }
+  | { mode: 'direct'; key: string; contentType: string };
+
+/**
+ * Attach a screenshot to a saved capture (Phase D4).
+ *
+ * Presigned PUT first, so a megabyte of JPEG goes straight to S3 and never
+ * traverses the Lambda. Falls back to posting through the BFF when there is no
+ * bucket (local dev) or when the cross-origin PUT is refused — which it will be
+ * until the bucket's CORS rules name the published extension ID. Both paths end
+ * with the same object key recorded against the capture.
+ *
+ * Returns false rather than throwing: a screenshot is an enhancement, and losing
+ * it must never fail the capture the user already confirmed.
+ */
+export async function uploadScreenshot(
+  token: string,
+  captureId: string,
+  base64: string,
+): Promise<boolean> {
+  let target: ScreenshotTarget | null = null;
+  try {
+    const res = await fetch(
+      chromePath(`/captures/${captureId}/screenshot/presign`),
+      { method: 'POST', headers: authHeaders(token) },
+    );
+    if (res.ok) target = (await res.json()) as ScreenshotTarget;
+  } catch {
+    // Fall through to the direct path.
+  }
+
+  if (target?.mode === 'put') {
+    try {
+      const bytes = base64ToBytes(base64);
+      const put = await fetch(target.uploadUrl, {
+        method: 'PUT',
+        // Content-Type is bound into the signature, so it must match exactly.
+        headers: { 'content-type': target.contentType },
+        body: bytes,
+      });
+      if (put.ok) {
+        const commit = await fetch(
+          chromePath(`/captures/${captureId}/screenshot/commit`),
+          { method: 'POST', headers: authHeaders(token) },
+        );
+        if (commit.ok) return true;
+      }
+    } catch {
+      // CORS not yet configured, or the URL expired — use the fallback.
+    }
+  }
+
+  try {
+    const res = await fetch(chromePath(`/captures/${captureId}/screenshot`), {
+      method: 'POST',
+      headers: authHeaders(token),
+      body: JSON.stringify({ dataBase64: base64 }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Short-lived read URL for a stored screenshot, or null if there is none. */
+export async function fetchScreenshotUrl(
+  token: string,
+  captureId: string,
+): Promise<string | null> {
+  try {
+    const res = await fetch(chromePath(`/captures/${captureId}/screenshot`), {
+      headers: authHeaders(token),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { url?: string };
+    return data.url ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function base64ToBytes(b64: string): Uint8Array<ArrayBuffer> {
+  const bin = atob(b64);
+  const out = new Uint8Array(new ArrayBuffer(bin.length));
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+/* ── Connectors (cross-surface platform, Phase E) ─────────────────── */
+
+export type ConnectorConnection = {
+  id: string;
+  provider: string;
+  status: 'connected' | 'revoked' | 'error';
+  scopes: string[];
+  accountLabel: string | null;
+  lastError: string | null;
+  connectedAt: string;
+};
+
+export type ConnectorProvider = {
+  id: string;
+  label: string;
+  tier: number;
+  disclosure: string;
+  scopes: string[];
+  connection: ConnectorConnection | null;
+};
+
+export type ConnectorsResponse = {
+  requiresSignIn: boolean;
+  providers: ConnectorProvider[];
+  /** WalkCroach Web settings page — the single place accounts are connected. */
+  connectUrl: string;
+};
+
+export async function listConnectors(
+  token: string,
+): Promise<ConnectorsResponse> {
+  const res = await fetch(chromePath('/connectors'), {
+    headers: authHeaders(token),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return (await res.json()) as ConnectorsResponse;
+}
+
+export async function disconnectConnector(
+  token: string,
+  provider: string,
+): Promise<void> {
+  const res = await fetch(chromePath(`/connectors/${provider}`), {
+    method: 'DELETE',
+    headers: authHeaders(token),
+  });
+  if (!res.ok) throw new Error(await res.text());
+}
+
+/** A validated, recorded proposal — everything the confirm card needs. */
+export type ConnectorProposal = {
+  runId: string;
+  action: string;
+  title: string;
+  consequence: string;
+  write: boolean;
+  weight: number;
+  rows: Array<{ label: string; value: string }>;
+};
+
+export async function proposeConnectorAction(
+  token: string,
+  action: string,
+  args: Record<string, unknown>,
+): Promise<ConnectorProposal> {
+  const res = await fetch(chromePath('/connectors/propose'), {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: JSON.stringify({ action, args }),
+  });
+  const data = (await res.json()) as ConnectorProposal & {
+    error?: string;
+    needsConnection?: string;
+  };
+  if (!res.ok) throw new Error(data.error ?? 'could not prepare that action');
+  return data;
+}
+
+/**
+ * Confirm. Deliberately sends no arguments: the payload was fixed when the
+ * proposal was recorded, so what executes is exactly what the card showed.
+ */
+export async function executeConnectorRun(
+  token: string,
+  runId: string,
+): Promise<Record<string, unknown>> {
+  const res = await fetch(chromePath(`/connectors/runs/${runId}/execute`), {
+    method: 'POST',
+    headers: authHeaders(token),
+  });
+  const data = (await res.json()) as {
+    ok?: boolean;
+    result?: Record<string, unknown>;
+    error?: string;
+  };
+  if (!res.ok || !data.ok) throw new Error(data.error ?? 'action failed');
+  return data.result ?? {};
+}
+
+export async function declineConnectorRun(
+  token: string,
+  runId: string,
+): Promise<void> {
+  await fetch(chromePath(`/connectors/runs/${runId}/decline`), {
+    method: 'POST',
+    headers: authHeaders(token),
+  }).catch(() => undefined);
+}
+
 export async function listWorkspaces(token: string): Promise<Workspace[]> {
   const res = await fetch(chromePath('/workspaces'), {
     headers: authHeaders(token),
@@ -370,6 +632,8 @@ export async function trackPrice(
 ): Promise<{
   captureId: string;
   appended: boolean;
+  /** False when this check found the same price as the previous one. */
+  priceChanged?: boolean;
   structuredFields: Record<string, unknown>;
   linkedProjectId?: string | null;
   availableInWebProject?: boolean;
@@ -383,6 +647,7 @@ export async function trackPrice(
   return (await res.json()) as {
     captureId: string;
     appended: boolean;
+    priceChanged?: boolean;
     structuredFields: Record<string, unknown>;
     linkedProjectId?: string | null;
     availableInWebProject?: boolean;

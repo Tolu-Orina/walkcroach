@@ -98,6 +98,24 @@ variable "nova_model_id" {
   default     = "global.amazon.nova-2-lite-v1:0"
 }
 
+variable "nova_canvas_model_id" {
+  type        = string
+  description = "Bedrock Nova Canvas model ID (image generation)"
+  default     = "amazon.nova-canvas-v1:0"
+}
+
+variable "nova_pro_model_id" {
+  type        = string
+  description = "Bedrock Nova Pro model ID (paid creative orchestration)"
+  default     = "amazon.nova-pro-v1:0"
+}
+
+variable "creative_lambda_image_uri" {
+  type        = string
+  description = "ECR image URI for lambda-creative (empty until first CI push)"
+  default     = ""
+}
+
 variable "titan_embed_model_id" {
   type        = string
   description = "Bedrock Titan embeddings model ID"

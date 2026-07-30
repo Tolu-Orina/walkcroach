@@ -1,0 +1,73 @@
+/*
+  Graphite Lumen type, woff2 only (Phase C1).
+
+  @fontsource's own stylesheets list `woff2, woff`, so a plain import ships a
+  legacy fallback for every weight. This is a Chromium-only extension — woff2 has
+  been supported since Chrome 36 — so the woff copies are pure package weight
+  that no user will ever download.
+
+  Weights are exactly what the panel renders:
+    Bricolage Grotesque 700  wordmark
+    Bricolage Grotesque 600  section / context / confirm titles
+    Source Sans 3 400        body
+    Source Sans 3 500        controls
+    Source Sans 3 600        eyebrows, field labels
+    JetBrains Mono 400       hosts, prices, IDs
+
+  `font-display: swap` matches Web: the panel must paint text immediately rather
+  than hold a blank frame against its interactive budget.
+*/
+
+@font-face {
+  font-family: 'Bricolage Grotesque';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('@fontsource/bricolage-grotesque/files/bricolage-grotesque-latin-600-normal.woff2')
+    format('woff2');
+}
+
+@font-face {
+  font-family: 'Bricolage Grotesque';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('@fontsource/bricolage-grotesque/files/bricolage-grotesque-latin-700-normal.woff2')
+    format('woff2');
+}
+
+@font-face {
+  font-family: 'Source Sans 3';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('@fontsource/source-sans-3/files/source-sans-3-latin-400-normal.woff2')
+    format('woff2');
+}
+
+@font-face {
+  font-family: 'Source Sans 3';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('@fontsource/source-sans-3/files/source-sans-3-latin-500-normal.woff2')
+    format('woff2');
+}
+
+@font-face {
+  font-family: 'Source Sans 3';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('@fontsource/source-sans-3/files/source-sans-3-latin-600-normal.woff2')
+    format('woff2');
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('@fontsource/jetbrains-mono/files/jetbrains-mono-latin-400-normal.woff2')
+    format('woff2');
+}

@@ -27,6 +27,15 @@ export function getNovaModelId(): string {
   );
 }
 
+/** Nova Canvas (image) — wired from Terraform NOVA_CANVAS_MODEL_ID. */
+export function getNovaCanvasModelId(): string {
+  return (
+    process.env.NOVA_CANVAS_MODEL_ID ??
+    process.env.BEDROCK_NOVA_CANVAS_MODEL_ID ??
+    'amazon.nova-canvas-v1:0'
+  );
+}
+
 /**
  * True when a Bedrock error is the "unresolvable model id/inference profile"
  * class (e.g. ValidationException: "The provided model identifier is

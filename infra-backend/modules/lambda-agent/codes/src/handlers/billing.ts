@@ -7,6 +7,8 @@ export const CREDIT_COSTS: Record<string, number> = {
   deploy: 5,
   db_provision: 10,
   inline_edit: 0,
+  generate_image: 5,
+  render_pptx: 20,
 };
 
 type BalanceRow = {
@@ -141,4 +143,146 @@ export async function debitCredits(
 
   const summary = await getUsageSummary(db, ownerId);
   return { ok: true, remaining: summary.remaining };
+}
+
+/* ------------------------------ entitlements ----------------------------- */
+
+export type Entitlement = 'free' | 'paid';
+
+/** Owner plan — rows created lazily; missing row means 'free'. */
+export async function getEntitlement(
+  db: DbClient,
+  ownerId: string,
+): Promise<Entitlement> {
+  const { rows } = await db.query<{ plan: string }>(
+    `SELECT plan FROM entitlements WHERE owner_id = $1`,
+    [ownerId],
+  );
+  const plan = rows[0]?.plan;
+  return plan === 'paid' ? 'paid' : 'free';
+}
+
+/** Flip an owner to a plan; used by Phase A2 admin hook and later Stripe webhook. */
+export async function setEntitlement(
+  db: DbClient,
+  ownerId: string,
+  plan: Entitlement,
+): Promise<void> {
+  await db.query(
+    `INSERT INTO entitlements (owner_id, plan, plan_started_at, updated_at)
+     VALUES ($1, $2, now(), now())
+     ON CONFLICT (owner_id)
+     DO UPDATE SET plan = EXCLUDED.plan, plan_started_at = now(), updated_at = now()`,
+    [ownerId, plan],
+  );
+}
+
+/* --------------------------- rolling hard quotas ------------------------- */
+/**
+ * Hard creative caps — separate from credits (web plan §4.4/§7). Even a paid
+ * owner cannot exceed 3 Nova Canvas images in any rolling 24h window or 1 Nova
+ * Reel video in any rolling 72h window, because those models burn dollars per
+ * generation regardless of credit price.
+ */
+export const HARD_QUOTAS = {
+  image_gen_daily: {
+    label: 'Image generation',
+    limit: 3,
+    interval: '24 hours',
+    unit: 'day',
+  },
+  video_gen_3day: {
+    label: 'Video generation',
+    limit: 1,
+    interval: '72 hours',
+    unit: '3 days',
+  },
+} as const;
+
+export type HardQuotaKey = keyof typeof HARD_QUOTAS;
+
+export type QuotaCheck =
+  | { ok: true; used: number; limit: number }
+  | { ok: false; used: number; limit: number; resetAt: string };
+
+/**
+ * Atomic check-and-increment on a rolling window. Returns ok:false without
+ * mutating when the cap is already reached.
+ */
+export async function consumeHardQuota(
+  db: DbClient,
+  ownerId: string,
+  key: HardQuotaKey,
+): Promise<QuotaCheck> {
+  const q = HARD_QUOTAS[key];
+  await db.query(
+    `INSERT INTO usage_counters (owner_id, counter_key, window_start, count)
+     VALUES ($1, $2, now(), 0)
+     ON CONFLICT (owner_id, counter_key) DO NOTHING`,
+    [ownerId, key],
+  );
+  const { rows } = await db.query<{
+    count: number;
+    reset_at: Date;
+  }>(
+    `UPDATE usage_counters
+     SET
+       count = CASE
+         WHEN window_start + interval '${q.interval}' < now() THEN 1
+         ELSE count + 1
+       END,
+       window_start = CASE
+         WHEN window_start + interval '${q.interval}' < now() THEN now()
+         ELSE window_start
+       END
+     WHERE owner_id = $1
+       AND counter_key = $2
+       AND (
+         window_start + interval '${q.interval}' < now()
+         OR count < $3
+       )
+     RETURNING count, window_start + interval '${q.interval}' AS reset_at`,
+    [ownerId, key, q.limit],
+  );
+  if (!rows[0]) {
+    const { rows: cur } = await db.query<{ count: number; reset_at: Date }>(
+      `SELECT count, window_start + interval '${q.interval}' AS reset_at
+       FROM usage_counters WHERE owner_id = $1 AND counter_key = $2`,
+      [ownerId, key],
+    );
+    return {
+      ok: false,
+      used: cur[0]?.count ?? q.limit,
+      limit: q.limit,
+      resetAt: cur[0]?.reset_at?.toISOString() ?? new Date().toISOString(),
+    };
+  }
+  return { ok: true, used: rows[0].count, limit: q.limit };
+}
+
+/** Peek without consuming — for the Chat quota pill. */
+export async function peekHardQuota(
+  db: DbClient,
+  ownerId: string,
+  key: HardQuotaKey,
+): Promise<{ used: number; limit: number; remaining: number; resetAt: string }> {
+  const q = HARD_QUOTAS[key];
+  const { rows } = await db.query<{ count: number; reset_at: Date }>(
+    `SELECT
+       CASE
+         WHEN window_start + interval '${q.interval}' < now() THEN 0
+         ELSE count
+       END AS count,
+       window_start + interval '${q.interval}' AS reset_at
+     FROM usage_counters
+     WHERE owner_id = $1 AND counter_key = $2`,
+    [ownerId, key],
+  );
+  const used = rows[0]?.count ?? 0;
+  return {
+    used,
+    limit: q.limit,
+    remaining: Math.max(0, q.limit - used),
+    resetAt: rows[0]?.reset_at?.toISOString() ?? new Date().toISOString(),
+  };
 }

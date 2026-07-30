@@ -13,13 +13,44 @@ type RecallHit = {
   url: string;
   title: string | null;
   extracted_text: string | null;
+  capture_type: string;
+  workspace_name: string | null;
+  project_id: string | null;
+  captured_at: string;
   distance: number;
+};
+
+/**
+ * Cited sources, emitted before the answer streams (Phase D5).
+ *
+ * The handler already told the model to cite its captures, but citations only
+ * existed inside the prose — the panel received a bare `memory_recalled { count }`
+ * and could not show what the answer was built from. Sending the hits themselves
+ * makes the memory graph visible and clickable, which is the point of the
+ * Agentic Memory story.
+ */
+export type RecallSource = {
+  captureId: string;
+  url: string;
+  title: string | null;
+  captureType: string;
+  workspace: string | null;
+  /** True when this capture is mirrored into a linked WalkCroach Web project. */
+  inWebProject: boolean;
+  capturedAt: string;
+  /** Cosine distance; lower is closer. Rendered as relevance, not shown raw. */
+  distance: number;
+};
+
+export type RecallSourcesEvent = {
+  type: 'recall_sources';
+  sources: RecallSource[];
 };
 
 export async function* streamRecall(
   auth: AuthContext,
   rawBody: string | undefined,
-): AsyncGenerator<AgentEvent> {
+): AsyncGenerator<AgentEvent | RecallSourcesEvent> {
   const body = parseJsonBody<{
     question?: string;
     workspaceId?: string | null;
@@ -66,27 +97,35 @@ export async function* streamRecall(
 
     if (scope === 'workspace') {
       const { rows } = await db.query<RecallHit>(
-        `SELECT id, url, title, LEFT(extracted_text, 2000) AS extracted_text,
-                embedding <=> $3::vector AS distance
-         FROM page_captures
-         WHERE workspace_id = $1::uuid
-           AND owner_id = $2
-           AND embedding IS NOT NULL
-           AND superseded_by IS NULL
-         ORDER BY embedding <=> $3::vector
+        `SELECT c.id, c.url, c.title,
+                LEFT(c.extracted_text, 2000) AS extracted_text,
+                c.capture_type, c.project_id, c.captured_at,
+                w.name AS workspace_name,
+                c.embedding <=> $3::vector AS distance
+         FROM page_captures c
+         LEFT JOIN workspaces w ON w.id = c.workspace_id
+         WHERE c.workspace_id = $1::uuid
+           AND c.owner_id = $2
+           AND c.embedding IS NOT NULL
+           AND c.superseded_by IS NULL
+         ORDER BY c.embedding <=> $3::vector
          LIMIT 8`,
         [b.workspaceId, auth.ownerId, vec],
       );
       hits = rows;
     } else {
       const { rows } = await db.query<RecallHit>(
-        `SELECT id, url, title, LEFT(extracted_text, 2000) AS extracted_text,
-                embedding <=> $2::vector AS distance
-         FROM page_captures
-         WHERE owner_id = $1
-           AND embedding IS NOT NULL
-           AND superseded_by IS NULL
-         ORDER BY embedding <=> $2::vector
+        `SELECT c.id, c.url, c.title,
+                LEFT(c.extracted_text, 2000) AS extracted_text,
+                c.capture_type, c.project_id, c.captured_at,
+                w.name AS workspace_name,
+                c.embedding <=> $2::vector AS distance
+         FROM page_captures c
+         LEFT JOIN workspaces w ON w.id = c.workspace_id
+         WHERE c.owner_id = $1
+           AND c.embedding IS NOT NULL
+           AND c.superseded_by IS NULL
+         ORDER BY c.embedding <=> $2::vector
          LIMIT 8`,
         [auth.ownerId, vec],
       );
@@ -105,6 +144,13 @@ export async function* streamRecall(
     type: 'memory_recalled',
     count: hits.length,
   };
+
+  if (hits.length) {
+    yield {
+      type: 'recall_sources',
+      sources: hits.map(toSource),
+    } satisfies RecallSourcesEvent;
+  }
 
   if (!hits.length) {
     yield {
@@ -138,4 +184,17 @@ export async function* streamRecall(
   })) {
     yield ev;
   }
+}
+
+function toSource(hit: RecallHit): RecallSource {
+  return {
+    captureId: hit.id,
+    url: hit.url,
+    title: hit.title,
+    captureType: hit.capture_type,
+    workspace: hit.workspace_name,
+    inWebProject: Boolean(hit.project_id),
+    capturedAt: hit.captured_at,
+    distance: hit.distance,
+  };
 }

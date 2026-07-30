@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { createSession, getProject } from '../api/client';
 import { BuilderIconLink } from '../features/builder/BuilderIconLink';
 import { ChatComposer } from '../features/chat/ChatComposer';
+import { CreativeConfirmCard } from '../features/chat/CreativeConfirmCard';
 import { MessageRow, StreamingSkeleton } from '../features/chat/MessageRow';
 import { useChatSession } from '../hooks/useChatSession';
 
@@ -29,6 +30,10 @@ export function ProjectChatPage() {
     openSession,
     cancelGeneration,
     sessionId,
+    pendingCreative,
+    creativeBusy,
+    confirmCreative,
+    declineCreative,
   } = useChatSession({
     projectId,
   });
@@ -241,6 +246,18 @@ export function ProjectChatPage() {
               <div ref={bottomRef} />
             </div>
           </div>
+          {pendingCreative && (
+            <div className="shrink-0 border-t border-line bg-ink/95 px-4 py-3 backdrop-blur-sm sm:px-8">
+              <div className="mx-auto max-w-3xl">
+                <CreativeConfirmCard
+                  pending={pendingCreative}
+                  busy={creativeBusy}
+                  onConfirm={() => void confirmCreative()}
+                  onDecline={declineCreative}
+                />
+              </div>
+            </div>
+          )}
           <div className="shrink-0 border-t border-line bg-ink/90 px-4 py-4 backdrop-blur-sm sm:px-8">
             <div className="mx-auto max-w-3xl">
               <ChatComposer

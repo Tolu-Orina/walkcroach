@@ -11,7 +11,12 @@ import { createDbClient } from '@walkcroach/db';
 import { runPromptTurn } from '@walkcroach/agent-harness';
 import { attachmentStorageKey, putObject } from '../artefacts.js';
 import { writeNdjson } from '../http.js';
-import { assertCredits, debitCredits } from './billing.js';
+import {
+  assertCredits,
+  debitCredits,
+  getEntitlement,
+  peekHardQuota,
+} from './billing.js';
 
 /** Nova text docs ≤4.5MB; media combined ≤25MB; API GW ~10MB with base64 → 5MB binary. */
 const MAX_ATTACH_BYTES = 5 * 1024 * 1024;
@@ -156,6 +161,35 @@ export async function runPromptStream(
         ? body.mode
         : undefined;
 
+    // Phase A — resolve creative limits (plan + rolling hard quota) once per
+    // turn so generate_image can gate without extra round trips.
+    const creativeLimits = ownerId
+      ? {
+          isPaid: (await getEntitlement(db, ownerId)) === 'paid',
+          imageCreditCost: 5,
+          imageDailyRemaining: (
+            await peekHardQuota(db, ownerId, 'image_gen_daily')
+          ).remaining,
+          imageDailyLimit: 3,
+          pptxCreditCost: 20,
+          ownerId,
+          debitCredits: async (
+            actionType: string,
+            metadata: Record<string, unknown> = {},
+          ) => {
+            const assert = await assertCredits(db, ownerId, actionType);
+            if (!assert.ok) return { ok: false as const, remaining: assert.remaining };
+            return debitCredits(
+              db,
+              ownerId,
+              actionType,
+              body.projectId,
+              metadata,
+            );
+          },
+        }
+      : undefined;
+
     await writeNdjson(
       write,
       runPromptTurn({
@@ -165,6 +199,7 @@ export async function runPromptStream(
         message: body.message,
         mode,
         webSearchEnabled: body.webSearchEnabled !== false,
+        creativeLimits,
         attachments,
       }),
     );

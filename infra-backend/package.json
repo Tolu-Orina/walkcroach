@@ -10,8 +10,8 @@
     "modules/lambda-ide/codes"
   ],
   "scripts": {
-    "build": "npm run build -w @walkcroach/db && npm run build -w @walkcroach/agent-harness && npm run build -w @walkcroach/backend && npm run build -w @walkcroach/chrome-api && npm run build -w @walkcroach/ide-api",
-    "build:packages": "npm run build -w @walkcroach/db && npm run build -w @walkcroach/agent-harness",
+    "build": "npm run build -w @walkcroach/db && npm run build -w @walkcroach/storage && npm run build -w @walkcroach/connectors && npm run build -w @walkcroach/agent-harness && npm run build -w @walkcroach/backend && npm run build -w @walkcroach/chrome-api && npm run build -w @walkcroach/ide-api",
+    "build:packages": "npm run build -w @walkcroach/db && npm run build -w @walkcroach/storage && npm run build -w @walkcroach/connectors && npm run build -w @walkcroach/agent-harness",
     "dev": "npm run dev -w @walkcroach/backend",
     "dev:chrome": "npm run dev -w @walkcroach/chrome-api",
     "dev:ide": "npm run dev -w @walkcroach/ide-api",
@@ -22,9 +22,11 @@
     "local:demo": "npm run local:demo -w @walkcroach/agent-harness",
     "migrate": "npm run migrate -w @walkcroach/db",
     "package:lambda": "npm run build:packages && node scripts/package-lambda.mjs",
-    "package:lambda:chrome": "npm run build -w @walkcroach/db && npm run build -w @walkcroach/agent-harness && node scripts/package-lambda-chrome.mjs",
+    "package:lambda:chrome": "npm run build -w @walkcroach/db && npm run build -w @walkcroach/storage && npm run build -w @walkcroach/connectors && npm run build -w @walkcroach/agent-harness && node scripts/package-lambda-chrome.mjs",
     "package:lambda:ide": "npm run build -w @walkcroach/db && npm run build -w @walkcroach/agent-harness && node scripts/package-lambda-ide.mjs",
-    "package:lambda:all": "npm run package:lambda && npm run package:lambda:chrome && npm run package:lambda:ide"
+    "package:lambda:all": "npm run package:lambda && npm run package:lambda:chrome && npm run package:lambda:ide",
+    "smoke:pptx": "python modules/lambda-creative/scripts/smoke_pptx.py",
+    "test:creative-scripts": "python -m pytest modules/lambda-creative/codes/tests -q"
   },
   "devDependencies": {
     "archiver": "^7.0.1",

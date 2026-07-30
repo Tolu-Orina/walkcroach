@@ -139,6 +139,97 @@ export const TOOLS: ToolDef[] = [
       required: ['text'],
     },
   },
+  {
+    name: 'load_skill',
+    description:
+      'Load a WalkCroach Web creative skill (SKILL.md) into context. Use before image generation, slide/flyer creation, or any task matching a skill name in the catalog.',
+    kind: 'server',
+    profiles: ['chat', 'project_chat'],
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: {
+          type: 'string',
+          description: 'Skill name from the available-skills catalog',
+        },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'generate_image',
+    description:
+      'Generate a single image with Amazon Nova Canvas. Hard-capped at 3 per rolling day for every user; paid users additionally spend 5 credits. Call load_skill("walkcroach-image-gen") first if the catalog is present.',
+    kind: 'server',
+    profiles: ['chat', 'project_chat'],
+    inputSchema: {
+      type: 'object',
+      properties: {
+        prompt: {
+          type: 'string',
+          description: 'Detailed visual description of the image to create',
+        },
+        aspect: {
+          type: 'string',
+          enum: ['square', 'landscape', 'portrait'],
+          description: 'Defaults to square (1024x1024)',
+        },
+        negativePrompt: {
+          type: 'string',
+          description: 'What to avoid in the image',
+        },
+      },
+      required: ['prompt'],
+    },
+  },
+  {
+    name: 'generate_creative_brief',
+    description:
+      'Paid-only. Draft a structured slide deck brief with Nova Pro (title, slides, bullets). Emits a ConfirmCard for the user before render_pptx. Call load_skill("walkcroach-pptx") first.',
+    kind: 'server',
+    profiles: ['chat', 'project_chat'],
+    inputSchema: {
+      type: 'object',
+      properties: {
+        topic: {
+          type: 'string',
+          description: 'What the deck is about',
+        },
+        slideCount: {
+          type: 'number',
+          description: 'Content slides (3–8, default 5). Title slide is added by the renderer.',
+        },
+        audience: { type: 'string' },
+        tone: { type: 'string' },
+      },
+      required: ['topic'],
+    },
+  },
+  {
+    name: 'render_pptx',
+    description:
+      'Paid-only. Render a confirmed slide brief to .pptx via lambda-creative (validate_pptx exit 0 required). Costs 20 credits. Prefer after the user confirms a generate_creative_brief ConfirmCard; pass assetId when available.',
+    kind: 'server',
+    profiles: ['chat', 'project_chat'],
+    inputSchema: {
+      type: 'object',
+      properties: {
+        assetId: {
+          type: 'string',
+          description: 'creative_assets id from generate_creative_brief',
+        },
+        brief: {
+          type: 'object',
+          description: 'Inline brief JSON when assetId is unavailable',
+        },
+        confirmed: {
+          type: 'boolean',
+          description: 'Must be true — user confirmed the ConfirmCard',
+        },
+      },
+      required: ['confirmed'],
+    },
+  },
 ];
 
 export function getToolDef(name: string): ToolDef | undefined {

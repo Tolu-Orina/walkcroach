@@ -1,0 +1,18 @@
+# WalkCroach creative skill script dependencies
+
+Install in `lambda-creative` (and local creative worker):
+
+```
+pip install pillow python-pptx pypdf pdf2image defusedxml
+```
+
+System packages:
+
+```
+# Debian/Amazon Linux equivalents
+libreoffice-impress  # or libreoffice-core + draw
+poppler-utils        # pdftoppm
+fonts-liberation     # fallback metrics; prefer bundled OFL under creative-philosophy/assets/fonts
+```
+
+Optional: `ffmpeg` for video compose (same image).

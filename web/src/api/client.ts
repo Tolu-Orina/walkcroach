@@ -533,6 +533,52 @@ export async function getUsage(): Promise<UsageSummary> {
   return parseJson(res);
 }
 
+export type CreativeQuota = {
+  plan: 'free' | 'paid';
+  image: { used: number; limit: number; remaining: number; resetAt: string; unit: string };
+  video: { label: string; limit: number; interval: string; unit: string };
+};
+
+export async function getCreativeQuota(): Promise<CreativeQuota> {
+  const res = await fetch(`${API_URL}/me/creative-quota`, {
+    headers: authHeaders(),
+  });
+  return parseJson(res);
+}
+
+export type CreativeConfirmResult = {
+  ok: boolean;
+  assetId: string;
+  status: string;
+  downloadName?: string;
+  slideCount?: number;
+  downloadUrl?: string | null;
+  previewUrl?: string | null;
+  remainingCredits?: number;
+  alreadyReady?: boolean;
+  error?: string;
+};
+
+export async function confirmCreativeRender(
+  assetId: string,
+): Promise<CreativeConfirmResult> {
+  const res = await fetch(`${API_URL}/creative-assets/${assetId}/confirm`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({}),
+  });
+  return parseJson(res);
+}
+
+export async function getCreativeDownloadUrl(
+  assetId: string,
+): Promise<{ url: string; downloadName: string }> {
+  const res = await fetch(`${API_URL}/creative-assets/${assetId}/download`, {
+    headers: authHeaders(),
+  });
+  return parseJson(res);
+}
+
 export type DeploymentSummary = {
   id: string;
   target: string;

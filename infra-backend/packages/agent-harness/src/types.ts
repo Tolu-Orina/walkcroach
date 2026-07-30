@@ -24,6 +24,40 @@ export type AgentEvent =
       files: Array<{ path: string; reason: string; preview?: string }>;
     }
   | { type: 'plan_awaiting_approval'; planId: string }
+  | {
+      type: 'image_generated';
+      assetId: string;
+      prompt: string;
+      dataUrl: string;
+      storageKey?: string;
+      width?: number;
+      height?: number;
+      remainingToday: number;
+      dailyLimit: number;
+    }
+  | { type: 'image_credit_required'; credits: number; prompt: string }
+  | {
+      type: 'creative_brief_ready';
+      assetId: string;
+      kind: 'slide_deck';
+      brief: Record<string, unknown>;
+      credits: number;
+      estimatedImages: number;
+      remainingImages: number;
+      imageDailyLimit: number;
+      stub?: boolean;
+    }
+  | {
+      type: 'creative_asset_ready';
+      assetId: string;
+      kind: 'slide_deck';
+      downloadName: string;
+      s3Key: string;
+      previewS3Key?: string | null;
+      previewDataUrl?: string;
+      slideCount: number;
+      creditsCharged: number;
+    }
   | { type: 'warning'; message: string }
   | {
       type: 'done';

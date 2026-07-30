@@ -149,13 +149,19 @@ resource "aws_lambda_function" "chrome" {
       COGNITO_CLIENT_ID    = var.cognito_client_id
       ALLOW_DEV_AUTH       = var.allow_dev_auth ? "true" : "false"
       CORS_ALLOW_ORIGIN    = var.cors_allow_origin
-      NODE_OPTIONS         = "--enable-source-maps"
+      CAPTURES_BUCKET      = aws_s3_bucket.captures.bucket
+      WEB_APP_URL          = var.web_app_url
+      # Prefix under which connector OAuth tokens are stored. Tokens never live
+      # in CockroachDB — `connectors.secret_ref` points here.
+      CONNECTOR_SECRET_PREFIX = "walkcroach/${var.environment}/connectors"
+      NODE_OPTIONS            = "--enable-source-maps"
     }
   }
 
   depends_on = [
     aws_cloudwatch_log_group.lambda,
     aws_iam_role_policy.lambda,
+    aws_iam_role_policy.captures,
   ]
 
   tags = var.tags
