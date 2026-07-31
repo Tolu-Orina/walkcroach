@@ -1,5 +1,8 @@
 import * as vscode from 'vscode';
-import { WalkCroachSidebarProvider } from './host/webviewProvider';
+import {
+  WalkCroachSidebarProvider,
+  renderLatencyReport,
+} from './host/webviewProvider';
 
 export function activate(context: vscode.ExtensionContext): void {
   const provider = new WalkCroachSidebarProvider(context);
@@ -15,6 +18,17 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand('walkcroach.ping', async () => {
       await provider.pingFromCommand();
+    }),
+  );
+
+  // §7E — the measurements exist to be read. Shown in an output channel
+  // rather than sent anywhere: this is instrumentation, not telemetry.
+  context.subscriptions.push(
+    vscode.commands.registerCommand('walkcroach.showLatency', () => {
+      const channel = vscode.window.createOutputChannel('WalkCroach Latency');
+      channel.clear();
+      channel.appendLine(renderLatencyReport(provider));
+      channel.show(true);
     }),
   );
 

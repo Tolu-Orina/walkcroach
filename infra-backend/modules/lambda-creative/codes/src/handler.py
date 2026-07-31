@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import Any
 
 from render_pptx import render_pptx
+from render_flyer import render_flyer
+from compose_video import compose_video
 from run_skill_script import ALLOWED_SCRIPTS, run_skill_script
 
 
@@ -104,6 +106,23 @@ def handle_render_pptx(event: dict[str, Any]) -> dict[str, Any]:
                 "stderr": validation.stderr,
             }
 
+        # E3 — a11y fail-closed (alt on pictures; brief.altText when stills planned)
+        brief_path = td_path / "brief.json"
+        brief_path.write_text(json.dumps(brief), encoding="utf-8")
+        a11y = run_skill_script(
+            "check_creative_a11y",
+            [str(out_pptx), "--brief", str(brief_path), "--json"],
+            timeout_s=60,
+        )
+        if not a11y.ok:
+            return {
+                "ok": False,
+                "error": "check_creative_a11y failed",
+                "exitCode": a11y.exit_code,
+                "stdout": a11y.stdout,
+                "stderr": a11y.stderr,
+            }
+
         preview_key = None
         preview_note = None
         thumb_out = td_path / "grid"
@@ -155,6 +174,107 @@ def handle_render_pptx(event: dict[str, Any]) -> dict[str, Any]:
         }
 
 
+def handle_render_flyer(event: dict[str, Any]) -> dict[str, Any]:
+    brief = event.get("brief") or {}
+    owner_id = str(event.get("ownerId") or "anonymous")
+    asset_id = str(event.get("assetId") or uuid.uuid4())
+
+    with tempfile.TemporaryDirectory(prefix="wc-flyer-") as td:
+        td_path = Path(td)
+        out_pdf = td_path / f"{asset_id}.pdf"
+        html_path = td_path / f"{asset_id}.html"
+        meta = render_flyer(brief, out_pdf, html_out=html_path)
+
+        # Fail closed on check_flyer_pdf
+        check = run_skill_script(
+            "check_flyer_pdf",
+            [str(out_pdf), "--max-pages", "1"],
+            timeout_s=60,
+        )
+        if not check.ok:
+            return {
+                "ok": False,
+                "error": "check_flyer_pdf failed",
+                "exitCode": check.exit_code,
+                "stdout": check.stdout,
+                "stderr": check.stderr,
+            }
+
+        brief_path = td_path / "brief.json"
+        brief_path.write_text(json.dumps(brief), encoding="utf-8")
+        a11y = run_skill_script(
+            "check_creative_a11y",
+            [str(html_path), "--brief", str(brief_path), "--json"],
+            timeout_s=30,
+        )
+        if not a11y.ok:
+            return {
+                "ok": False,
+                "error": "check_creative_a11y failed",
+                "exitCode": a11y.exit_code,
+                "stdout": a11y.stdout,
+                "stderr": a11y.stderr,
+            }
+
+        preview_key = None
+        preview_note = None
+        preview_data_url = None
+        img_dir = td_path / "pages"
+        images = run_skill_script(
+            "pdf_to_images",
+            [str(out_pdf), str(img_dir)],
+            timeout_s=120,
+        )
+        if images.ok:
+            png_line = next(
+                (
+                    ln.strip()
+                    for ln in images.stdout.splitlines()
+                    if ln.strip().lower().endswith(".png")
+                ),
+                None,
+            )
+            if png_line and Path(png_line).is_file():
+                png_bytes = Path(png_line).read_bytes()
+                preview_key = f"creative/{owner_id}/{asset_id}/preview.png"
+                _put_bytes(preview_key, png_bytes, "image/png")
+                preview_data_url = (
+                    "data:image/png;base64," + base64.b64encode(png_bytes).decode("ascii")
+                )
+            else:
+                preview_note = "pdf_to_images produced no png path"
+        else:
+            preview_note = (
+                f"pdf_to_images exit {images.exit_code}: "
+                f"{(images.stderr or images.stdout)[:400]}"
+            )
+
+        pdf_bytes = out_pdf.read_bytes()
+        s3_key = f"creative/{owner_id}/{asset_id}/flyer.pdf"
+        stored = _put_bytes(s3_key, pdf_bytes, "application/pdf")
+        # Also keep the filled HTML for audit / re-render
+        html_key = f"creative/{owner_id}/{asset_id}/flyer.html"
+        _put_bytes(html_key, html_path.read_bytes(), "text/html; charset=utf-8")
+
+        title = str(brief.get("headline") or brief.get("title") or "flyer").strip() or "flyer"
+        safe_name = (
+            "".join(c if c.isalnum() or c in "-_ " else "" for c in title)[:60].strip()
+            or "flyer"
+        )
+        return {
+            "ok": True,
+            "assetId": asset_id,
+            "s3Key": s3_key if _bucket() else stored,
+            "previewS3Key": preview_key,
+            "previewNote": preview_note,
+            "previewDataUrl": preview_data_url,
+            "downloadName": f"{safe_name}.pdf",
+            "template": meta.get("template"),
+            "engine": meta.get("engine"),
+            "htmlS3Key": html_key,
+        }
+
+
 def handle_run_skill_script(event: dict[str, Any]) -> dict[str, Any]:
     name = str(event.get("script") or "")
     args = event.get("args") or []
@@ -176,11 +296,62 @@ def handle_run_skill_script(event: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def handle_compose_video(event: dict[str, Any]) -> dict[str, Any]:
+    """Polly + ffmpeg compose (Phase D3/D5)."""
+    owner_id = str(event.get("ownerId") or "anonymous")
+    job_id = str(event.get("jobId") or uuid.uuid4())
+    script = str(event.get("voiceoverScript") or "")
+    brand = str(event.get("brand") or "WalkCroach")
+    aspect = str(event.get("aspect") or "16:9")
+    reel_ref = event.get("reelS3Key") or event.get("reelPath")
+
+    with tempfile.TemporaryDirectory(prefix="wc-video-") as td:
+        td_path = Path(td)
+        reel_local: Path | None = None
+        if reel_ref:
+            dest = td_path / "reel.mp4"
+            got = _download_image(str(reel_ref), dest)  # bytes download works for any key
+            if got:
+                reel_local = got
+            elif Path(str(reel_ref)).is_file():
+                reel_local = Path(str(reel_ref))
+
+        out_mp4 = td_path / "final.mp4"
+        result = compose_video(
+            reel_mp4=reel_local,
+            voiceover_script=script,
+            out_mp4=out_mp4,
+            brand=brand,
+            aspect=aspect,
+        )
+        if not result.get("ok"):
+            return result
+
+        body = out_mp4.read_bytes()
+        s3_key = f"video-jobs/{owner_id}/{job_id}/final.mp4"
+        stored = _put_bytes(s3_key, body, "video/mp4")
+        return {
+            "ok": True,
+            "jobId": job_id,
+            "s3Key": s3_key if _bucket() else stored,
+            "downloadName": f"{brand[:40].strip() or 'walkcroach'}-video.mp4",
+            "bytes": len(body),
+            "stub": result.get("stub"),
+            "aspect": aspect,
+            "note": result.get("note"),
+            "partialCompose": bool(result.get("partialCompose")),
+        }
+
+
 def handler(event: dict[str, Any], _context: Any = None) -> dict[str, Any]:
     action = str(event.get("action") or "render_pptx")
     try:
         if action == "render_pptx":
             return handle_render_pptx(event)
+        if action == "render_flyer":
+            return handle_render_flyer(event)
+        if action == "compose_video":
+            return handle_compose_video(event)
         if action == "run_skill_script":
             return handle_run_skill_script(event)
         return {"ok": False, "error": f"unknown action: {action}"}

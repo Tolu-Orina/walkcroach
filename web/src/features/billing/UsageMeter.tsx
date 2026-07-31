@@ -24,7 +24,11 @@ export function UsageMeter() {
   return (
     <div
       className="flex items-center gap-2 rounded-sm border border-line bg-ink/60 px-2 py-1"
-      title="Free tier credits this month"
+      title={
+        usage.plan === 'paid'
+          ? 'Paid plan credits this month (shared with Chrome)'
+          : 'Free plan credits this month — upgrade for creatives'
+      }
     >
       <div className="h-1.5 w-16 overflow-hidden rounded-full bg-line">
         <div
@@ -33,7 +37,8 @@ export function UsageMeter() {
         />
       </div>
       <span className="text-[10px] text-mist">
-        {usage.remaining}/{usage.monthlyCredits} credits
+        {usage.remaining}/{usage.monthlyCredits}
+        {usage.plan === 'paid' ? '' : ' · free'}
       </span>
     </div>
   );

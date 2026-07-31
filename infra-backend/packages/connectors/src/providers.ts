@@ -134,7 +134,7 @@ export const PROVIDERS: Record<ProviderId, ProviderDef> = {
   hubspot: {
     id: 'hubspot',
     label: 'HubSpot',
-    tier: 3,
+    tier: 2,
     authorizeUrl: 'https://app.hubspot.com/oauth/authorize',
     tokenUrl: 'https://api.hubapi.com/oauth/v1/token',
     scopes: ['crm.objects.contacts.read', 'crm.objects.contacts.write'],

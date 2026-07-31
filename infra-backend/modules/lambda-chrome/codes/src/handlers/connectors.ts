@@ -1,4 +1,5 @@
 import { createDbClient } from '@walkcroach/db';
+import { embedAndStoreWorkflowRun } from '@walkcroach/agent-harness';
 import {
   configuredProviders,
   describeAction,
@@ -16,6 +17,11 @@ import {
   validateActionArgs,
   type ActionId,
 } from '@walkcroach/connectors';
+import {
+  assertCredits,
+  debitCredits,
+  getEntitlement,
+} from '@walkcroach/ledger';
 import type { AuthContext } from '../auth.js';
 import { jsonResponse } from '../http.js';
 import { metricLog, parseJsonBody } from '../util.js';
@@ -172,6 +178,7 @@ export async function handleProposeAction(
       title: action.label,
       consequence: action.consequence,
       write: action.write,
+      irreversible: action.irreversible,
       weight: action.weight,
       rows: describeAction(action.id as ActionId, validated.args),
     });
@@ -197,16 +204,108 @@ export async function handleExecuteRun(
 
   const db = createDbClient();
   try {
+    /*
+      Credit parity with Web (Phase E7).
+      The Chrome BFF previously executed connector actions without touching the
+      ledger, so the "shared pool" was in practice a Web-only limit — the same
+      account could spend freely from the side panel. The gate below mirrors
+      `lambda-agent/handlers/connectors.ts` exactly, using the same
+      `@walkcroach/ledger` primitives against the same tables.
+
+      The run is read before claiming so the cost is known up front; `executeRun`
+      is what actually claims it, atomically.
+    */
+    const pending = await peekRun(db, auth.ownerId, runId);
+    if (!pending) {
+      return jsonResponse(409, { error: 'this action is no longer pending' });
+    }
+    const action = getAction(pending.action);
+    if (!action) return jsonResponse(400, { error: 'unknown action' });
+
+    if (action.write) {
+      const plan = await getEntitlement(db, auth.ownerId);
+      if (plan !== 'paid') {
+        return jsonResponse(402, {
+          error: 'upgrade_required',
+          message: 'Connector writes require a paid plan.',
+        });
+      }
+    }
+
+    const creditAction = action.write ? 'connector_write' : 'connector_read';
+    const credits = await assertCredits(db, auth.ownerId, creditAction);
+    if (!credits.ok) {
+      return jsonResponse(402, {
+        error: 'insufficient_credits',
+        remaining: credits.remaining,
+      });
+    }
+
     const out = await executeRun({ db, ownerId: auth.ownerId, runId });
     if (!out.ok) {
       metricLog('chrome.connector.execute', { ok: false });
       return jsonResponse(out.status ?? 500, { error: out.error });
     }
+
+    const debit = await debitCredits(db, auth.ownerId, creditAction, undefined, {
+      runId,
+      action: action.id,
+      surface: SURFACE,
+    });
+    if (!debit.ok) {
+      // The provider call already happened. Reporting a soft credit failure is
+      // the honest outcome — we cannot un-send an email to balance the books.
+      metricLog('chrome.connector.execute', { ok: true, debit: false });
+      return jsonResponse(200, {
+        ok: true,
+        result: out.result,
+        creditsCharged: 0,
+        creditWarning: 'executed_but_debit_failed',
+        remainingCredits: debit.remaining,
+      });
+    }
+
+    // E8: make the run recallable. "What did we send last week" should work in
+    // the panel, not only in Web Chat, which is the whole point of one memory
+    // layer across surfaces. Best-effort — Titan is optional in local dev, and a
+    // missing embedding must never fail an action that already executed.
+    try {
+      await embedAndStoreWorkflowRun({
+        db,
+        runId,
+        action: action.id,
+        proposed: { action: action.id },
+        result: out.result,
+        status: 'executed',
+      });
+    } catch {
+      /* recall degrades; the action still happened */
+    }
+
     metricLog('chrome.connector.execute', { ok: true });
-    return jsonResponse(200, { ok: true, result: out.result });
+    return jsonResponse(200, {
+      ok: true,
+      result: out.result,
+      creditsCharged: action.write ? 2 : 1,
+      remainingCredits: debit.remaining,
+    });
   } finally {
     await db.close();
   }
+}
+
+/** Read a pending run without claiming it, so its cost can be gated first. */
+async function peekRun(
+  db: ReturnType<typeof createDbClient>,
+  ownerId: string,
+  runId: string,
+): Promise<{ action: string } | null> {
+  const { rows } = await db.query<{ action: string }>(
+    `SELECT action FROM workflow_runs
+     WHERE id = $1::uuid AND owner_id = $2 AND status = 'proposed'`,
+    [runId, ownerId],
+  );
+  return rows[0] ?? null;
 }
 
 /** POST /chrome/v1/connectors/runs/:id/decline */

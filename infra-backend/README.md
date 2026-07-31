@@ -45,4 +45,4 @@ Deploy order: **infra-backend → SSM api_url → infra-web**.
 
 `ci-cd/infra-backend-pipeline.yaml` — CodePipeline V2 + CodeConnections.
 
-See `docs/plan1.md` Phase 2.
+See `docs/walkcroach-master-doc.md` (backend / infra sections) and `docs/runtime-secrets-and-ssm.md`.

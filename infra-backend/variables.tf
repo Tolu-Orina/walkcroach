@@ -169,3 +169,15 @@ variable "github_ssm_prefix" {
   description = "Override SSM prefix for manually created GitHub App parameters"
   default     = ""
 }
+
+variable "bedrock_monthly_budget_usd" {
+  type        = string
+  description = "Phase H4 — monthly AWS Budget USD limit for Amazon Bedrock"
+  default     = "150"
+}
+
+variable "budget_alert_email" {
+  type        = string
+  description = "Phase H4 — optional email subscribed to creative Bedrock budget SNS"
+  default     = ""
+}

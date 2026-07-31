@@ -140,6 +140,47 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: 'recall_creative',
+    description:
+      'Semantic search over this owner’s past ready creatives (decks, flyers, images) — use for “like the bakery deck”, “another flyer like last time”, brand/palette recall.',
+    kind: 'server',
+    profiles: ['chat', 'project_chat'],
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'What to find (topic, brand, “like last deck”, etc.)',
+        },
+        limit: { type: 'number' },
+        kind: {
+          type: 'string',
+          enum: ['slide_deck', 'flyer', 'image'],
+          description: 'Optional filter',
+        },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'save_creative_memory',
+    description:
+      'Save a finished creative into project memory so later chats can recall “another like this”. Requires a linked project.',
+    kind: 'server',
+    profiles: ['chat', 'project_chat'],
+    inputSchema: {
+      type: 'object',
+      properties: {
+        assetId: { type: 'string' },
+        note: {
+          type: 'string',
+          description: 'Optional short note (defaults to title + kind)',
+        },
+      },
+      required: ['assetId'],
+    },
+  },
+  {
     name: 'load_skill',
     description:
       'Load a WalkCroach Web creative skill (SKILL.md) into context. Use before image generation, slide/flyer creation, or any task matching a skill name in the catalog.',
@@ -228,6 +269,176 @@ export const TOOLS: ToolDef[] = [
         },
       },
       required: ['confirmed'],
+    },
+  },
+  {
+    name: 'generate_flyer_brief',
+    description:
+      'Paid-only. Draft a one-page flyer brief with Nova Pro, including a short visual philosophy (walkcroach-creative-philosophy). Emits a ConfirmCard before render_flyer. Call load_skill("walkcroach-flyer") first.',
+    kind: 'server',
+    profiles: ['chat', 'project_chat'],
+    inputSchema: {
+      type: 'object',
+      properties: {
+        topic: {
+          type: 'string',
+          description: 'What the flyer promotes (sale, event, announcement)',
+        },
+        template: {
+          type: 'string',
+          enum: ['sale', 'event', 'announcement'],
+          description: 'HTML template pack variant (default sale)',
+        },
+        brand: { type: 'string' },
+        audience: { type: 'string' },
+      },
+      required: ['topic'],
+    },
+  },
+  {
+    name: 'render_flyer',
+    description:
+      'Paid-only. Render a confirmed flyer brief to PDF via lambda-creative (check_flyer_pdf exit 0 required). Costs 10 credits. Pass assetId from generate_flyer_brief after ConfirmCard.',
+    kind: 'server',
+    profiles: ['chat', 'project_chat'],
+    inputSchema: {
+      type: 'object',
+      properties: {
+        assetId: {
+          type: 'string',
+          description: 'creative_assets id from generate_flyer_brief',
+        },
+        brief: {
+          type: 'object',
+          description: 'Inline flyer brief when assetId is unavailable',
+        },
+        confirmed: {
+          type: 'boolean',
+          description: 'Must be true — user confirmed the ConfirmCard',
+        },
+      },
+      required: ['confirmed'],
+    },
+  },
+  {
+    name: 'generate_video_brief',
+    description:
+      'Paid-only. Draft a ≤30s Video Studio brief for one Nova Reel MULTI_SHOT_AUTOMATED job (durationSeconds=30) plus Polly script. Emits a ConfirmCard. Costs 270 credits on confirm; 1 video / 72h. Call load_skill("walkcroach-video-studio") first.',
+    kind: 'server',
+    profiles: ['chat', 'project_chat'],
+    inputSchema: {
+      type: 'object',
+      properties: {
+        topic: {
+          type: 'string',
+          description: 'What the teaser/ad is about',
+        },
+        brand: { type: 'string' },
+        audience: { type: 'string' },
+        aspect: {
+          type: 'string',
+          enum: ['16:9', '9:16'],
+          description: 'Output aspect; 9:16 crops after compose (default 16:9)',
+        },
+      },
+      required: ['topic'],
+    },
+  },
+  {
+    name: 'start_video_job',
+    description:
+      'Paid-only. Start a confirmed video job (debit 270, assert 72h cap, one MULTI_SHOT_AUTOMATED 30s Reel invoke, Polly+ffmpeg). Prefer the ConfirmCard REST path; if calling the tool, pass confirmed=true and jobId.',
+    kind: 'server',
+    profiles: ['chat', 'project_chat'],
+    inputSchema: {
+      type: 'object',
+      properties: {
+        jobId: {
+          type: 'string',
+          description: 'video_jobs id from generate_video_brief',
+        },
+        confirmed: {
+          type: 'boolean',
+          description: 'Must be true after ConfirmCard',
+        },
+      },
+      required: ['jobId', 'confirmed'],
+    },
+  },
+  {
+    name: 'list_connectors',
+    description:
+      'List this owner’s connected workflow providers (Gmail, Calendar, Sheets, Slack, Stripe, HubSpot) and which OAuth apps are configured. Call before proposing an action if unsure what is connected.',
+    kind: 'server',
+    profiles: ['chat', 'project_chat'],
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'propose_connector_action',
+    description:
+      'Propose a catalogue connector action (gmail.send, calendar.create_event, slack.post_message, sheets.*, stripe.*, hubspot.*, …). Validates args, records a workflow_run as proposed, and shows a ConfirmCard. Never executes — wait for the user to Confirm. Call load_skill("walkcroach-connectors") first.',
+    kind: 'server',
+    profiles: ['chat', 'project_chat'],
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          description:
+            'Catalogue action id, e.g. gmail.send, calendar.create_event, slack.post_message',
+        },
+        args: {
+          type: 'object',
+          description: 'Action arguments matching the catalogue field specs',
+        },
+      },
+      required: ['action', 'args'],
+    },
+  },
+  {
+    name: 'recall_workflow_runs',
+    description:
+      'Semantic search over past connector workflow runs (“what did we email last week”, “Slack posts about the sale”). Use after load_skill("walkcroach-connectors") when the user asks about prior sends/schedules.',
+    kind: 'server',
+    profiles: ['chat', 'project_chat'],
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string' },
+        limit: { type: 'number' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'cockroach_mcp',
+    description:
+      'Call a CockroachDB Cloud Managed MCP tool (list_tables, select_query, …). Read tools run immediately when CRDB_MCP_API_KEY is configured. Write/mutating MCP tools require confirmed=true after the user explicitly approves in chat.',
+    kind: 'server',
+    profiles: ['chat', 'project_chat', 'builder'],
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tool: {
+          type: 'string',
+          description: 'MCP tool name (e.g. list_tables, select_query)',
+        },
+        args: {
+          type: 'object',
+          description: 'Arguments for the MCP tool',
+        },
+        confirmed: {
+          type: 'boolean',
+          description: 'Required true for write/mutating MCP tools',
+        },
+        listOnly: {
+          type: 'boolean',
+          description: 'If true, only list available MCP tools (no call)',
+        },
+      },
     },
   },
 ];

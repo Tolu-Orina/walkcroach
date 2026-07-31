@@ -307,6 +307,14 @@ export {
 } from './skills.js';
 export { BUNDLED_SKILLS } from './skills/bundled.js';
 export {
+  resolveInferenceCredentials,
+  withInferenceCredentials,
+  describeMissingCredentials,
+  ENV_BEDROCK_BEARER,
+  type InferenceCredentials,
+  type InferenceCredentialSource,
+} from './inference-credentials.js';
+export {
   TelemetrySink,
   emptyTelemetry,
   type TelemetryCounters,

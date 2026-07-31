@@ -130,6 +130,60 @@ export async function invokeRenderPptx(params: {
   return raw as CreativeRenderResult;
 }
 
+export async function invokeRenderFlyer(params: {
+  brief: Record<string, unknown>;
+  ownerId: string;
+  assetId: string;
+}): Promise<CreativeRenderResult & { previewDataUrl?: string; template?: string }> {
+  const raw = await invokeCreative({
+    action: 'render_flyer',
+    brief: params.brief,
+    ownerId: params.ownerId,
+    assetId: params.assetId,
+  });
+  return raw as CreativeRenderResult & {
+    previewDataUrl?: string;
+    template?: string;
+  };
+}
+
+export async function invokeComposeVideo(params: {
+  ownerId: string;
+  jobId: string;
+  voiceoverScript: string;
+  brand?: string;
+  aspect?: '16:9' | '9:16';
+  reelS3Key?: string | null;
+}): Promise<
+  CreativeRenderResult & {
+    jobId?: string;
+    bytes?: number;
+    stub?: boolean;
+    aspect?: string;
+    note?: string;
+    /** Mux/outro/crop degraded but file still produced (Phase H2). */
+    partialCompose?: boolean;
+  }
+> {
+  const raw = await invokeCreative({
+    action: 'compose_video',
+    ownerId: params.ownerId,
+    jobId: params.jobId,
+    voiceoverScript: params.voiceoverScript,
+    brand: params.brand ?? 'WalkCroach',
+    aspect: params.aspect ?? '16:9',
+    reelS3Key: params.reelS3Key ?? undefined,
+  });
+  return raw as CreativeRenderResult & {
+    jobId?: string;
+    bytes?: number;
+    stub?: boolean;
+    aspect?: string;
+    note?: string;
+    partialCompose?: boolean;
+  };
+}
+
 export async function invokeRunSkillScript(params: {
   script: string;
   args: string[];

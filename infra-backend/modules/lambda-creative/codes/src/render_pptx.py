@@ -116,17 +116,28 @@ def _add_image_safe(
     top_px: int,
     max_w_px: int,
     max_h_px: int,
+    alt_text: str = "",
 ):
     hd = _load_hd_helper()
     w, h = hd.max_fit_box(image_path, max_w_px, max_h_px)
     hd.assert_hd_fit(image_path, w, h)
-    return slide.shapes.add_picture(
+    pic = slide.shapes.add_picture(
         str(image_path),
         px(left_px),
         px(top_px),
         width=px(w),
         height=px(h),
     )
+    # Phase E3 — OOXML cNvPr descr for screen readers / check_creative_a11y
+    descr = (alt_text or image_path.stem or "Slide image").strip()[:255]
+    try:
+        pic._element.nvPicPr.cNvPr.set("descr", descr)  # type: ignore[attr-defined]
+    except Exception:
+        try:
+            pic.name = descr[:50]
+        except Exception:
+            pass
+    return pic
 
 
 def render_pptx(
@@ -211,6 +222,13 @@ def render_pptx(
         if img_path and Path(img_path).is_file():
             _add_bullets(slide, bullets, left_px=80, top_px=180, w_px=900)
             try:
+                alt = str(
+                    brief.get("altText")
+                    or brief.get("alt_text")
+                    or spec.get("altText")
+                    or spec.get("title")
+                    or "Slide illustration"
+                )
                 _add_image_safe(
                     slide,
                     Path(img_path),
@@ -218,6 +236,7 @@ def render_pptx(
                     top_px=180,
                     max_w_px=780,
                     max_h_px=720,
+                    alt_text=alt,
                 )
             except ValueError:
                 pass  # HD refuse — skip rather than upscale

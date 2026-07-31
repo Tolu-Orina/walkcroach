@@ -58,6 +58,24 @@ variable "creative_lambda_name" {
   default     = ""
 }
 
+variable "video_state_machine_arn" {
+  type        = string
+  description = "Step Functions ARN for Video Studio (empty = stub/inline pipeline)"
+  default     = ""
+}
+
+variable "nova_reel_model_id" {
+  type        = string
+  description = "Bedrock Nova Reel model ID"
+  default     = "amazon.nova-reel-v1:1"
+}
+
+variable "bedrock_reel_region" {
+  type        = string
+  description = "Region for Nova Reel async invoke (often us-east-1)"
+  default     = "us-east-1"
+}
+
 variable "titan_embed_model_id" {
   type = string
 }
@@ -71,6 +89,18 @@ variable "bedrock_guardrail_id" {
 variable "bedrock_guardrail_version" {
   type        = string
   description = "Bedrock Guardrail version (e.g. 1 or DRAFT)"
+  default     = "DRAFT"
+}
+
+variable "creative_guardrail_id" {
+  type        = string
+  description = "Bedrock Guardrail ID for creative marketing moderation (empty to use rules-only)"
+  default     = ""
+}
+
+variable "creative_guardrail_version" {
+  type        = string
+  description = "Creative marketing Guardrail version"
   default     = "DRAFT"
 }
 
@@ -128,6 +158,30 @@ variable "cors_allow_origin" {
   default     = "*"
 }
 
+variable "web_app_url" {
+  type        = string
+  description = "WalkCroach Web origin for OAuth redirect + Connections deep links"
+  default     = ""
+}
+
+variable "crdb_mcp_url" {
+  type        = string
+  description = "CockroachDB Cloud Managed MCP URL"
+  default     = "https://cockroachlabs.cloud/mcp"
+}
+
+variable "free_monthly_credits" {
+  type        = number
+  description = "Free-tier monthly credit grant (chat/builder; creatives gated)"
+  default     = 100
+}
+
+variable "paid_monthly_credits" {
+  type        = number
+  description = "Paid-tier monthly credit grant (~$20/mo). Keep finite for margin."
+  default     = 500
+}
+
 variable "allow_github_pat" {
   type        = bool
   description = "Allow legacy PAT connect (disable in prod when GitHub App is configured)"
@@ -182,11 +236,13 @@ data "aws_iam_policy_document" "lambda" {
       "secretsmanager:DescribeSecret",
       "secretsmanager:CreateSecret",
       "secretsmanager:PutSecretValue",
+      "secretsmanager:DeleteSecret",
       "secretsmanager:TagResource",
     ]
     resources = [
       var.runtime_secret_arn,
       "arn:aws:secretsmanager:*:*:secret:walkcroach/${var.environment}/projects/*",
+      "arn:aws:secretsmanager:*:*:secret:walkcroach/${var.environment}/connectors/*",
     ]
   }
 
@@ -283,28 +339,38 @@ resource "aws_lambda_function" "agent" {
 
   environment {
     variables = {
-      ENVIRONMENT               = var.environment
-      BEDROCK_REGION            = var.bedrock_region
-      NOVA_MODEL_ID             = var.nova_model_id
-      NOVA_CANVAS_MODEL_ID      = var.nova_canvas_model_id
-      NOVA_PRO_MODEL_ID         = var.nova_pro_model_id
-      CREATIVE_LAMBDA_NAME      = var.creative_lambda_name
-      TITAN_EMBED_MODEL_ID      = var.titan_embed_model_id
-      BEDROCK_GUARDRAIL_ID      = var.bedrock_guardrail_id
-      BEDROCK_GUARDRAIL_VERSION = var.bedrock_guardrail_version
-      RUNTIME_SECRET_ARN        = var.runtime_secret_arn
-      ARTEFACTS_BUCKET          = var.artefacts_bucket_name
-      APPS_BUCKET               = var.apps_bucket_name
-      APPS_WILDCARD_DOMAIN      = var.apps_wildcard_domain
-      APPS_CF_DOMAIN            = var.apps_cf_domain
-      CODEBUILD_PROJECT         = var.codebuild_project
-      COGNITO_USER_POOL_ID      = var.cognito_user_pool_id
-      COGNITO_CLIENT_ID         = var.cognito_client_id
-      ALLOW_DEV_AUTH            = var.allow_dev_auth ? "true" : "false"
-      CORS_ALLOW_ORIGIN         = var.cors_allow_origin
-      ALLOW_GITHUB_PAT          = var.allow_github_pat ? "true" : "false"
-      GITHUB_SSM_PREFIX         = var.github_ssm_prefix != "" ? var.github_ssm_prefix : "/${var.name_prefix}/${var.environment}/github"
-      NODE_OPTIONS              = "--enable-source-maps"
+      ENVIRONMENT                = var.environment
+      BEDROCK_REGION             = var.bedrock_region
+      NOVA_MODEL_ID              = var.nova_model_id
+      NOVA_CANVAS_MODEL_ID       = var.nova_canvas_model_id
+      NOVA_PRO_MODEL_ID          = var.nova_pro_model_id
+      CREATIVE_LAMBDA_NAME       = var.creative_lambda_name
+      VIDEO_STATE_MACHINE_ARN    = var.video_state_machine_arn
+      NOVA_REEL_MODEL_ID         = var.nova_reel_model_id
+      BEDROCK_REEL_REGION        = var.bedrock_reel_region
+      TITAN_EMBED_MODEL_ID       = var.titan_embed_model_id
+      BEDROCK_GUARDRAIL_ID       = var.bedrock_guardrail_id
+      BEDROCK_GUARDRAIL_VERSION  = var.bedrock_guardrail_version
+      CREATIVE_GUARDRAIL_ID      = var.creative_guardrail_id
+      CREATIVE_GUARDRAIL_VERSION = var.creative_guardrail_version
+      RUNTIME_SECRET_ARN         = var.runtime_secret_arn
+      CONNECTOR_SECRET_PREFIX    = "walkcroach/${var.environment}/connectors"
+      WEB_APP_URL                = var.web_app_url
+      CRDB_MCP_URL               = var.crdb_mcp_url
+      FREE_MONTHLY_CREDITS       = tostring(var.free_monthly_credits)
+      PAID_MONTHLY_CREDITS       = tostring(var.paid_monthly_credits)
+      ARTEFACTS_BUCKET           = var.artefacts_bucket_name
+      APPS_BUCKET                = var.apps_bucket_name
+      APPS_WILDCARD_DOMAIN       = var.apps_wildcard_domain
+      APPS_CF_DOMAIN             = var.apps_cf_domain
+      CODEBUILD_PROJECT          = var.codebuild_project
+      COGNITO_USER_POOL_ID       = var.cognito_user_pool_id
+      COGNITO_CLIENT_ID          = var.cognito_client_id
+      ALLOW_DEV_AUTH             = var.allow_dev_auth ? "true" : "false"
+      CORS_ALLOW_ORIGIN          = var.cors_allow_origin
+      ALLOW_GITHUB_PAT           = var.allow_github_pat ? "true" : "false"
+      GITHUB_SSM_PREFIX          = var.github_ssm_prefix != "" ? var.github_ssm_prefix : "/${var.name_prefix}/${var.environment}/github"
+      NODE_OPTIONS               = "--enable-source-maps"
     }
   }
 

@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>{{brand}} — {{headline}}</title>
+  <style>
+    @page { size: A4; margin: 0; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 210mm; height: 297mm; }
+    body {
+      font-family: "Bricolage Grotesque", "Source Sans 3", Calibri, sans-serif;
+      background: {{fg}};
+      color: {{bg}};
+    }
+    .sheet {
+      height: 100%;
+      padding: 20mm 18mm;
+      display: flex; flex-direction: column;
+      background: {{fg}};
+    }
+    .brand {
+      font-size: 12pt; font-weight: 800; letter-spacing: 0.08em;
+      text-transform: uppercase; color: {{bg}};
+    }
+    .rule {
+      margin-top: 8mm; height: 1.2mm; width: 22mm; background: {{accent}};
+    }
+    .eyebrow {
+      margin-top: 22mm;
+      font-size: 11pt; letter-spacing: 0.14em; text-transform: uppercase;
+      color: {{steel}}; font-weight: 700;
+    }
+    .headline {
+      margin-top: 6mm; font-size: 40pt; line-height: 1.05; font-weight: 800;
+      color: {{bg}}; max-width: 160mm;
+    }
+    .support {
+      margin-top: 10mm; font-size: 14pt; line-height: 1.5;
+      color: {{panel}}; max-width: 145mm;
+    }
+    .cta {
+      margin-top: auto;
+      display: inline-block; width: fit-content;
+      border: 1.4mm solid {{accent}}; color: {{accent}};
+      font-weight: 800; font-size: 12pt;
+      padding: 4mm 9mm; border-radius: 2mm;
+      text-decoration: none;
+    }
+    .meta { margin-top: 6mm; font-size: 10pt; color: {{mist}}; }
+  </style>
+</head>
+<body>
+  <div class="sheet">
+    <div class="brand">{{brand}}</div>
+    <div class="rule" aria-hidden="true"></div>
+    <div class="eyebrow">{{eyebrow}}</div>
+    <h1 class="headline">{{headline}}</h1>
+    <p class="support">{{support}}</p>
+    <a class="cta" href="#">{{cta}}</a>
+    <p class="meta">{{meta}}</p>
+  </div>
+</body>
+</html>

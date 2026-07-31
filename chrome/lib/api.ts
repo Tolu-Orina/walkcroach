@@ -429,6 +429,8 @@ export type ConnectorProposal = {
   title: string;
   consequence: string;
   write: boolean;
+  /** Cannot be taken back once executed. A strict subset of `write`. */
+  irreversible: boolean;
   weight: number;
   rows: Array<{ label: string; value: string }>;
 };

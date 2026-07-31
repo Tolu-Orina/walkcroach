@@ -5,7 +5,8 @@ import type {
   ProjectMemoryBridge,
   SharedSkillsBridge,
 } from '@walkcroach/agent-engine';
-import { loadConfig } from './config.js';
+import { resolveApiBaseUrl } from './config.js';
+import { ApiError, NetworkError } from './exit-codes.js';
 
 export type IdeProject = {
   id: string;
@@ -22,12 +23,30 @@ export type IdeLink = {
   localRepoDisplay?: string | null;
 };
 
+/**
+ * Single entry point for "which API are we talking to" (C0.2/C0.3).
+ *
+ * This used to read env-then-config inline, which meant `--api-url` could not
+ * reach it and nothing could report where the value came from. Precedence now
+ * lives in one place: flag > env > project > user > default.
+ */
 async function baseUrl(): Promise<string> {
-  const cfg = await loadConfig();
-  return (process.env.WALKCROACH_API_BASE_URL ?? cfg.apiBaseUrl).replace(
-    /\/$/,
-    '',
-  );
+  return (await resolveApiBaseUrl()).value;
+}
+
+/**
+ * `fetch` rejects with a bare `TypeError: fetch failed` and the real reason
+ * buried in `cause` — useless in a terminal. Rewriting it for humans is
+ * clig.dev's rule, and it is what makes exit code 4 mean something.
+ */
+async function request(url: URL | string, init?: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch (err) {
+    const cause = (err as { cause?: { message?: string; code?: string } }).cause;
+    const detail = cause?.code ?? cause?.message ?? (err as Error).message;
+    throw new NetworkError(`Cannot reach the WalkCroach API at ${url} (${detail})`);
+  }
 }
 
 async function ideFetch(
@@ -46,7 +65,7 @@ async function ideFetch(
       if (v !== undefined) url.searchParams.set(k, v);
     }
   }
-  return fetch(url, {
+  return request(url, {
     method: opts.method ?? 'GET',
     headers: {
       authorization: `Bearer ${opts.token}`,
@@ -65,21 +84,26 @@ async function readJson<T>(res: Response): Promise<T> {
   try {
     data = text ? JSON.parse(text) : {};
   } catch {
-    throw new Error(`IDE API non-JSON (${res.status}): ${text.slice(0, 200)}`);
+    throw new ApiError(
+      `IDE API non-JSON (${res.status}): ${text.slice(0, 200)}`,
+      res.status,
+    );
   }
   if (!res.ok) {
     const err =
       data && typeof data === 'object' && 'error' in data
         ? String((data as { error: string }).error)
         : `IDE API ${res.status}`;
-    throw new Error(err);
+    // Carrying the status lets exitCodeForError distinguish "sign in again"
+    // (401/403 → 2) from "the service is down" (5xx → 4).
+    throw new ApiError(err, res.status);
   }
   return data as T;
 }
 
 export async function ideHealth(): Promise<{ ok: boolean; surface?: string }> {
   const base = await baseUrl();
-  const res = await fetch(`${base}/ide/v1/health`);
+  const res = await request(`${base}/ide/v1/health`);
   return readJson(res);
 }
 
@@ -92,6 +116,20 @@ export async function ideMe(
     query: localRepoKey ? { local_repo_key: localRepoKey } : undefined,
   });
   return readJson(res);
+}
+
+/** POST /ide/v1/projects — register a project scaffolded locally (C3.6). */
+export async function createProject(
+  token: string,
+  body: {
+    name: string;
+    surfaceOrigin?: 'cli' | 'ide';
+    stackConfig?: Record<string, unknown>;
+  },
+): Promise<IdeProject> {
+  const res = await ideFetch('/ide/v1/projects', { method: 'POST', token, body });
+  const data = await readJson<{ project: IdeProject }>(res);
+  return data.project;
 }
 
 export async function listMyProjects(token: string): Promise<IdeProject[]> {

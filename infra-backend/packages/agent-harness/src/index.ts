@@ -4,6 +4,8 @@ export {
   embedText,
   getNovaModelId,
   getNovaCanvasModelId,
+  getNovaReelModelId,
+  getBedrockReelRegion,
   getBedrockRegion,
   formatBedrockModelErrorForLogs,
   formatBedrockErrorForUser,
@@ -17,18 +19,69 @@ export {
   type LoopMode,
   type CreativeLimits,
   defaultCreativeLimits,
+  IMAGE_GEN_DAILY_LIMIT,
+  IMAGE_GEN_PAID_CREDIT_COST,
 } from './loop.js';
 export {
+  creativeMetric,
+  CREATIVE_METRIC_NAMESPACE,
+  type CreativeMetricName,
+} from './metrics.js';
+export {
+  generateCreativeBrief,
+  generateFlyerBrief,
+  generateVideoBrief,
+  getNovaProModelId,
+  type CreativeBrief,
+  type FlyerBrief,
+  type VideoBrief,
+  type VideoShotBrief,
+} from './creative-brief.js';
+export {
   invokeRenderPptx,
+  invokeRenderFlyer,
+  invokeComposeVideo,
   invokeRunSkillScript,
   type CreativeRenderResult,
   type SkillScriptResult,
 } from './creative-client.js';
 export {
-  generateCreativeBrief,
-  getNovaProModelId,
-  type CreativeBrief,
-} from './creative-brief.js';
+  startMultiShotAutomated,
+  startMultiShotManual,
+  getReelStatus,
+  type ReelShot,
+  type StartReelResult,
+  type ReelStatus,
+} from './video-reel.js';
+export { generateCanvasImage, type GeneratedImage } from './image-gen.js';
+export {
+  embedAndStoreCreativeAsset,
+  embedAndStoreVideoJob,
+  recallCreativeAssets,
+  saveCreativeToProjectMemory,
+  creativeEmbedText,
+  type CreativeRecallHit,
+} from './creative-memory.js';
+export {
+  moderateCreativeCopy,
+  moderateCreativeCopyRules,
+  type ModerationVerdict,
+} from './creative-moderation.js';
+export {
+  embedAndStoreWorkflowRun,
+  recallWorkflowRuns,
+  workflowEmbedText,
+  type WorkflowRecallHit,
+} from './workflow-memory.js';
+export {
+  getMcpConfigFromEnv,
+  getSharedMcpClient,
+  CockroachMcpClient,
+  isMcpWriteTool,
+  DEFAULT_MCP_URL,
+  type McpConfig,
+  type McpToolInfo,
+} from './mcp.js';
 export {
   listWebSkillMetas,
   loadWebSkill,

@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>{{brand}} — {{headline}}</title>
+  <style>
+    @page { size: A4; margin: 0; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 210mm; height: 297mm; }
+    body {
+      font-family: "Bricolage Grotesque", "Source Sans 3", Calibri, sans-serif;
+      background: {{bg}};
+      color: {{fg}};
+    }
+    .wrap {
+      height: 100%;
+      display: grid;
+      grid-template-rows: 1.15fr 0.85fr;
+    }
+    .visual {
+      background:
+        linear-gradient(135deg, {{panel}} 0%, {{bg}} 70%),
+        radial-gradient(circle at 70% 40%, {{accent}}33, transparent 55%);
+      position: relative;
+      padding: 16mm;
+    }
+    .visual .brand {
+      font-size: 13pt; font-weight: 800; letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+    .visual .date {
+      position: absolute; right: 16mm; top: 16mm;
+      font-size: 11pt; color: {{steel}}; font-weight: 600;
+      letter-spacing: 0.08em; text-transform: uppercase;
+    }
+    .copy {
+      padding: 14mm 16mm 16mm;
+      background: {{panel}};
+      border-top: 1.2mm solid {{accent}};
+      display: flex; flex-direction: column;
+    }
+    .eyebrow {
+      font-size: 10pt; letter-spacing: 0.16em; text-transform: uppercase;
+      color: {{steel}}; font-weight: 600;
+    }
+    .headline {
+      margin-top: 5mm; font-size: 34pt; line-height: 1.08; font-weight: 800;
+    }
+    .support {
+      margin-top: 6mm; font-size: 13pt; line-height: 1.45; color: {{mist}};
+      max-width: 150mm;
+    }
+    .cta {
+      margin-top: auto;
+      display: inline-block; width: fit-content;
+      background: {{accent}}; color: {{bg}};
+      font-weight: 800; font-size: 12pt;
+      padding: 4mm 8mm; border-radius: 2mm;
+    }
+    .meta { margin-top: 5mm; font-size: 10pt; color: {{mist}}; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="visual">
+      <div class="brand">{{brand}}</div>
+      <div class="date">{{meta}}</div>
+    </section>
+    <section class="copy">
+      <div class="eyebrow">{{eyebrow}}</div>
+      <h1 class="headline">{{headline}}</h1>
+      <p class="support">{{support}}</p>
+      <a class="cta" href="#">{{cta}}</a>
+      <p class="meta">{{location}}</p>
+    </section>
+  </div>
+</body>
+</html>

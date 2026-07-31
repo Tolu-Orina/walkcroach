@@ -12,6 +12,7 @@ import { AppsHubPage } from './AppsHubPage';
 import { AuthGithubCallbackPage } from './AuthGithubCallbackPage';
 import { ConnectChromePage } from './auth/ConnectChromePage';
 import { ConnectIdePage } from './auth/ConnectIdePage';
+import { ConnectCliPage } from './auth/ConnectCliPage';
 import { ForgotPasswordPage } from './auth/ForgotPasswordPage';
 import { ResetPasswordPage } from './auth/ResetPasswordPage';
 import { SignInPage } from './auth/SignInPage';
@@ -29,6 +30,8 @@ import { ProjectChatPage } from './ProjectChatPage';
 import { ProjectHomePage } from './ProjectHomePage';
 import { ProtectedRoute } from './ProtectedRoute';
 import { SettingsPage } from './SettingsPage';
+import { ConnectionsPage } from './ConnectionsPage';
+import { ConnectionsCallbackPage } from './ConnectionsCallbackPage';
 import { WelcomePage } from './WelcomePage';
 
 function LegacyProjectRedirect() {
@@ -165,6 +168,7 @@ export function AppRoutes() {
       <Route path="/signin" element={<SignInPage />} />
       <Route path="/signup" element={<SignUpPage />} />
       <Route path="/connect/ide" element={<ConnectIdePage />} />
+      <Route path="/connect/cli" element={<ConnectCliPage />} />
       <Route path="/connect/chrome" element={<ConnectChromePage />} />
       <Route path="/verify" element={<VerifyEmailPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
@@ -200,6 +204,11 @@ export function AppRoutes() {
         <Route path="apps" element={<AppsHubPage />} />
         <Route path="builder" element={<BuilderLaunchPage />} />
         <Route path="settings" element={<SettingsPage />} />
+        <Route path="settings/connections" element={<ConnectionsPage />} />
+        <Route
+          path="settings/connections/callback"
+          element={<ConnectionsCallbackPage />}
+        />
       </Route>
 
       {/* Legacy redirects */}

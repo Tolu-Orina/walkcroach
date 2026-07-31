@@ -13,7 +13,7 @@ import {
   handleMemoryRecall,
   handleUpdateMemoryEntry,
 } from './memory.js';
-import { handleListMyProjects, handleMe } from './me.js';
+import { handleCreateProject, handleListMyProjects, handleMe } from './me.js';
 import {
   extractBearer,
   handleCreateSessionCode,
@@ -68,6 +68,9 @@ export async function handleIdeRest(req: HttpRequest) {
     return handleCreateSessionCode(auth, req.body, bearer);
   }
 
+  if (method === 'POST' && /\/ide\/v1\/projects\/?$/.test(path)) {
+    return handleCreateProject(auth, req.body);
+  }
   if (method === 'GET' && /\/ide\/v1\/me\/projects\/?$/.test(path)) {
     return handleListMyProjects(auth);
   }

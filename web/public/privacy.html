@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WalkCroach Web — Privacy Policy</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #1a1f1c;
+        --muted: #5c675f;
+        --bg: #f3f6f2;
+        --card: #ffffff;
+        --accent: #2f6b4f;
+        --line: #d5ddd6;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: 'Segoe UI', Georgia, 'Times New Roman', serif;
+        background:
+          radial-gradient(ellipse 80% 50% at 10% -10%, #dce8df 0%, transparent 55%),
+          radial-gradient(ellipse 60% 40% at 100% 0%, #e8efe6 0%, transparent 50%),
+          var(--bg);
+        color: var(--ink);
+        line-height: 1.55;
+      }
+      main {
+        max-width: 42rem;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      h1 {
+        font-size: 1.85rem;
+        letter-spacing: -0.02em;
+        margin: 0 0 0.35rem;
+      }
+      .meta {
+        color: var(--muted);
+        font-size: 0.95rem;
+        margin-bottom: 2rem;
+      }
+      h2 {
+        font-size: 1.15rem;
+        margin: 1.75rem 0 0.5rem;
+      }
+      p,
+      li {
+        font-size: 1rem;
+        color: var(--ink);
+      }
+      ul {
+        padding-left: 1.2rem;
+      }
+      a {
+        color: var(--accent);
+      }
+      .box {
+        background: var(--card);
+        border: 1px solid var(--line);
+        padding: 1rem 1.1rem;
+        margin: 1rem 0;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>WalkCroach Web Privacy Policy</h1>
+      <p class="meta">
+        Effective date: 30 July 2026 · Product: WalkCroach Web (app / Chat / Builder)<br />
+        Publisher site:
+        <a href="https://walkcroach.conquerorfoundation.com"
+          >https://walkcroach.conquerorfoundation.com</a
+        >
+        · Chrome extension policy:
+        <a href="/chrome-privacy.html">chrome-privacy.html</a>
+      </p>
+
+      <div class="box">
+        <p>
+          WalkCroach Web is an <strong>SME builder and creative studio</strong>. You chat,
+          build apps, generate slides/flyers/images/short video, and optionally connect
+          third-party accounts. We process what you submit to provide those features —
+          not to scrape your business by default.
+        </p>
+      </div>
+
+      <h2>1. What we collect</h2>
+      <ul>
+        <li>Account identifiers (Cognito subject, email when signed in)</li>
+        <li>Chat messages, attachments you upload, project files, and memory you save</li>
+        <li>
+          Creative artefacts you generate (briefs, decks, flyers, stills, ≤30s video) and
+          related job metadata (status, credits charged, quota counters)
+        </li>
+        <li>Usage ledger: credit debits, plan entitlement, Stripe customer id when billing</li>
+        <li>
+          Connector OAuth tokens for accounts you connect (Google, Slack, Stripe Connect,
+          HubSpot) — stored in AWS Secrets Manager, not returned to the browser
+        </li>
+        <li>Operational logs and product metrics (feature counts, latency, error codes)</li>
+      </ul>
+
+      <h2>2. How we use AI models</h2>
+      <p>
+        Inference runs on <strong>Amazon Bedrock</strong> (Amazon Nova 2 Lite / Pro, Nova
+        Canvas, Nova Reel) and related AWS services (e.g. Polly for video voiceover).
+        Prompts and outputs for creatives may pass through Bedrock Guardrails. We do not
+        sell your prompts to train third-party foundation models.
+      </p>
+
+      <h2>3. Hard caps &amp; billing</h2>
+      <ul>
+        <li>Paid plan (~$20/mo) unlocks creatives and connector writes</li>
+        <li>Images: ≤3 / owner / rolling 24 hours (hard cap, even when paid)</li>
+        <li>Video: ≤1 × ≤30s / owner / rolling 72 hours (hard cap)</li>
+        <li>Payments: Stripe Checkout and Customer Portal; webhooks update entitlements</li>
+      </ul>
+
+      <h2>4. Connectors</h2>
+      <p>
+        Connecting Gmail, Calendar, Sheets, Slack, Stripe, or HubSpot is opt-in. Writes
+        use propose → confirm → execute. Disconnecting deletes the stored OAuth token.
+        Workflow run records keep action outcomes for audit, not your credentials.
+      </p>
+
+      <h2>5. Storage &amp; retention</h2>
+      <ul>
+        <li>Primary system of record: CockroachDB (never-delete / superseded_by patterns)</li>
+        <li>Artefacts (images, decks, video): object storage with short-lived download URLs</li>
+        <li>
+          Account deletion requests:
+          <a href="mailto:privacy@walkcroach.com">privacy@walkcroach.com</a>
+        </li>
+      </ul>
+
+      <h2>6. What we do not claim</h2>
+      <ul>
+        <li>We do not claim unlimited image or video generation</li>
+        <li>We do not claim Canva Autofill or non-Nova creative vendors in-product</li>
+        <li>Free tier does not include Pro orchestration, Canvas, or Reel</li>
+        <li>Failed video jobs free the 72h slot for retry; credits already debited are not auto-refunded</li>
+      </ul>
+
+      <h2>7. Children</h2>
+      <p>
+        WalkCroach Web is intended for business users. It is not directed at children under
+        13 (or the equivalent age in your jurisdiction).
+      </p>
+
+      <h2>8. Contact</h2>
+      <p>
+        Privacy questions:
+        <a href="mailto:privacy@walkcroach.com">privacy@walkcroach.com</a>
+      </p>
+    </main>
+  </body>
+</html>

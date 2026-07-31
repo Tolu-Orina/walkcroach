@@ -5,7 +5,7 @@ Progressive Agent Skills for WalkCroach Web Modules — **instructions + assets 
 ## Read first
 
 - [NOTICE.md](./NOTICE.md) — why scripts matter, Apache vs proprietary split  
-- [docs/walkcroach-web-modules-imp-plan.md](../../docs/walkcroach-web-modules-imp-plan.md) — §2 / skills-as-code  
+- [docs/walkcroach-master-doc.md](../../docs/walkcroach-master-doc.md) — ecosystem status (skills live under `skills/web/`)  
 
 ## Layout
 

@@ -60,12 +60,37 @@ Override in Settings only if you are targeting a non-prod environment.
 | Tools disabled | Trust the workspace folder |
 | MCP errors | Re-run Configure CockroachDB |
 
-## After Open VSX enrollment
+## Publishing to Open VSX
+
+The path is wired, not just written down (§7D):
+
+| Step | Where |
+|---|---|
+| Verify the listing metadata and the built bundle | `npm run check:publishable` |
+| Build, size-check, verify and package | `npm run package:vsix` |
+| Publish | tag `ide-v<version>` → `.github/workflows/publish-ide.yml` |
+
+`check:publishable` fails closed on a missing marketplace field, a placeholder
+icon, a README too short to be a listing, an unbuilt bundle, a non-production
+`apiBaseUrl` default, or a `package:vsix` that lost `--no-dependencies`.
+
+**Before the first publish**, one manual step remains — it needs a human with
+the account:
+
+1. Enrol the `walkcroach` publisher at <https://open-vsx.org> and sign the
+   publisher agreement.
+2. Create an access token, and store it as `OVSX_PAT` in the `ovsx-publish`
+   GitHub environment.
+
+Then:
 
 ```bash
 cd ide
-npm run package:vsix
-npx ovsx publish walkcroach-ide.vsix -p "$OVSX_PAT"
+npm version patch          # or minor/major
+git tag ide-v$(node -p "require('./package.json').version")
+git push --tags
 ```
 
-Users can then install from the Open VSX / Cursor marketplace under publisher `walkcroach`.
+Users can then install from the Open VSX / Cursor marketplace under publisher
+`walkcroach`. Locally, `npm run publish:ovsx` does the same with a token in the
+environment.

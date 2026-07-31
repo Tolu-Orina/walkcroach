@@ -100,9 +100,19 @@ export type AgentEvent =
     }
   | { type: 'image_credit_required'; credits: number; prompt: string }
   | {
+      type: 'upgrade_required';
+      reason:
+        | 'paid_plan_required'
+        | 'insufficient_credits'
+        | 'image_quota_exceeded'
+        | 'video_quota_exceeded';
+      message: string;
+      feature?: string;
+    }
+  | {
       type: 'creative_brief_ready';
       assetId: string;
-      kind: 'slide_deck';
+      kind: 'slide_deck' | 'flyer';
       brief: Record<string, unknown>;
       credits: number;
       estimatedImages: number;
@@ -111,15 +121,52 @@ export type AgentEvent =
       stub?: boolean;
     }
   | {
+      type: 'video_brief_ready';
+      jobId: string;
+      brief: Record<string, unknown>;
+      credits: number;
+      estimatedImages: number;
+      remainingImages: number;
+      imageDailyLimit: number;
+      remainingVideo: number;
+      videoLimit: number;
+      videoResetAt?: string;
+      stub?: boolean;
+    }
+  | {
+      type: 'video_job_updated';
+      jobId: string;
+      status: string;
+      durationSec?: number;
+      aspect?: string;
+      creditsCharged?: number;
+      downloadUrl?: string | null;
+      error?: string;
+    }
+  | {
       type: 'creative_asset_ready';
       assetId: string;
-      kind: 'slide_deck';
+      kind: 'slide_deck' | 'flyer';
       downloadName: string;
       s3Key: string;
       previewS3Key?: string | null;
       previewDataUrl?: string;
-      slideCount: number;
+      slideCount?: number;
       creditsCharged: number;
+    }
+  | {
+      type: 'connector_action_proposed';
+      runId: string;
+      action: string;
+      title: string;
+      consequence: string;
+      write: boolean;
+      /** Cannot be taken back once executed. A strict subset of `write`. */
+      irreversible: boolean;
+      weight: number;
+      rows: Array<{ label: string; value: string }>;
+      needsConnection?: string;
+      connectUrl?: string;
     }
   | { type: 'checkpoint_created'; checkpointId: string; summary: string }
   | { type: 'warning'; message: string }
@@ -179,5 +226,21 @@ export type ChatMessage = {
     creditsCharged: number;
     previewUrl?: string | null;
     downloadUrl?: string | null;
+  };
+  /** Finished flyer artefact. */
+  flyer?: {
+    assetId: string;
+    downloadName: string;
+    creditsCharged: number;
+    previewUrl?: string | null;
+    downloadUrl?: string | null;
+  };
+  /** Async video job card. */
+  videoJob?: {
+    jobId: string;
+    status: string;
+    durationSec?: number;
+    aspect?: string;
+    creditsCharged?: number;
   };
 };

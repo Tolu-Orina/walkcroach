@@ -9,10 +9,11 @@ type DeckAsset = {
 
 type Props = {
   asset: DeckAsset;
+  onSaveMemory?: () => void;
 };
 
-/** Inline artefact card for a finished slide deck (Phase B5). */
-export function CreativeDeckCard({ asset }: Props) {
+/** Inline artefact card for a finished slide deck (Phase B5 / E1 save). */
+export function CreativeDeckCard({ asset, onSaveMemory }: Props) {
   return (
     <div className="mt-3 max-w-lg overflow-hidden rounded-[var(--radius-surface)] border border-line bg-raised/60">
       {asset.previewUrl ? (
@@ -35,15 +36,26 @@ export function CreativeDeckCard({ asset }: Props) {
             {asset.slideCount} slides · {asset.creditsCharged} credits
           </p>
         </div>
-        {asset.downloadUrl && (
-          <a
-            href={asset.downloadUrl}
-            download={asset.downloadName}
-            className="interactive shrink-0 rounded-[var(--radius-control)] border border-signal/40 bg-signal/15 px-3 py-1.5 text-[12px] font-semibold text-signal hover:bg-signal/25"
-          >
-            Download
-          </a>
-        )}
+        <div className="flex shrink-0 flex-wrap gap-2">
+          {onSaveMemory && (
+            <button
+              type="button"
+              onClick={onSaveMemory}
+              className="interactive rounded-[var(--radius-control)] border border-line px-3 py-1.5 text-[12px] font-semibold text-mist hover:border-signal/40 hover:text-signal"
+            >
+              Save to memory
+            </button>
+          )}
+          {asset.downloadUrl && (
+            <a
+              href={asset.downloadUrl}
+              download={asset.downloadName}
+              className="interactive rounded-[var(--radius-control)] border border-signal/40 bg-signal/15 px-3 py-1.5 text-[12px] font-semibold text-signal hover:bg-signal/25"
+            >
+              Download
+            </a>
+          )}
+        </div>
       </div>
     </div>
   );

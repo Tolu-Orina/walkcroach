@@ -1,0 +1,98 @@
+name: Publish CLI
+
+# Publishing lives here rather than in CodeBuild for one concrete reason:
+# npm's trusted publishing accepts OIDC identities from GitHub Actions and
+# GitLab CI, and CodeBuild is not among them. The choice is between a thin
+# workflow that publishes with a short-lived OIDC token, or a long-lived npm
+# automation token sitting in Secrets Manager. This is the first.
+#
+# CodeBuild still builds and tests (cli/buildspec.yml). This job repeats the
+# gates rather than trusting an artifact it did not produce — publishing is the
+# one step where "probably still fine" is not good enough.
+#
+# Setup, once, on npmjs.com → @walkcroach/cli → Settings → Trusted publisher:
+#   Organization/user: Tolu-Orina
+#   Repository:        walkcroach
+#   Workflow:          publish-cli.yml
+#   Environment:       npm-publish
+# Requires npm CLI >= 11.5.1, which is why the version is pinned below.
+
+on:
+  push:
+    tags:
+      - 'cli-v*'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Pack and verify without publishing'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    permissions:
+      # The OIDC identity npm exchanges for a short-lived publish credential.
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+
+      # Trusted publishing and automatic provenance need a recent npm; the
+      # one bundled with Node 20 predates both.
+      - name: Use npm >= 11.5.1
+        run: npm install -g npm@latest
+
+      - name: Build the private packages the CLI bundles
+        run: |
+          cd packages/agent-engine
+          npm ci
+          npm run build
+          cd ../templates
+          npm ci
+          npm run build
+
+      - name: Install, typecheck, test
+        working-directory: cli
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+          npm run build
+
+      - name: Verify the packaged artifact
+        working-directory: cli
+        run: npm run test:packaged
+
+      - name: Check the tag matches package.json
+        if: startsWith(github.ref, 'refs/tags/')
+        working-directory: cli
+        run: |
+          set -eu
+          TAG="${GITHUB_REF#refs/tags/cli-v}"
+          PKG="$(node -p "require('./package.json').version")"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "Tag cli-v$TAG does not match package.json $PKG" >&2
+            exit 1
+          fi
+
+      - name: Publish
+        if: startsWith(github.ref, 'refs/tags/') && inputs.dry_run != true
+        working-directory: cli
+        # No NODE_AUTH_TOKEN: trusted publishing supplies a short-lived
+        # credential via OIDC, and emits provenance attestations by default.
+        run: npm publish
+
+      - name: Dry run
+        if: inputs.dry_run == true
+        working-directory: cli
+        run: npm publish --dry-run

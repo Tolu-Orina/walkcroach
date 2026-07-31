@@ -1,5 +1,197 @@
 # Changelog
 
+## 0.5.3 — 2026-07-30
+
+Phase G — hardening. The privacy policy turned out to contain a direct
+contradiction of shipped behaviour, which is the most serious finding of this pass.
+
+**The privacy policy denied something the extension does (G3)**
+
+Under "We do not collect", the published policy listed *"tab capture streams"* —
+while the extension calls `chrome.tabs.captureVisibleTab` for opt-in screenshots.
+A reviewer comparing the two would have found a flat contradiction in the document
+Chrome Web Store review reads most closely.
+
+- Screenshots are now declared: visible area only, opt-in per save, shown before
+  storage, never the full page or another tab. Retention and deletion documented,
+  including the 90-day expiry.
+- Connector data declared: what a confirmed action reads or writes, and that
+  WalkCroach does not browse a mailbox, calendar or account in the background.
+- §4 rewritten. It described the `activeTab` model retired in v0.2.0 and omitted
+  `identity` and `contextMenus`. It also said WalkCroach "does not request
+  site-wide host permissions (`https://*/*`)" — the extension *declares* exactly
+  those as optional. Now explains per-site permission properly, and that the
+  signed site-profile bundle is data, never executed.
+
+**The message router had no coverage, and was not even measured (G1)**
+
+`background.ts` is a WXT entrypoint that calls `defineBackground` at module scope,
+so it cannot be imported from a test — it sat outside the coverage report
+entirely. It is also the security boundary: every path by which page content, a
+screenshot or a selection leaves the page.
+
+- Routing logic extracted to `lib/message-router.ts` with injected dependencies;
+  `background.ts` is now the thin adapter binding real `chrome.*` calls to it.
+- **30 tests**, pinning that nothing is read before access is checked. Including
+  the deliberate asymmetry: `CAPTURE_SCREENSHOT` is gated on `ready` and nothing
+  weaker, where extraction still makes one best-effort attempt — an image of the
+  screen shows whatever else is on it.
+- Also covers that the cache is never consulted for an ungranted origin, which
+  would return text for a site whose permission was withdrawn.
+- Router 0% → 84%. Chrome overall 52.7% → **63.7%**.
+
+**Performance budgets measured, not assumed (G4)**
+
+New `tests/e2e/chrome/performance.spec.ts` measures the plan's two NFRs in real
+Chrome against the real build:
+
+| Budget | Measured |
+|---|---|
+| Panel interactive < 300ms | **69ms** warm median, 199ms cold |
+| Extract < 1s P95 | **117ms** P95, 13ms median |
+
+Both comfortably inside. CI slack multiplies the budget rather than weakening it,
+so a genuine regression still fails on a loaded runner.
+
+**Threat model (G5)**
+
+`docs/walkcroach-chrome-threat-model.md`. Nine threats, led by the one the plan
+names — page-content prompt injection into a connector write. Each states the
+attack, what stops it, **and what does not**: nothing prevents the model from
+proposing the attack, and a user who reads "To: finance@attacker.example" and
+confirms anyway has been socially engineered. Every mitigation cites the test that
+holds it, and all 14 citations were verified to resolve to real, passing tests.
+
+**Accessibility fix found by writing the tests**
+
+`NavRail` gained 9 tests for its tablist and roving tabindex. `ConnectorsPanel`
+gained 9 — and one of them caught a real flaw: while a disconnect was in flight
+the visible text said "Removing…" but the accessible name still said "Disconnect
+Gmail", so the one user who cannot see the button change was told nothing was
+happening. The label now tracks the state, with `aria-busy`.
+
+**Totals:** 311 chrome unit/component, 25 manifest/packet, 9 real-Chrome e2e.
+
+## 0.5.2 — 2026-07-30
+
+Phase F — store packet, enterprise, observability. The theme of this pass is that
+the shipping artifact had drifted away from everything written about it.
+
+**Store packet was describing a different product (F1)**
+
+- `SUBMISSION_CHECKLIST.md` still sat at v0.1.4, documenting a CORS hotfix, four
+  releases and an entire permission model out of date. Rewritten for 0.5.1 with
+  the real gates: automated (typecheck, 263 unit, 18 manifest, 7 real-Chrome e2e),
+  the two-step manual gate, and the backend deploys that must land first.
+- `STORE_LISTING.md` still told reviewers WalkCroach "only reads the page you act
+  on" after you "open it from the toolbar" — the `activeTab` model retired in
+  v0.2.0. It also pointed at a "Trust tab" that has been called Account since the
+  redesign. Rewritten to describe per-site permission, selection capture, price
+  history and cited recall.
+- Added a **claim-gating table**: connectors, remote profiles and presigned
+  screenshot upload are complete in the package but not user-reachable, so they
+  must not appear in the listing yet. The plan's rule is that store claims lag
+  reality.
+- **Six new tests** assert the packet against the built artifact — version parity,
+  every declared permission carrying a justification, no retired access language,
+  no connector claims while inert, and one screenshot per documented scene. This
+  drifted twice; it should not be a human's job to notice a third time.
+
+**Screenshots now come from the real extension (F2)**
+
+- `capture.mjs` rendered `_fixture.html`, a hand-written mock of the panel that
+  had already drifted from the shipped UI. Deleted. It now loads the actual
+  `.output/chrome-mv3` build in Chromium and photographs the real panel, then
+  composites it onto a branded 1280×800 backdrop with a caption.
+- Only the BFF and `chrome.runtime.sendMessage` are stubbed, because captures
+  cannot depend on a deployed backend and Chrome will not grant a site permission
+  to an automated run. Everything visual is shipped code.
+- Five scenes in reviewer-reading order: the page surface, the per-site grant, the
+  confirm card, cited recall, and Account. The connectors list is stubbed empty on
+  purpose. Exits non-zero if a capture comes out suspiciously small, which is what
+  an empty panel looks like when the stubs drift.
+
+**Enterprise policy had two real defects (F4)**
+
+- It set `ExtensionSettings["*"].installation_mode = "blocked"` — an org-wide
+  default that would have disabled **every other extension** in the fleet of any
+  administrator who pasted it.
+- It set `runtime_allowed_hosts` to the API and website domains. That key is an
+  allowlist of hosts the extension may *interact with*, so this would have stopped
+  WalkCroach reading any page a user allowed — the product would have appeared
+  broken with no obvious cause.
+- Both fixed, with `enterprise/README.md` explaining the corrections, how to apply
+  the policy per platform, and why `runtime_blocked_hosts` is the safer instrument
+  for bounding access.
+
+**Monitoring (F5)**
+
+- Metric table verified against the names actually emitted by the Lambda rather
+  than written from intent. Added extraction quality, price-change, screenshot
+  upload-path, and connector lifecycle metrics.
+- New section for signals that should never fire —
+  `chrome.screenshot.key_mismatch`, `chrome.connector.unknown_action`, redirect
+  rejections — each with what it means if it does.
+
+**What a person still has to do (F3, F6)**
+
+`store/RELEASE_RUNBOOK.md` states it plainly: uploading to the Chrome Web Store
+needs a developer account and interactive dashboard use, and cannot be scripted;
+the Platform Ops Portal from master §9 does not exist, so there is nothing to wire
+Chrome into. The runbook gives the correct ordering — deploy backend, run gates,
+upload, then propagate the assigned extension ID to the enterprise policy and the
+bucket CORS — plus prepared answers for the likely review questions.
+
+## 0.5.1 — 2026-07-30
+
+Phase E completion pass, after reviewing the Web-side connector work.
+
+**Credit bypass fixed (E7) — the significant one**
+
+The Web execute path gated entitlement, asserted credits and debited the ledger.
+The Chrome path did none of it: it read the balance for the meter but never
+charged against it, so connector actions run from the side panel were free. The
+"shared pool" was in practice a Web-only limit, on the same `owner_id`.
+
+- New `@walkcroach/ledger` package holds the ledger primitives, extracted from
+  `lambda-agent/handlers/billing.ts`. Stripe webhooks, checkout and the portal
+  stay in the agent Lambda — they are Web-specific and have no business being
+  importable by an extension backend. `billing.ts` re-exports, so its public
+  surface and its 37 tests are unchanged.
+- Chrome's execute now mirrors Web exactly: paid-plan gate on writes, credit
+  assertion before executing, atomic debit after, and the same soft-failure
+  response when a debit fails post-execution — an email cannot be un-sent to
+  balance the books.
+
+**Actions became memory (E8)**
+
+- Chrome embeds executed runs via `embedAndStoreWorkflowRun`, matching Web.
+- Chrome recall now searches `workflow_runs` alongside `page_captures` in the
+  same embedding space, so "what did we send last week" works in the panel and
+  not only in Web Chat. Scoped to `executed` runs: a declined proposal is
+  auditable in history but did not happen, and recalling it as if it had would
+  be misleading. Runs render in the existing sources list as `action` — from the
+  user's point of view the saved quote and the email about it are one kind of
+  memory.
+- The recall system prompt had reverted to citing by title/url, contradicting the
+  numbered `[n]` markers the sources UI renders. Restored, and extended with
+  `[A1]` for actions.
+
+**Review findings on the Web side**
+
+- `ConnectionsPage.tsx` imported `ConnectorProviderRow`, which does not exist —
+  the Web project did not compile. Fixed to `ConnectorProviderView`.
+- The OAuth start/callback had **no test coverage**, despite being the route that
+  turns an authorization code into stored credentials. Added 14 tests covering
+  single-use state, the owner-mismatch check that prevents session fixation, that
+  state is stored hashed, that the PKCE verifier never reaches the client, and
+  that tokens appear in neither the connectors row nor the response.
+- Two pre-existing `theme.test.ts` failures: the tests asserted a hard dark
+  default while `resolveTheme` follows `prefers-color-scheme`, and never stubbed
+  `matchMedia`. Updated to test the shipping behaviour explicitly in both
+  directions. **Flagged**: if Web is meant to be dark-first with light as opt-in,
+  the implementation is what needs changing, not the test.
+
 ## 0.5.0 — 2026-07-30
 
 Phase E — workflow connectors. Built as a **cross-surface platform**, not a Chrome

@@ -34,9 +34,11 @@ function fakeDb(initial?: { plan?: string; count?: number; windowAge?: 'fresh' |
       // usage_counters atomic update
       if (/UPDATE usage_counters/.test(sql)) {
         const limit = Number(params?.[2]);
+        const amount = Number(params?.[3] ?? 1);
         const expired = state.windowAge === 'expired';
-        if (!expired && state.count >= limit) return { rows: [] };
-        state.count = expired ? 1 : state.count + 1;
+        const base = expired ? 0 : state.count;
+        if (base + amount > limit) return { rows: [] };
+        state.count = base + amount;
         state.windowAge = 'fresh';
         return {
           rows: [
@@ -69,9 +71,11 @@ function fakeDb(initial?: { plan?: string; count?: number; windowAge?: 'fresh' |
 describe('creative entitlements + hard quotas (Phase A)', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('extends CREDIT_COSTS with generate_image and render_pptx', () => {
+  it('extends CREDIT_COSTS with generate_image, render_pptx, render_flyer, start_video_job', () => {
     expect(CREDIT_COSTS.generate_image).toBe(5);
     expect(CREDIT_COSTS.render_pptx).toBe(20);
+    expect(CREDIT_COSTS.render_flyer).toBe(10);
+    expect(CREDIT_COSTS.start_video_job).toBe(270);
   });
 
   it('defaults missing entitlement row to free', async () => {

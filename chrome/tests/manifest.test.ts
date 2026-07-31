@@ -166,3 +166,96 @@ describe('release hygiene', () => {
     expect(manifest.version).toBe(pkg.version);
   });
 });
+
+/**
+ * Store packet consistency (Phase F1).
+ *
+ * The submission checklist and listing copy have gone stale against the shipped
+ * artifact twice: the checklist sat at v0.1.4 describing a CORS hotfix while the
+ * manifest moved to 0.5.x, and the listing still described the `activeTab`-only
+ * access model months after it was replaced. Both are things a reviewer reads
+ * closely, so they are asserted here rather than trusted to a human diff.
+ */
+describe('store packet matches the shipped artifact', () => {
+  const storeDir = resolve(import.meta.dirname, '..', 'store');
+  const read = (name: string) =>
+    readFileSync(resolve(storeDir, name), 'utf-8');
+
+  /**
+   * Just the text that gets pasted into the dashboard.
+   *
+   * The file also carries an editorial preamble that *quotes* the retired copy to
+   * explain what changed, plus a screenshot table. Scanning the whole file would
+   * flag those, so the assertions below read only the description body.
+   */
+  const listingCopy = () => {
+    const listing = read('STORE_LISTING.md');
+    const start = listing.indexOf('## Detailed description');
+    const end = listing.indexOf('## Category');
+    expect(start, 'listing has no description section').toBeGreaterThan(-1);
+    expect(end, 'listing has no category section').toBeGreaterThan(start);
+    return listing.slice(start, end);
+  };
+
+  it('the checklist names the version being shipped', () => {
+    expect(read('SUBMISSION_CHECKLIST.md')).toContain(manifest.version);
+  });
+
+  it('the listing names the version being shipped', () => {
+    expect(read('STORE_LISTING.md')).toContain(manifest.version);
+  });
+
+  it('every declared permission has a written justification', () => {
+    // A permission with no dashboard justification is a review rejection.
+    const justifications = read('PERMISSION_JUSTIFICATIONS.md');
+    for (const permission of manifest.permissions ?? []) {
+      expect(justifications, permission).toContain(permission);
+    }
+  });
+
+  it('the listing does not describe the retired activeTab access model', () => {
+    const body = listingCopy();
+    expect(body).not.toMatch(/only reads the page you act on/i);
+    // The surface has been called Account since the redesign.
+    expect(body).not.toMatch(/Trust tab/i);
+  });
+
+  it('the listing does not claim connectors while they ship inert', () => {
+    // Providers are hidden by `configuredProviders()` until an OAuth app exists,
+    // so naming them in the listing would advertise something no installer can
+    // reach. Delete this test when SUBMISSION_CHECKLIST §1 says otherwise.
+    const body = listingCopy();
+    for (const provider of ['Gmail', 'Google Calendar', 'Slack', 'Stripe']) {
+      expect(body, provider).not.toContain(provider);
+    }
+  });
+
+  it('ships one screenshot per documented scene', () => {
+    const listing = read('STORE_LISTING.md');
+    for (const file of [
+      '01-page.png',
+      '02-grant.png',
+      '03-confirm.png',
+      '04-recall.png',
+      '05-account.png',
+    ]) {
+      expect(listing, file).toContain(file);
+      const shot = resolve(storeDir, 'screenshots', file);
+      expect(existsSync(shot), `${file} missing`).toBe(true);
+      // An empty panel capture is a few KB; a real one is ~200KB.
+      expect(readFileSync(shot).length, file).toBeGreaterThan(40_000);
+    }
+  });
+
+  it('the enterprise policy does not block other extensions', () => {
+    // An earlier sample set ExtensionSettings["*"] = blocked, which would have
+    // disabled every other extension in an administrator's fleet.
+    const policy = JSON.parse(
+      readFileSync(
+        resolve(import.meta.dirname, '..', 'enterprise', 'policies.json'),
+        'utf-8',
+      ),
+    ) as { ExtensionSettings?: Record<string, unknown> };
+    expect(Object.keys(policy.ExtensionSettings ?? {})).not.toContain('*');
+  });
+});

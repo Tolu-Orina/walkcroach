@@ -38,6 +38,7 @@ describe('catalogue integrity', () => {
   it('states an irreversible consequence for sending mail', () => {
     expect(ACTIONS['gmail.send'].consequence).toMatch(/cannot be undone/i);
     expect(ACTIONS['gmail.send'].write).toBe(true);
+    expect(ACTIONS['gmail.send'].irreversible).toBe(true);
   });
 
   it('treats a draft as a write but not as a send', () => {
@@ -45,11 +46,45 @@ describe('catalogue integrity', () => {
     expect(ACTIONS['gmail.draft'].consequence).toMatch(/nothing is sent/i);
   });
 
+  it('never badges a reversible write as irreversible', () => {
+    // The confirm cards render this flag verbatim. A draft that says
+    // "Nothing is sent." must not carry an "irreversible" badge above it —
+    // one contradiction teaches users to ignore the badge on gmail.send,
+    // which is the one place it has to land.
+    expect(ACTIONS['gmail.draft'].irreversible).toBe(false);
+    expect(ACTIONS['sheets.append_row'].irreversible).toBe(false);
+    expect(ACTIONS['hubspot.create_contact'].irreversible).toBe(false);
+  });
+
+  it('keeps irreversible a strict subset of write, and states it everywhere', () => {
+    for (const action of Object.values(ACTIONS)) {
+      // Not optional: a new action must answer this question deliberately,
+      // rather than inheriting a default that under-warns.
+      expect(typeof action.irreversible, action.id).toBe('boolean');
+      if (action.irreversible) expect(action.write, action.id).toBe(true);
+      if (!action.write) expect(action.irreversible, action.id).toBe(false);
+    }
+    expect(
+      Object.values(ACTIONS)
+        .filter((a) => a.irreversible)
+        .map((a) => a.id)
+        .sort(),
+    ).toEqual(['calendar.create_event', 'gmail.send', 'slack.post_message']);
+  });
+
   it('marks every Stripe action read-only, matching the read_only scope', () => {
     for (const action of actionsForProvider('stripe')) {
       expect(action.write, action.id).toBe(false);
     }
     expect(PROVIDERS.stripe.scopes).toEqual(['read_only']);
+  });
+
+  it('exposes Sheets and HubSpot catalogue actions (Phase F4)', () => {
+    expect(getAction('sheets.append_row')?.write).toBe(true);
+    expect(getAction('sheets.read_range')?.write).toBe(false);
+    expect(getAction('hubspot.create_contact')?.write).toBe(true);
+    expect(getAction('hubspot.list_contacts')?.write).toBe(false);
+    expect(PROVIDERS.hubspot.tier).toBe(2);
   });
 });
 

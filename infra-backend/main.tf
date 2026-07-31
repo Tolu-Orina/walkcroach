@@ -59,37 +59,41 @@ module "bedrock_guardrails" {
 module "lambda_agent" {
   source = "./modules/lambda-agent"
 
-  name_prefix               = local.name_prefix
-  environment               = var.environment
-  zip_path                  = local.lambda_zip
-  handler                   = var.lambda_handler
-  runtime                   = var.lambda_runtime
-  timeout                   = var.lambda_timeout
-  memory_mb                 = var.lambda_memory_mb
-  bedrock_region            = var.bedrock_region
-  nova_model_id             = var.nova_model_id
-  nova_canvas_model_id      = var.nova_canvas_model_id
-  nova_pro_model_id         = var.nova_pro_model_id
-  titan_embed_model_id      = var.titan_embed_model_id
-  bedrock_guardrail_id      = module.bedrock_guardrails.guardrail_id
-  bedrock_guardrail_version = module.bedrock_guardrails.guardrail_version
-  runtime_secret_arn        = module.secrets.runtime_secret_arn
-  artefacts_bucket_arn      = module.artefacts.bucket_arn
-  artefacts_bucket_name     = module.artefacts.bucket_id
-  apps_bucket_arn           = module.apps_hosting.apps_bucket_arn
-  apps_bucket_name          = module.apps_hosting.apps_bucket_id
-  apps_wildcard_domain      = module.apps_hosting.apps_wildcard_domain
-  apps_cf_domain            = module.apps_hosting.cloudfront_domain_name
-  codebuild_project         = module.apps_hosting.codebuild_project_name
-  cognito_user_pool_id      = module.cognito.user_pool_id
-  cognito_client_id         = module.cognito.client_id
-  allow_dev_auth            = var.allow_dev_auth
-  cors_allow_origin         = var.web_app_url != "" ? var.web_app_url : "*"
-  allow_github_pat          = var.allow_github_pat
-  github_ssm_prefix         = var.github_ssm_prefix
-  creative_lambda_arn       = module.lambda_creative.function_arn
-  creative_lambda_name      = module.lambda_creative.function_name
-  tags                      = local.tags
+  name_prefix                = local.name_prefix
+  environment                = var.environment
+  zip_path                   = local.lambda_zip
+  handler                    = var.lambda_handler
+  runtime                    = var.lambda_runtime
+  timeout                    = var.lambda_timeout
+  memory_mb                  = var.lambda_memory_mb
+  bedrock_region             = var.bedrock_region
+  nova_model_id              = var.nova_model_id
+  nova_canvas_model_id       = var.nova_canvas_model_id
+  nova_pro_model_id          = var.nova_pro_model_id
+  titan_embed_model_id       = var.titan_embed_model_id
+  bedrock_guardrail_id       = module.bedrock_guardrails.guardrail_id
+  bedrock_guardrail_version  = module.bedrock_guardrails.guardrail_version
+  creative_guardrail_id      = module.bedrock_guardrails.creative_guardrail_id
+  creative_guardrail_version = module.bedrock_guardrails.creative_guardrail_version
+  runtime_secret_arn         = module.secrets.runtime_secret_arn
+  artefacts_bucket_arn       = module.artefacts.bucket_arn
+  artefacts_bucket_name      = module.artefacts.bucket_id
+  apps_bucket_arn            = module.apps_hosting.apps_bucket_arn
+  apps_bucket_name           = module.apps_hosting.apps_bucket_id
+  apps_wildcard_domain       = module.apps_hosting.apps_wildcard_domain
+  apps_cf_domain             = module.apps_hosting.cloudfront_domain_name
+  codebuild_project          = module.apps_hosting.codebuild_project_name
+  cognito_user_pool_id       = module.cognito.user_pool_id
+  cognito_client_id          = module.cognito.client_id
+  allow_dev_auth             = var.allow_dev_auth
+  cors_allow_origin          = var.web_app_url != "" ? var.web_app_url : "*"
+  web_app_url                = var.web_app_url
+  allow_github_pat           = var.allow_github_pat
+  github_ssm_prefix          = var.github_ssm_prefix
+  creative_lambda_arn        = module.lambda_creative.function_arn
+  creative_lambda_name       = module.lambda_creative.function_name
+  video_state_machine_arn    = module.stepfunctions_video.state_machine_arn
+  tags                       = local.tags
 }
 
 module "lambda_creative" {
@@ -101,6 +105,16 @@ module "lambda_creative" {
   artefacts_bucket_name = module.artefacts.bucket_id
   image_uri             = var.creative_lambda_image_uri
   tags                  = local.tags
+}
+
+module "stepfunctions_video" {
+  source = "./modules/stepfunctions-video"
+
+  name_prefix = local.name_prefix
+  # Worker Lambda ARN wired when a dedicated non-streaming function is published.
+  # Empty → SFN skipped; agent uses VIDEO_STUDIO_STUB / inline compose path.
+  video_worker_lambda_arn = ""
+  tags                    = local.tags
 }
 
 module "lambda_chrome" {
@@ -121,6 +135,7 @@ module "lambda_chrome" {
   cognito_client_id    = module.cognito.client_id
   allow_dev_auth       = var.allow_dev_auth
   cors_allow_origin    = var.web_app_url != "" ? var.web_app_url : "*"
+  web_app_url          = var.web_app_url
   tags                 = local.tags
 }
 
@@ -175,4 +190,14 @@ module "ssm" {
   cognito_region       = module.cognito.region
   web_app_url          = var.web_app_url
   tags                 = local.tags
+}
+
+module "observability_creative" {
+  source = "./modules/observability-creative"
+
+  name_prefix                = local.name_prefix
+  environment                = var.environment
+  bedrock_monthly_budget_usd = var.bedrock_monthly_budget_usd
+  budget_alert_email         = var.budget_alert_email
+  tags                       = local.tags
 }

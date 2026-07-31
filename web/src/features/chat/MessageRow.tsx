@@ -1,6 +1,9 @@
 import type { ChatMessage } from '../../api/types';
+import { rememberCreative } from '../../api/client';
 import { MemoryRecallCard } from '../memory/MemoryRecallCard';
 import { CreativeDeckCard } from './CreativeDeckCard';
+import { CreativeFlyerCard } from './CreativeFlyerCard';
+import { VideoJobCard } from './VideoJobCard';
 import { MarkdownContent } from './markdown';
 
 type MessageRowProps = {
@@ -113,7 +116,43 @@ export function MessageRow({ msg, streaming, saveContext }: MessageRowProps) {
             </div>
           </div>
         )}
-        {msg.deck && <CreativeDeckCard asset={msg.deck} />}
+        {msg.deck && (
+          <CreativeDeckCard
+            asset={msg.deck}
+            onSaveMemory={
+              saveContext?.projectId
+                ? () => {
+                    void rememberCreative(msg.deck!.assetId, {
+                      projectId: saveContext.projectId!,
+                    }).catch(() => undefined);
+                  }
+                : undefined
+            }
+          />
+        )}
+        {msg.flyer && (
+          <CreativeFlyerCard
+            asset={msg.flyer}
+            onSaveMemory={
+              saveContext?.projectId
+                ? () => {
+                    void rememberCreative(msg.flyer!.assetId, {
+                      projectId: saveContext.projectId!,
+                    }).catch(() => undefined);
+                  }
+                : undefined
+            }
+          />
+        )}
+        {msg.videoJob && (
+          <VideoJobCard
+            jobId={msg.videoJob.jobId}
+            initialStatus={msg.videoJob.status}
+            durationSec={msg.videoJob.durationSec}
+            aspect={msg.videoJob.aspect}
+            creditsCharged={msg.videoJob.creditsCharged}
+          />
+        )}
       </div>
     </div>
   );

@@ -69,7 +69,7 @@
     <main>
       <h1>WalkCroach Chrome Privacy Policy</h1>
       <p class="meta">
-        Effective date: 23 July 2026 · Product: WalkCroach Chrome (browser extension)<br />
+        Effective date: 30 July 2026 · Product: WalkCroach Chrome (browser extension)<br />
         Publisher site:
         <a href="https://walkcroach.conquerorfoundation.com"
           >https://walkcroach.conquerorfoundation.com</a
@@ -92,6 +92,20 @@
         <li>Extracted main text from that page (Readability-style extract), truncated for size</li>
         <li>Optional structured fields you review and accept before save (e.g. price, candidate summary)</li>
         <li>Workspace names and saved captures you create</li>
+        <li>
+          <strong>Screenshots, only if you ask for one.</strong> When you tick
+          &ldquo;Add a screenshot&rdquo; on a save, WalkCroach captures the
+          <em>visible area</em> of the current tab, shows it to you, and stores it
+          only if you then confirm. It never captures the full scrollable page,
+          another tab, or anything you have not been shown first.
+        </li>
+        <li>
+          <strong>Connected-account data, only for actions you confirm.</strong>
+          If you connect Google Calendar, Gmail, Slack or Stripe, WalkCroach reads
+          or writes only what a specific confirmed action needs &mdash; the events in
+          a date range you asked about, the email you approved, your balance. It
+          does not browse your mailbox, calendar or account in the background.
+        </li>
         <li>Device session identifiers for try-before-sign-in, and Cognito account id when you sign in</li>
         <li>Technical logs: route name, latency, error codes, character counts — <em>not</em> full page bodies</li>
       </ul>
@@ -99,7 +113,13 @@
       <ul>
         <li>Passwords, payment card numbers, or other credentials from pages</li>
         <li>Browsing history of sites you never act on</li>
-        <li>Audio, microphone, camera, or tab capture streams</li>
+        <li>Audio, microphone, or camera</li>
+        <li>
+          Continuous or background capture of your screen. Screenshots are
+          single, still images of the visible tab, taken only when you ask for one
+          on a specific save
+        </li>
+        <li>The contents of your mailbox, calendar or Slack history</li>
         <li>Contacts, bookmarks, or downloads</li>
       </ul>
 
@@ -136,17 +156,32 @@
 
       <h2>4. Permissions and Limited Use</h2>
       <p>
-        At install, WalkCroach requests <code>storage</code>, <code>activeTab</code>,
-        <code>scripting</code>, <code>sidePanel</code>, and a
+        At install, WalkCroach requests <code>storage</code>,
+        <code>activeTab</code>, <code>scripting</code>, <code>sidePanel</code>,
+        <code>identity</code> (used only to complete sign-in to your WalkCroach
+        account &mdash; we do not read your Chrome profile identity),
+        <code>contextMenus</code>, and a
         <strong>single host permission for the WalkCroach HTTPS API</strong>
-        (our backend only—not arbitrary websites). It does
-        <strong>not</strong> request site-wide host permissions
-        (<code>https://*/*</code>, <code>http://*/*</code>, or <code>&lt;all_urls&gt;</code>)
-        and does not inject a persistent content script. After you open WalkCroach from the
-        toolbar, it may read the active page only when you summarize, ask, draft, save, or
-        insert—using Chrome’s active-tab access for that gesture.
-      </p>
-      <p>
+        (our backend only &mdash; not arbitrary websites).
+        <br /><br />
+        <strong>Page access is granted one site at a time.</strong> The extension
+        declares <code>http://*/*</code> and <code>https://*/*</code> as
+        <em>optional</em> host permissions. None of them are granted at install, and
+        no install warning about your browsing is shown. The first time you use
+        WalkCroach on a site, Chrome asks you about <em>that one site</em>. Every
+        site you have allowed is listed under <strong>Account</strong> in the side
+        panel, and withdrawing one takes effect immediately and clears anything
+        cached for it.
+        <br /><br />
+        WalkCroach declares no persistent content script. Page text is read by a
+        one-shot extraction that runs only when you click summarize, ask, draft,
+        save or insert, on a site you have allowed.
+        <br /><br />
+        <strong>Site profiles.</strong> WalkCroach may download an updated list of
+        which sites map to which shortcut. That list is signed data describing
+        match patterns and button labels; it is never executed as code, and if it
+        cannot be verified the version inside the extension is used instead.
+        <br /><br />
         <strong>Limited Use:</strong> The use of information received from Chrome APIs and from
         pages you explicitly act on will adhere to the
         <a
@@ -164,6 +199,24 @@
       <ul>
         <li>Device sessions and captures remain until you delete them or request account deletion.</li>
         <li>You can delete individual captures and workspaces from the extension.</li>
+        <li>
+          <strong>Screenshots</strong> are deleted with the capture they belong to,
+          and expire automatically 90 days after they are stored even if you keep
+          the capture.
+        </li>
+        <li>
+          <strong>Connected accounts.</strong> Access tokens are held in AWS Secrets
+          Manager, never in our database and never sent to the extension.
+          Disconnecting from the panel or from WalkCroach Web deletes the stored
+          token immediately. A record that an action was proposed, confirmed or
+          declined is kept so you can audit what was done on your behalf; it holds
+          the action and its outcome, not your credentials.
+        </li>
+        <li>
+          <strong>Cached page text</strong> inside the browser is cleared when the
+          tab navigates or closes, when you withdraw a site, and when the browser
+          session ends.
+        </li>
         <li>
           To delete an account and associated Chrome/Web data, contact
           <a href="mailto:privacy@walkcroach.com">privacy@walkcroach.com</a>.

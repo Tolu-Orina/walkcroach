@@ -16,7 +16,8 @@
     "@walkcroach/db": "*",
     "aws-jwt-verify": "^5.0.0",
     "@walkcroach/storage": "*",
-    "@walkcroach/connectors": "*"
+    "@walkcroach/connectors": "*",
+    "@walkcroach/ledger": "*"
   },
   "devDependencies": {
     "@types/aws-lambda": "^8.10.149",

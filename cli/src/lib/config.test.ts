@@ -9,6 +9,7 @@ import {
   ensureHome,
   loadConfig,
   saveConfig,
+  DEFAULT_API_BASE_URL,
   loadSecrets,
   saveSecrets,
   getSecret,
@@ -57,7 +58,10 @@ describe('ensureHome', () => {
 describe('loadConfig / saveConfig', () => {
   it('returns defaults when no config file', async () => {
     const cfg = await loadConfig();
-    expect(cfg.apiBaseUrl).toBe('http://localhost:3003');
+    // C0.2: the shipped default is the production API. It used to be
+    // localhost:3003, which only worked for someone running the BFF in this
+    // repo — a published CLI talked to nothing at all.
+    expect(cfg.apiBaseUrl).toBe(DEFAULT_API_BASE_URL);
     expect(cfg.defaultAutonomy).toBe('strict');
   });
 
@@ -72,7 +76,7 @@ describe('loadConfig / saveConfig', () => {
     await saveConfig({ cognitoClientId: 'cid-123' });
     const cfg = await loadConfig();
     expect(cfg.cognitoClientId).toBe('cid-123');
-    expect(cfg.apiBaseUrl).toBe('http://localhost:3003');
+    expect(cfg.apiBaseUrl).toBe(DEFAULT_API_BASE_URL);
   });
 });
 

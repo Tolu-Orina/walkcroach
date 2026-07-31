@@ -4,6 +4,9 @@ import { createSession, getProject } from '../api/client';
 import { BuilderIconLink } from '../features/builder/BuilderIconLink';
 import { ChatComposer } from '../features/chat/ChatComposer';
 import { CreativeConfirmCard } from '../features/chat/CreativeConfirmCard';
+import { ConnectorConfirmCard } from '../features/chat/ConnectorConfirmCard';
+import { ImageQuotaPill } from '../features/chat/ImageQuotaPill';
+import { UpgradeModal } from '../features/billing/UpgradeModal';
 import { MessageRow, StreamingSkeleton } from '../features/chat/MessageRow';
 import { useChatSession } from '../hooks/useChatSession';
 
@@ -34,6 +37,12 @@ export function ProjectChatPage() {
     creativeBusy,
     confirmCreative,
     declineCreative,
+    pendingConnector,
+    connectorBusy,
+    confirmConnector,
+    declineConnector,
+    upgradePrompt,
+    dismissUpgrade,
   } = useChatSession({
     projectId,
   });
@@ -178,6 +187,7 @@ export function ProjectChatPage() {
             </button>
           ))}
         </div>
+        <ImageQuotaPill />
         <BuilderIconLink projectId={projectId} label="Builder" />
       </div>
 
@@ -258,6 +268,18 @@ export function ProjectChatPage() {
               </div>
             </div>
           )}
+          {pendingConnector && (
+            <div className="shrink-0 border-t border-line bg-ink/95 px-4 py-3 backdrop-blur-sm sm:px-8">
+              <div className="mx-auto max-w-3xl">
+                <ConnectorConfirmCard
+                  pending={pendingConnector}
+                  busy={connectorBusy}
+                  onConfirm={() => void confirmConnector()}
+                  onDecline={declineConnector}
+                />
+              </div>
+            </div>
+          )}
           <div className="shrink-0 border-t border-line bg-ink/90 px-4 py-4 backdrop-blur-sm sm:px-8">
             <div className="mx-auto max-w-3xl">
               <ChatComposer
@@ -273,6 +295,15 @@ export function ProjectChatPage() {
           </div>
         </>
       )}
+      <UpgradeModal
+        open={Boolean(upgradePrompt)}
+        message={
+          upgradePrompt?.message ??
+          'Upgrade to Paid (~$20/mo) for creatives and connector writes.'
+        }
+        feature={upgradePrompt?.feature}
+        onClose={dismissUpgrade}
+      />
     </div>
   );
 }

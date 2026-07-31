@@ -13,6 +13,8 @@ CloudFormation templates for CodePipeline + CodeBuild (adapted from the IleraMed
 | `infra-backend-pipeline.yaml` | Backend infra + Lambda deploy |
 | `infra-web-pipeline.yaml` | Web infra + SPA sync to S3/CloudFront |
 
+**Backend Terraform IAM:** Keep `CodeBuildTerraformRole` aligned with `infra-backend` modules. Product S3 is `walkcroach-*` (with a Deny hardening `walkcroach-tf-state`). ECR is `walkcroach*`. New modules that need Step Functions / SNS / Budgets / dashboards are already covered broadly — re-deploy this CloudFormation stack after IAM edits.
+
 ## Bootstrap names (manual, once per account)
 
 | Resource | Name |

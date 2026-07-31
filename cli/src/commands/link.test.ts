@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { EXIT } from '../lib/exit-codes.js';
 
 let tempDir: string;
 const origHome = process.env.WALKCROACH_HOME;
@@ -57,10 +58,11 @@ describe('linkProject', () => {
     stdoutSpy.mockRestore();
   });
 
-  it('returns 1 when not signed in', async () => {
+  it('returns AUTH_REQUIRED (2) when not signed in', async () => {
     const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     const code = await linkProject({ projectId: 'p1', cwd: tempDir });
-    expect(code).toBe(1);
+    // Distinct from a usage error: a CI job can retry this after auth login.
+    expect(code).toBe(EXIT.AUTH_REQUIRED);
     stderrSpy.mockRestore();
   });
 });
@@ -95,10 +97,10 @@ describe('listProjects', () => {
     stdoutSpy.mockRestore();
   });
 
-  it('returns 1 when not signed in', async () => {
+  it('returns AUTH_REQUIRED (2) when not signed in', async () => {
     const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     const code = await listProjects({});
-    expect(code).toBe(1);
+    expect(code).toBe(EXIT.AUTH_REQUIRED);
     stderrSpy.mockRestore();
   });
 });

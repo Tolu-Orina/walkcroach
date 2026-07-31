@@ -8,15 +8,22 @@
  */
 import { randomUUID } from 'node:crypto';
 import { createDbClient } from '@walkcroach/db';
-import { runPromptTurn } from '@walkcroach/agent-harness';
+import { creativeMetric, runPromptTurn } from '@walkcroach/agent-harness';
 import { attachmentStorageKey, putObject } from '../artefacts.js';
 import { writeNdjson } from '../http.js';
+import type { AuthContext } from '../auth.js';
 import {
   assertCredits,
+  consumeHardQuota,
   debitCredits,
   getEntitlement,
   peekHardQuota,
+  peekVideoQuota,
+  refundCredits,
+  releaseHardQuota,
 } from './billing.js';
+import { handleConfirmCreativeRender } from './creative.js';
+import { handleConfirmVideoJob } from './video.js';
 
 /** Nova text docs ≤4.5MB; media combined ≤25MB; API GW ~10MB with base64 → 5MB binary. */
 const MAX_ATTACH_BYTES = 5 * 1024 * 1024;
@@ -161,33 +168,116 @@ export async function runPromptStream(
         ? body.mode
         : undefined;
 
-    // Phase A — resolve creative limits (plan + rolling hard quota) once per
-    // turn so generate_image can gate without extra round trips.
+    // Phase A/D — resolve creative limits (plan + rolling hard quotas) once per
+    // turn so generate_image / video tools can gate without extra round trips.
     const creativeLimits = ownerId
-      ? {
-          isPaid: (await getEntitlement(db, ownerId)) === 'paid',
-          imageCreditCost: 5,
-          imageDailyRemaining: (
-            await peekHardQuota(db, ownerId, 'image_gen_daily')
-          ).remaining,
-          imageDailyLimit: 3,
-          pptxCreditCost: 20,
-          ownerId,
-          debitCredits: async (
-            actionType: string,
-            metadata: Record<string, unknown> = {},
-          ) => {
-            const assert = await assertCredits(db, ownerId, actionType);
-            if (!assert.ok) return { ok: false as const, remaining: assert.remaining };
-            return debitCredits(
-              db,
-              ownerId,
-              actionType,
-              body.projectId,
-              metadata,
-            );
-          },
-        }
+      ? await (async () => {
+          const [plan, imageQ, videoQ] = await Promise.all([
+            getEntitlement(db, ownerId),
+            peekHardQuota(db, ownerId, 'image_gen_daily'),
+            peekVideoQuota(db, ownerId),
+          ]);
+          return {
+            isPaid: plan === 'paid',
+            imageCreditCost: 5,
+            imageDailyRemaining: imageQ.remaining,
+            imageDailyLimit: 3,
+            pptxCreditCost: 20,
+            flyerCreditCost: 10,
+            videoCreditCost: 270,
+            videoRemaining: videoQ.remaining,
+            videoLimit: videoQ.limit,
+            videoResetAt: videoQ.resetAt,
+            ownerId,
+            debitCredits: async (
+              actionType: string,
+              metadata: Record<string, unknown> = {},
+            ) => {
+              const assert = await assertCredits(db, ownerId, actionType);
+              if (!assert.ok) return { ok: false as const, remaining: assert.remaining };
+              return debitCredits(
+                db,
+                ownerId,
+                actionType,
+                body.projectId,
+                metadata,
+              );
+            },
+            consumeHardQuota: async (amount = 1) => {
+              const r = await consumeHardQuota(
+                db,
+                ownerId,
+                'image_gen_daily',
+                amount,
+              );
+              if (!r.ok) {
+                creativeMetric('CreativeQuotaDenied', {
+                  feature: 'image_gen_daily',
+                  tier: plan === 'paid' ? 'paid' : 'free',
+                });
+              }
+              return r;
+            },
+            releaseHardQuota: async (amount = 1) => {
+              await releaseHardQuota(db, ownerId, 'image_gen_daily', amount);
+            },
+            refundCredits: async (
+              actionType: string,
+              amount: number,
+              metadata: Record<string, unknown> = {},
+            ) => {
+              const r = await refundCredits(
+                db,
+                ownerId,
+                actionType,
+                amount,
+                body.projectId,
+                metadata,
+              );
+              return { remaining: r.remaining };
+            },
+            confirmCreativeAsset: async (assetId: string) => {
+              const auth: AuthContext = {
+                ownerId,
+                isAnonymous: false,
+                source: 'dev',
+              };
+              const res = await handleConfirmCreativeRender(db, auth, assetId);
+              const parsed = JSON.parse(res.body) as {
+                ok?: boolean;
+                status?: string;
+                error?: string;
+                downloadName?: string;
+              };
+              return {
+                ok: Boolean(parsed.ok) && res.statusCode < 400,
+                status: parsed.status,
+                error: parsed.error,
+                downloadName: parsed.downloadName,
+              };
+            },
+            startVideoJob: async (jobId: string) => {
+              const auth: AuthContext = {
+                ownerId,
+                isAnonymous: false,
+                source: 'dev',
+              };
+              const res = await handleConfirmVideoJob(db, auth, jobId);
+              const parsed = JSON.parse(res.body) as {
+                ok?: boolean;
+                status?: string;
+                error?: string;
+                remainingCredits?: number;
+              };
+              return {
+                ok: Boolean(parsed.ok) && res.statusCode < 400,
+                status: parsed.status,
+                error: parsed.error,
+                remainingCredits: parsed.remainingCredits,
+              };
+            },
+          };
+        })()
       : undefined;
 
     await writeNdjson(

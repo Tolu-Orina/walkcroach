@@ -216,22 +216,29 @@ Resources:
                   - dynamodb:PutItem
                   - dynamodb:DeleteItem
                 Resource: !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/walkcroach-tf-lock'
-              # module.artefacts — walkcroach-artefacts-{env}
-              - Sid: ArtefactsBuckets
+              # All WalkCroach product buckets (artefacts, apps, chrome-captures, future).
+              # Name new buckets walkcroach-… so they inherit this without another IAM edit.
+              - Sid: ProductBuckets
                 Effect: Allow
                 Action:
                   - s3:*
                 Resource:
-                  - 'arn:aws:s3:::walkcroach-artefacts-*'
-                  - 'arn:aws:s3:::walkcroach-artefacts-*/*'
-              # module.apps_hosting — walkcroach-apps-{env}
-              - Sid: AppsHostingBuckets
-                Effect: Allow
-                Action:
-                  - s3:*
+                  - 'arn:aws:s3:::walkcroach-*'
+                  - 'arn:aws:s3:::walkcroach-*/*'
+              # ProductBuckets also matches walkcroach-tf-state — keep state to the
+              # TerraformState* allows above (Deny wins over Allow).
+              - Sid: ProtectTerraformStateBucket
+                Effect: Deny
+                NotAction:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                  - s3:GetBucketVersioning
+                  - s3:GetBucketLocation
                 Resource:
-                  - 'arn:aws:s3:::walkcroach-apps-*'
-                  - 'arn:aws:s3:::walkcroach-apps-*/*'
+                  - 'arn:aws:s3:::walkcroach-tf-state'
+                  - 'arn:aws:s3:::walkcroach-tf-state/*'
               # module.apps_hosting — CloudFront + ACM + Route53
               - Sid: AppsHostingEdge
                 Effect: Allow
@@ -252,13 +259,13 @@ Resources:
                 Action:
                   - cognito-idp:*
                 Resource: '*'
-              # module.lambda_agent
+              # module.lambda_{agent,chrome,ide,creative}
               - Sid: Lambda
                 Effect: Allow
                 Action:
                   - lambda:*
                 Resource: '*'
-              # module.lambda_agent IAM role + inline policy (+ PassRole on create)
+              # Lambda / SFN IAM roles + inline policies (+ PassRole on create)
               - Sid: IamForLambda
                 Effect: Allow
                 Action:
@@ -276,7 +283,7 @@ Resources:
                   - iam:ListAttachedRolePolicies
                   - iam:PassRole
                 Resource: '*'
-              # aws_cloudwatch_log_group.lambda + CodeBuild build logs
+              # aws_cloudwatch_log_group.* + CodeBuild build logs
               - Sid: Logs
                 Effect: Allow
                 Action:
@@ -347,6 +354,60 @@ Resources:
                 Resource:
                   - !Sub 'arn:aws:bedrock:*:${AWS::AccountId}:guardrail/*'
                   - !Sub 'arn:aws:bedrock:*:${AWS::AccountId}:guardrail-profile/*'
+              # module.lambda_creative — ECR repo walkcroach-creative (+ lifecycle)
+              # CreateRepository often requires Resource '*' (repo does not exist yet).
+              - Sid: EcrCreativeCreate
+                Effect: Allow
+                Action:
+                  - ecr:CreateRepository
+                  - ecr:DescribeRepositories
+                Resource: '*'
+              - Sid: EcrCreativeManage
+                Effect: Allow
+                Action:
+                  - ecr:*
+                Resource: !Sub 'arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/walkcroach*'
+              # module.stepfunctions_video — state machine + IAM (PassRole above)
+              - Sid: StepFunctionsVideo
+                Effect: Allow
+                Action:
+                  - states:*
+                Resource: '*'
+              # module.observability_creative — budget SNS topic + email subscription
+              - Sid: ObservabilitySns
+                Effect: Allow
+                Action:
+                  - sns:*
+                Resource: !Sub 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:walkcroach-*'
+              - Sid: ObservabilitySnsList
+                Effect: Allow
+                Action:
+                  - sns:ListTopics
+                  - sns:CreateTopic
+                Resource: '*'
+              # module.observability_creative — AWS Budgets (no useful resource ARNs)
+              - Sid: ObservabilityBudgets
+                Effect: Allow
+                Action:
+                  - budgets:*
+                Resource: '*'
+              - Sid: BudgetsServiceLinkedRole
+                Effect: Allow
+                Action:
+                  - iam:CreateServiceLinkedRole
+                Resource: !Sub 'arn:aws:iam::${AWS::AccountId}:role/aws-service-role/budgets.amazonaws.com/AWSServiceRoleForBudgets'
+                Condition:
+                  StringEquals:
+                    iam:AWSServiceName: budgets.amazonaws.com
+              # module.observability_creative — CloudWatch dashboard (not covered by logs:*)
+              - Sid: ObservabilityDashboards
+                Effect: Allow
+                Action:
+                  - cloudwatch:PutDashboard
+                  - cloudwatch:GetDashboard
+                  - cloudwatch:DeleteDashboards
+                  - cloudwatch:ListDashboards
+                Resource: '*'
 
   # CloudWatch Log Groups
   TerraformValidateLogGroup:

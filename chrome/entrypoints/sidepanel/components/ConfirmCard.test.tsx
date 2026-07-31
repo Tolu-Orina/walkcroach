@@ -139,6 +139,30 @@ describe('ConfirmCard — the write gate', () => {
     expect(screen.getByLabelText('Price')).toBeDisabled();
   });
 
+  it('warns only when the action truly cannot be taken back', () => {
+    const { rerender } = render(
+      <ConfirmCard title="Send email" irreversible onConfirm={noop} onDismiss={noop} />,
+    );
+    expect(screen.getByText('This cannot be undone.')).toBeInTheDocument();
+
+    // A draft is a write, but a recoverable one. The panel used to derive this
+    // flag from `write`, which put "This cannot be undone." directly above
+    // gmail.draft's own line saying nothing is sent. Every false warning
+    // cheapens the true one, and gmail.send is where it has to land.
+    rerender(
+      <ConfirmCard
+        title="Draft email"
+        intent="Saves a draft in your mailbox. Nothing is sent."
+        onConfirm={noop}
+        onDismiss={noop}
+      />,
+    );
+    expect(screen.queryByText('This cannot be undone.')).toBeNull();
+    expect(
+      screen.getByText('Saves a draft in your mailbox. Nothing is sent.'),
+    ).toBeInTheDocument();
+  });
+
   it('is announced as a named form region', () => {
     render(<ConfirmCard title="Save this page?" onConfirm={noop} onDismiss={noop} />);
     expect(

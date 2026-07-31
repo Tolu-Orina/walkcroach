@@ -16,7 +16,20 @@ beforeEach(() => {
   vi.stubGlobal('document', {
     documentElement: { dataset: {} as Record<string, string> },
   });
+  // Default to an OS with no dark preference. Individual tests override this —
+  // `resolveTheme` follows prefers-color-scheme, so leaving matchMedia
+  // unstubbed silently tested whatever jsdom happens to return.
+  stubPrefersDark(false);
 });
+
+function stubPrefersDark(dark: boolean): void {
+  vi.stubGlobal('window', {
+    matchMedia: vi.fn((query: string) => ({
+      matches: dark && query.includes('prefers-color-scheme: dark'),
+      media: query,
+    })),
+  });
+}
 
 afterEach(() => {
   for (const k of Object.keys(fakeStore)) delete fakeStore[k];
@@ -45,8 +58,14 @@ describe('getStoredTheme', () => {
 });
 
 describe('resolveTheme', () => {
-  it('defaults to dark', () => {
+  it('follows a dark OS preference when nothing is stored', () => {
+    stubPrefersDark(true);
     expect(resolveTheme()).toBe('dark');
+  });
+
+  it('follows a light OS preference when nothing is stored', () => {
+    stubPrefersDark(false);
+    expect(resolveTheme()).toBe('light');
   });
 
   it('returns stored theme when available', () => {
@@ -70,7 +89,14 @@ describe('initTheme', () => {
     expect(document.documentElement.dataset.theme).toBe('light');
   });
 
-  it('defaults to dark', () => {
+  it('follows the OS preference when nothing is stored', () => {
+    stubPrefersDark(true);
     expect(initTheme()).toBe('dark');
+  });
+
+  it('lets a stored preference override the OS', () => {
+    stubPrefersDark(true);
+    fakeStore['walkcroach.theme.v1'] = 'light';
+    expect(initTheme()).toBe('light');
   });
 });

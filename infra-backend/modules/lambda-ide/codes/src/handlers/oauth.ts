@@ -8,6 +8,44 @@ import { metricLog, parseJsonBody } from '../util.js';
 const REDIRECT_PATTERN =
   /^(vscode|cursor|vscode-insiders|vscodium|windsurf|code-oss):\/\/walkcroach\.walkcroach-ide\/auth$/;
 
+/**
+ * The CLI cannot receive a custom scheme, so it listens on the loopback
+ * interface instead — the pattern RFC 8252 §7.3 prescribes for native apps.
+ *
+ * Deliberately a separate check rather than a widened `REDIRECT_PATTERN`: the
+ * editor pattern is duplicated in `web/src/app/auth/ConnectIdePage.tsx` and
+ * annotated "must stay in sync". Editing it here would silently break IDE
+ * sign-in for every editor, to add a case the IDE never uses.
+ *
+ * Parsed rather than regex-matched, because the interesting failures are
+ * hosts that only *look* like loopback — `127.0.0.1.attacker.example` matches
+ * a careless `/^http:\/\/127\.0\.0\.1/` and resolves to someone else's server.
+ * The port is free (the OS assigns it), everything else is fixed.
+ */
+export function isLoopbackRedirectUri(raw: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== 'http:') return false;
+  // Hostname must be a literal loopback address. `localhost` is excluded on
+  // purpose: it goes through DNS, and DNS can be made to point elsewhere.
+  if (url.hostname !== '127.0.0.1' && url.hostname !== '[::1]') return false;
+  if (url.pathname !== '/callback') return false;
+  if (url.search || url.hash || url.username || url.password) return false;
+  // An absent port would mean :80, which needs privileges and is never ours.
+  if (!url.port) return false;
+  const port = Number(url.port);
+  return Number.isInteger(port) && port >= 1024 && port <= 65535;
+}
+
+/** Every redirect target this BFF will issue a code for. */
+export function isAllowedRedirectUri(raw: string): boolean {
+  return REDIRECT_PATTERN.test(raw) || isLoopbackRedirectUri(raw);
+}
+
 const CODE_TTL_MS = 5 * 60_000;
 
 function newAuthCode(): string {
@@ -46,7 +84,7 @@ export async function handleCreateSessionCode(
   if (!state || state.length < 8) {
     return jsonResponse(400, { error: 'state is required' });
   }
-  if (!redirectUri || !REDIRECT_PATTERN.test(redirectUri)) {
+  if (!redirectUri || !isAllowedRedirectUri(redirectUri)) {
     return jsonResponse(400, { error: 'redirectUri is not allowed' });
   }
   if (sessionBearer.startsWith('dev:')) {
@@ -125,7 +163,7 @@ export async function handleExchangeToken(
       error: 'code, state, and redirectUri are required',
     });
   }
-  if (!REDIRECT_PATTERN.test(redirectUri)) {
+  if (!isAllowedRedirectUri(redirectUri)) {
     return jsonResponse(400, { error: 'redirectUri is not allowed' });
   }
 

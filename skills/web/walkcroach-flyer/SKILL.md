@@ -29,9 +29,17 @@ load walkcroach-creative-philosophy
 | `scripts/check_flyer_pdf.py` | Page count, placeholder text scan |
 | `../walkcroach-pdf/scripts/pdf_to_images.py` | Rasterize pages for Pro/CI visual QA and Chat preview |
 
-## Layout rules
+## Templates
 
-Full-bleed hero, brand-level name, one headline, one support line, one CTA. Use OFL fonts under `walkcroach-creative-philosophy/assets/fonts/` when rasterizing type into the HTML template (Bricolage Grotesque is already in that pack — aligns with Graphite Lumen).
+HTML pack under `templates/` (baked into lambda-creative):
+
+| File | Use |
+|---|---|
+| `sale.html` | Promotional / discount one-pager |
+| `event.html` | Date-forward event split layout |
+| `announcement.html` | Light-on-dark announcement |
+
+Renderer fills Graphite Lumen tokens; Playwright produces PDF when Chromium is present, otherwise ReportLab twin (same field map) for local/CI.
 
 ## Credits
 

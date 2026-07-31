@@ -1,0 +1,70 @@
+version: 0.2
+
+# WalkCroach CLI — build, test, and verify the artifact people install.
+#
+# Mirrors chrome/buildspec.yml's discipline: the unit suite proves the source
+# behaves, and a second gate proves the *built artifact* matches what the
+# package claims. For Chrome that is `test:manifest` against the built
+# manifest; here it is `test:packaged` against a real tarball installed
+# outside the repo, which is the only thing that catches a `file:` dependency,
+# a stripped dist, or a runtime import missing from `dependencies`.
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 20
+  pre_build:
+    commands:
+      - echo "WalkCroach CLI — typecheck / unit / bundle / packaged artifact"
+      - node -v
+      - npm -v
+  build:
+    commands:
+      - |
+        set -eu
+        # Both private packages are file: devDependencies bundled into the CLI,
+        # and must be built before it can typecheck or bundle against them.
+        # A stale dist here ships stale code with no error anywhere.
+        cd packages/agent-engine
+        npm ci
+        npm run build
+
+        cd ../templates
+        npm ci
+        npm run build
+        npm test
+
+        cd ../../cli
+        npm ci
+        npm run typecheck
+        npm test
+        npm run build
+
+        # Fail closed: a published CLI must never carry a localhost default.
+        # Same class of check as chrome's zip:prod localhost scan.
+        if grep -n "localhost:3003" dist/bin.js; then
+          echo "dist/bin.js contains a localhost default" >&2
+          exit 1
+        fi
+
+        # Packs, installs the tarball into a scratch directory with no
+        # relationship to this checkout, and runs the binary. Needs network:
+        # resolving real dependencies from the registry is the point.
+        npm run test:packaged
+
+        # Leave the tarball as the build artifact, so a release can ship it
+        # even if the publish step is not wired up yet (plan §C2.5, option 3).
+        npm pack --pack-destination ./artifact
+  post_build:
+    commands:
+      - echo "CLI build complete"
+
+artifacts:
+  files:
+    - cli/artifact/*.tgz
+  name: walkcroach-cli-$(date +%Y%m%d-%H%M%S)
+
+cache:
+  paths:
+    - cli/node_modules/**/*
+    - packages/agent-engine/node_modules/**/*

@@ -7,6 +7,11 @@ import {
 } from '@walkcroach/agent-engine';
 import { getSecret } from '../lib/config.js';
 import {
+  AuthRequiredError,
+  EXIT,
+  exitCodeForError,
+} from '../lib/exit-codes.js';
+import {
   createLink,
   deleteLink,
   ideMe,
@@ -19,8 +24,8 @@ const execFileAsync = promisify(execFile);
 async function requireToken(): Promise<string> {
   const token = await getSecret(SECRET_KEYS.cognitoAccessToken);
   if (!token) {
-    throw new Error(
-      'Not signed in. Run: walkcroach auth login --token <access_token>',
+    throw new AuthRequiredError(
+      'Not signed in. Run: walkcroach auth login',
     );
   }
   return token;
@@ -56,12 +61,10 @@ export async function linkProject(opts: {
       localRepoDisplay: remote ?? cwd,
     });
     sink.command('link', link);
-    return 0;
+    return EXIT.OK;
   } catch (err) {
-    sink.result(false, {
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return 1;
+    sink.failure(err);
+    return exitCodeForError(err);
   }
 }
 
@@ -85,12 +88,10 @@ export async function unlinkProject(opts: {
     }
     await deleteLink(token, me.link.id);
     sink.command('unlink', { ok: true, linkId: me.link.id });
-    return 0;
+    return EXIT.OK;
   } catch (err) {
-    sink.result(false, {
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return 1;
+    sink.failure(err);
+    return exitCodeForError(err);
   }
 }
 
@@ -100,12 +101,10 @@ export async function listProjects(opts: { json?: boolean }): Promise<number> {
     const token = await requireToken();
     const projects = await listMyProjects(token);
     sink.command('projects', { projects });
-    return 0;
+    return EXIT.OK;
   } catch (err) {
-    sink.result(false, {
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return 1;
+    sink.failure(err);
+    return exitCodeForError(err);
   }
 }
 
@@ -128,11 +127,9 @@ export async function linkStatus(opts: {
       link: me.link,
       ownerId: me.ownerId,
     });
-    return 0;
+    return EXIT.OK;
   } catch (err) {
-    sink.result(false, {
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return 1;
+    sink.failure(err);
+    return exitCodeForError(err);
   }
 }

@@ -1,7 +1,11 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
+// api.ts resolves the base URL through the one precedence entry point (C0.2),
+// so that — not loadConfig — is what these tests stand in for.
 vi.mock('./config.js', () => ({
-  loadConfig: vi.fn().mockResolvedValue({ apiBaseUrl: 'http://test-api:3000' }),
+  resolveApiBaseUrl: vi
+    .fn()
+    .mockResolvedValue({ value: 'http://test-api:3000', source: 'user' }),
 }));
 
 const fetchMock = vi.fn();
@@ -26,9 +30,9 @@ describe('ideHealth', () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ ok: true }));
     const result = await ideHealth();
     expect(result).toEqual({ ok: true });
-    expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining('/ide/v1/health'),
-    );
+    // Assert the URL, not the arity: health passes no init, and every call now
+    // goes through one `request()` wrapper that rewrites transport failures.
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/ide/v1/health');
   });
 
   it('throws on non-ok response', async () => {

@@ -44,6 +44,30 @@ async function parseJson<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+/** Like parseJson but preserves API error payloads for confirm flows (402/429). */
+async function parseJsonSoft<T extends { ok?: boolean; error?: string }>(
+  res: Response,
+): Promise<T> {
+  const text = await res.text();
+  let body: Record<string, unknown> = {};
+  try {
+    body = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+  } catch {
+    body = { error: text || `${res.status} ${res.statusText}` };
+  }
+  if (!res.ok) {
+    return {
+      ...body,
+      ok: false,
+      error:
+        typeof body.error === 'string'
+          ? body.error
+          : `${res.status} ${res.statusText}`,
+    } as T;
+  }
+  return body as T;
+}
+
 export async function listProjects(): Promise<ProjectSummary[]> {
   const res = await fetch(`${API_URL}/projects`, {
     headers: authHeaders(),
@@ -524,6 +548,8 @@ export type UsageSummary = {
   used: number;
   remaining: number;
   costs: Record<string, number>;
+  plan?: 'free' | 'paid';
+  sharedPool?: boolean;
 };
 
 export async function getUsage(): Promise<UsageSummary> {
@@ -533,10 +559,45 @@ export async function getUsage(): Promise<UsageSummary> {
   return parseJson(res);
 }
 
+export async function getBillingStatus(): Promise<{
+  plan: 'free' | 'paid';
+  checkoutEnabled: boolean;
+  priceLabel: string;
+}> {
+  const res = await fetch(`${API_URL}/billing/status`, {
+    headers: authHeaders(),
+  });
+  return parseJson(res);
+}
+
+export async function startBillingCheckout(): Promise<{ url: string }> {
+  const res = await fetch(`${API_URL}/billing/checkout`, {
+    method: 'POST',
+    headers: authHeaders(),
+  });
+  return parseJson(res);
+}
+
+export async function openBillingPortal(): Promise<{ url: string }> {
+  const res = await fetch(`${API_URL}/billing/portal`, {
+    method: 'POST',
+    headers: authHeaders(),
+  });
+  return parseJson(res);
+}
+
 export type CreativeQuota = {
   plan: 'free' | 'paid';
   image: { used: number; limit: number; remaining: number; resetAt: string; unit: string };
-  video: { label: string; limit: number; interval: string; unit: string };
+  video: {
+    used: number;
+    limit: number;
+    remaining: number;
+    resetAt: string;
+    label: string;
+    interval: string;
+    unit: string;
+  };
 };
 
 export async function getCreativeQuota(): Promise<CreativeQuota> {
@@ -550,12 +611,15 @@ export type CreativeConfirmResult = {
   ok: boolean;
   assetId: string;
   status: string;
+  kind?: string;
   downloadName?: string;
   slideCount?: number;
   downloadUrl?: string | null;
   previewUrl?: string | null;
+  previewDataUrl?: string | null;
   remainingCredits?: number;
   alreadyReady?: boolean;
+  alreadyStarted?: boolean;
   error?: string;
 };
 
@@ -567,6 +631,49 @@ export async function confirmCreativeRender(
     headers: authHeaders(),
     body: JSON.stringify({}),
   });
+  return parseJsonSoft(res);
+}
+
+export type VideoJobStatus = {
+  id: string;
+  status: string;
+  durationSec: number;
+  aspect: string;
+  creditsCharged: number;
+  imagesConsumed: number;
+  downloadUrl: string | null;
+  s3Key: string | null;
+  error: unknown;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type VideoConfirmResult = {
+  ok: boolean;
+  jobId: string;
+  status: string;
+  creditsCharged?: number;
+  remainingCredits?: number;
+  remainingVideo?: number;
+  alreadyReady?: boolean;
+  alreadyStarted?: boolean;
+  error?: string;
+  resetAt?: string;
+};
+
+export async function confirmVideoJob(jobId: string): Promise<VideoConfirmResult> {
+  const res = await fetch(`${API_URL}/video-jobs/${jobId}/confirm`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({}),
+  });
+  return parseJsonSoft(res);
+}
+
+export async function getVideoJob(jobId: string): Promise<VideoJobStatus> {
+  const res = await fetch(`${API_URL}/video-jobs/${jobId}`, {
+    headers: authHeaders(),
+  });
   return parseJson(res);
 }
 
@@ -575,6 +682,18 @@ export async function getCreativeDownloadUrl(
 ): Promise<{ url: string; downloadName: string }> {
   const res = await fetch(`${API_URL}/creative-assets/${assetId}/download`, {
     headers: authHeaders(),
+  });
+  return parseJson(res);
+}
+
+export async function rememberCreative(
+  assetId: string,
+  body: { projectId: string; note?: string },
+): Promise<{ ok: boolean; memoryId: string; assetId: string }> {
+  const res = await fetch(`${API_URL}/creative-assets/${assetId}/remember`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify(body),
   });
   return parseJson(res);
 }
@@ -781,4 +900,85 @@ export async function fetchChromeChatHandoff(code: string): Promise<{
     { headers: authHeaders() },
   );
   return parseJson(res);
+}
+
+/* ── Phase F connectors ──────────────────────────────────────────── */
+
+export type ConnectorProviderView = {
+  id: string;
+  label: string;
+  tier: number;
+  disclosure: string;
+  scopes: string[];
+  connection: {
+    id: string;
+    provider: string;
+    status: string;
+    accountLabel: string | null;
+    lastError: string | null;
+    connectedAt: string;
+  } | null;
+};
+
+export async function listConnectors(): Promise<{
+  providers: ConnectorProviderView[];
+  connectUrl: string;
+}> {
+  const res = await fetch(`${API_URL}/connectors`, {
+    headers: authHeaders(),
+  });
+  return parseJson(res);
+}
+
+export async function startConnectorOauth(
+  provider: string,
+  surface: 'web' | 'chrome' = 'web',
+): Promise<{ authorizeUrl: string; state: string; redirectUri: string }> {
+  const res = await fetch(
+    `${API_URL}/connectors/${encodeURIComponent(provider)}/oauth/start`,
+    {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ surface }),
+    },
+  );
+  return parseJson(res);
+}
+
+export async function completeConnectorOauth(body: {
+  code: string;
+  state: string;
+}): Promise<{ ok: boolean; provider: string }> {
+  const res = await fetch(`${API_URL}/connectors/oauth/callback`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify(body),
+  });
+  return parseJson(res);
+}
+
+export async function disconnectConnector(provider: string): Promise<void> {
+  const res = await fetch(
+    `${API_URL}/connectors/${encodeURIComponent(provider)}`,
+    { method: 'DELETE', headers: authHeaders() },
+  );
+  await parseJson(res);
+}
+
+export async function executeConnectorRun(
+  runId: string,
+): Promise<{ ok: boolean; result: Record<string, unknown>; creditsCharged?: number }> {
+  const res = await fetch(
+    `${API_URL}/connectors/runs/${encodeURIComponent(runId)}/execute`,
+    { method: 'POST', headers: authHeaders() },
+  );
+  return parseJson(res);
+}
+
+export async function declineConnectorRun(runId: string): Promise<void> {
+  const res = await fetch(
+    `${API_URL}/connectors/runs/${encodeURIComponent(runId)}/decline`,
+    { method: 'POST', headers: authHeaders() },
+  );
+  await parseJson(res);
 }

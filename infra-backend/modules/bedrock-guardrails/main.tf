@@ -68,9 +68,100 @@ resource "aws_bedrock_guardrail" "chat" {
   tags = var.tags
 }
 
+/**
+ * Phase E2 — marketing-claim guardrail for creative briefs / VO scripts.
+ * Applied via ApplyGuardrail when CREATIVE_GUARDRAIL_ID is wired on lambda-agent.
+ */
+resource "aws_bedrock_guardrail" "creative" {
+  name                      = "${var.name_prefix}-${var.environment}-creative"
+  description               = "WalkCroach Creative Studio marketing-claim moderation"
+  blocked_input_messaging   = "This creative copy was blocked by marketing safety filters. Soften absolute claims (guarantees, cures, get-rich) and try again."
+  blocked_outputs_messaging = "This creative output was blocked by marketing safety filters."
+
+  cross_region_config {
+    guardrail_profile_identifier = local.guardrail_profile_arn
+  }
+
+  content_policy_config {
+    filters_config {
+      type             = "HATE"
+      input_strength   = "MEDIUM"
+      output_strength  = "MEDIUM"
+      input_action     = "BLOCK"
+      output_action    = "BLOCK"
+      input_enabled    = true
+      output_enabled   = true
+      input_modalities = ["TEXT"]
+    }
+    filters_config {
+      type             = "INSULTS"
+      input_strength   = "MEDIUM"
+      output_strength  = "MEDIUM"
+      input_action     = "BLOCK"
+      output_action    = "BLOCK"
+      input_enabled    = true
+      output_enabled   = true
+      input_modalities = ["TEXT"]
+    }
+    filters_config {
+      type             = "SEXUAL"
+      input_strength   = "HIGH"
+      output_strength  = "HIGH"
+      input_action     = "BLOCK"
+      output_action    = "BLOCK"
+      input_enabled    = true
+      output_enabled   = true
+      input_modalities = ["TEXT"]
+    }
+    filters_config {
+      type             = "VIOLENCE"
+      input_strength   = "MEDIUM"
+      output_strength  = "MEDIUM"
+      input_action     = "BLOCK"
+      output_action    = "BLOCK"
+      input_enabled    = true
+      output_enabled   = true
+      input_modalities = ["TEXT"]
+    }
+
+    tier_config {
+      tier_name = "STANDARD"
+    }
+  }
+
+  # topics_config action/enabled fields are not yet in hashicorp/aws (PR #45916 open).
+  # DENY topics block by default for both input and output.
+  topic_policy_config {
+    topics_config {
+      name       = "Guaranteed financial returns"
+      type       = "DENY"
+      definition = "Claims that guarantee investment returns, passive income, or get-rich-quick outcomes without risk disclosure."
+      examples   = ["Guaranteed 100% returns", "Double your money risk-free", "Passive income guaranteed"]
+    }
+    topics_config {
+      name       = "Medical cure claims"
+      type       = "DENY"
+      definition = "Claims that a product or service cures disease or replaces medical treatment."
+      examples   = ["Cures cancer instantly", "Miracle diabetes cure", "FDA-approved miracle treatment"]
+    }
+
+    tier_config {
+      tier_name = "STANDARD"
+    }
+  }
+
+  tags = var.tags
+}
+
 resource "aws_bedrock_guardrail_version" "chat" {
   description   = "${var.environment} published"
   guardrail_arn = aws_bedrock_guardrail.chat.guardrail_arn
+  skip_destroy  = true
+}
+
+resource "aws_bedrock_guardrail_version" "creative" {
+  description   = "${var.environment} creative published"
+  guardrail_arn = aws_bedrock_guardrail.creative.guardrail_arn
   skip_destroy  = true
 }
 
@@ -84,6 +175,18 @@ output "guardrail_arn" {
 
 output "guardrail_version" {
   value = aws_bedrock_guardrail_version.chat.version
+}
+
+output "creative_guardrail_id" {
+  value = aws_bedrock_guardrail.creative.guardrail_id
+}
+
+output "creative_guardrail_arn" {
+  value = aws_bedrock_guardrail.creative.guardrail_arn
+}
+
+output "creative_guardrail_version" {
+  value = aws_bedrock_guardrail_version.creative.version
 }
 
 output "guardrail_profile_arn" {

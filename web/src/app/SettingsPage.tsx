@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   getGithubStatus,
   getUsage,
   listProjects,
+  openBillingPortal,
+  startBillingCheckout,
   type UsageSummary,
 } from '../api/client';
 import { useAuth } from '../auth/useAuth';
@@ -22,10 +24,14 @@ type GhRow = {
  */
 export function SettingsPage() {
   const { user, signOut } = useAuth();
+  const [searchParams] = useSearchParams();
   const [usage, setUsage] = useState<UsageSummary | null>(null);
   const [usageError, setUsageError] = useState<string | null>(null);
+  const [billingBusy, setBillingBusy] = useState(false);
+  const [billingError, setBillingError] = useState<string | null>(null);
   const [githubRows, setGithubRows] = useState<GhRow[]>([]);
   const [githubLoading, setGithubLoading] = useState(true);
+  const billingFlash = searchParams.get('billing');
 
   useEffect(() => {
     void getUsage()
@@ -37,7 +43,7 @@ export function SettingsPage() {
         setUsage(null);
         setUsageError(err instanceof Error ? err.message : String(err));
       });
-  }, []);
+  }, [billingFlash]);
 
   useEffect(() => {
     let cancelled = false;
@@ -137,11 +143,21 @@ export function SettingsPage() {
         <ThemeToggle />
       </section>
 
-      {/* PF-20 Usage + PF-21 billing soon */}
+      {/* Phase G — Usage & billing */}
       <section className="surface mt-4 space-y-4 p-5">
         <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-mist">
           Usage & billing
         </h2>
+        {billingFlash === 'success' && (
+          <p className="rounded-[var(--radius-control)] border border-signal/40 bg-signal/10 px-3 py-2 text-sm text-signal">
+            Subscription updated. Paid features unlock within a minute.
+          </p>
+        )}
+        {billingFlash === 'cancel' && (
+          <p className="rounded-[var(--radius-control)] border border-line px-3 py-2 text-sm text-mist">
+            Checkout cancelled — you are still on Free.
+          </p>
+        )}
         {usageError && (
           <p className="text-sm text-ember">Could not load usage.</p>
         )}
@@ -157,7 +173,7 @@ export function SettingsPage() {
                   </span>
                 </p>
                 <span className="text-[11px] font-semibold uppercase tracking-wider text-mist">
-                  Free plan
+                  {usage.plan === 'paid' ? 'Paid plan' : 'Free plan'}
                 </span>
               </div>
               <div className="mt-2 h-2 overflow-hidden rounded-full bg-line">
@@ -168,6 +184,9 @@ export function SettingsPage() {
               </div>
               <p className="mt-1.5 text-[12px] text-mist">
                 Used this month: {usage.used}
+                {usage.sharedPool
+                  ? ' · shared with Chrome side panel'
+                  : ''}
               </p>
             </div>
             {usage.costs && Object.keys(usage.costs).length > 0 && (
@@ -190,9 +209,59 @@ export function SettingsPage() {
         {!usage && !usageError && (
           <p className="text-sm text-mist">Loading usage…</p>
         )}
-        <p className="rounded-[var(--radius-control)] border border-line/80 bg-raised/40 px-3 py-2 text-[12px] leading-relaxed text-mist">
-          Billing portal coming soon. This weekend ships the free credit meter
-          only — Stripe Customer Portal is deferred.
+        {billingError && (
+          <p className="text-sm text-ember">{billingError}</p>
+        )}
+        <div className="flex flex-wrap gap-2">
+          {usage?.plan !== 'paid' ? (
+            <button
+              type="button"
+              disabled={billingBusy}
+              className="interactive rounded-[var(--radius-control)] bg-signal px-3 py-1.5 text-xs font-semibold text-ink disabled:opacity-50"
+              onClick={() => {
+                setBillingBusy(true);
+                setBillingError(null);
+                void startBillingCheckout()
+                  .then(({ url }) => {
+                    window.location.assign(url);
+                  })
+                  .catch((err) => {
+                    setBillingError(
+                      err instanceof Error ? err.message : String(err),
+                    );
+                    setBillingBusy(false);
+                  });
+              }}
+            >
+              {billingBusy ? 'Opening…' : 'Upgrade · ~$20/mo'}
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled={billingBusy}
+              className="btn-secondary text-xs disabled:opacity-50"
+              onClick={() => {
+                setBillingBusy(true);
+                setBillingError(null);
+                void openBillingPortal()
+                  .then(({ url }) => {
+                    window.location.assign(url);
+                  })
+                  .catch((err) => {
+                    setBillingError(
+                      err instanceof Error ? err.message : String(err),
+                    );
+                    setBillingBusy(false);
+                  });
+              }}
+            >
+              {billingBusy ? 'Opening…' : 'Manage billing'}
+            </button>
+          )}
+        </div>
+        <p className="text-[12px] leading-relaxed text-mist">
+          Paid includes creatives and connector writes. Hard caps still apply
+          (3 images/day, 1 video/72h) so platform cost stays bounded.
         </p>
       </section>
 
@@ -201,6 +270,24 @@ export function SettingsPage() {
         <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-mist">
           Connections
         </h2>
+
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-line/60 pb-3">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-paper">
+              Workflow connectors
+            </p>
+            <p className="mt-0.5 text-[12px] leading-relaxed text-mist">
+              Gmail, Calendar, Sheets, Slack, Stripe, HubSpot — OAuth tokens in
+              Secrets Manager only.
+            </p>
+          </div>
+          <Link
+            to="/app/settings/connections"
+            className="btn-secondary shrink-0 text-xs"
+          >
+            Manage
+          </Link>
+        </div>
 
         <div className="space-y-3">
           <div className="flex flex-wrap items-start justify-between gap-3 border-b border-line/60 pb-3">
@@ -290,6 +377,10 @@ export function SettingsPage() {
       </section>
 
       <p className="mt-6 text-[11px] text-mist/70">
+        <a href="/privacy.html" className="text-signal underline-offset-2 hover:underline">
+          Privacy
+        </a>
+        {' · '}
         Account export / delete and social sign-in are out of weekend scope
         (PF-23 / PF-24 cut).
       </p>

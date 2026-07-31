@@ -10,6 +10,8 @@ import { useAuth } from '../auth/useAuth';
 import { ChatComposer } from '../features/chat/ChatComposer';
 import { CHAT_TEMPLATES } from '../features/chat/chatTemplates';
 import { CreativeConfirmCard } from '../features/chat/CreativeConfirmCard';
+import { ConnectorConfirmCard } from '../features/chat/ConnectorConfirmCard';
+import { UpgradeModal } from '../features/billing/UpgradeModal';
 import { ImageQuotaPill } from '../features/chat/ImageQuotaPill';
 import { MessageRow, StreamingSkeleton } from '../features/chat/MessageRow';
 import { useChatSession } from '../hooks/useChatSession';
@@ -50,6 +52,12 @@ export function ChatHomePage() {
     creativeBusy,
     confirmCreative,
     declineCreative,
+    pendingConnector,
+    connectorBusy,
+    confirmConnector,
+    declineConnector,
+    upgradePrompt,
+    dismissUpgrade,
   } = useChatSession();
 
   const [draft, setDraft] = useState<string | undefined>(undefined);
@@ -335,6 +343,19 @@ export function ChatHomePage() {
             </div>
           )}
 
+          {pendingConnector && (
+            <div className="shrink-0 border-t border-line/80 bg-ink/90 px-4 py-3 backdrop-blur-md sm:px-8">
+              <div className="mx-auto max-w-3xl">
+                <ConnectorConfirmCard
+                  pending={pendingConnector}
+                  busy={connectorBusy}
+                  onConfirm={() => void confirmConnector()}
+                  onDecline={declineConnector}
+                />
+              </div>
+            </div>
+          )}
+
           <div className="shrink-0 border-t border-line/80 bg-ink/80 px-4 py-4 backdrop-blur-md sm:px-8">
             <div className="mx-auto max-w-3xl">
               <ChatComposer
@@ -360,6 +381,15 @@ export function ChatHomePage() {
           </div>
         </>
       )}
+      <UpgradeModal
+        open={Boolean(upgradePrompt)}
+        message={
+          upgradePrompt?.message ??
+          'Upgrade to Paid (~$20/mo) for creatives and connector writes.'
+        }
+        feature={upgradePrompt?.feature}
+        onClose={dismissUpgrade}
+      />
     </div>
   );
 }

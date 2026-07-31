@@ -6,14 +6,16 @@
  * (that footgun dropped e2b_api_key / searxng_url in mixed envs).
  * Existing process.env values win over secret keys.
  *
- * Expected JSON keys:
+ * Expected JSON keys (full list: docs/runtime-secrets-and-ssm.md):
  *   crdb_connection_string
- *   crdb_mcp_api_key
- *   aws_bearer_token_bedrock
+ *   crdb_mcp_api_key / crdb_mcp_cluster_id
+ *   aws_bearer_token_bedrock (local only)
  *   walkcroach_api_key
- *   e2b_api_key          (App Builder sandbox — locked runtime)
- *   searxng_url          (optional; web_search tool)
- *   chrome_device_signing_key (optional; Chrome BFF reads via its own loader)
+ *   e2b_api_key
+ *   searxng_url
+ *   chrome_device_signing_key
+ *   google_oauth_client_{id,secret}, slack_oauth_*, stripe_oauth_*, hubspot_oauth_*
+ *   stripe_secret_key, stripe_webhook_secret, stripe_price_id_paid  (WalkCroach Billing)
  */
 import {
   GetSecretValueCommand,
@@ -59,11 +61,23 @@ export async function ensureRuntimeSecrets(): Promise<void> {
   const secret = JSON.parse(raw.SecretString ?? '{}') as {
     crdb_connection_string?: string;
     crdb_mcp_api_key?: string;
+    crdb_mcp_cluster_id?: string;
     aws_bearer_token_bedrock?: string;
     walkcroach_api_key?: string;
     e2b_api_key?: string;
     searxng_url?: string;
     chrome_device_signing_key?: string;
+    google_oauth_client_id?: string;
+    google_oauth_client_secret?: string;
+    slack_oauth_client_id?: string;
+    slack_oauth_client_secret?: string;
+    stripe_oauth_client_id?: string;
+    stripe_oauth_client_secret?: string;
+    hubspot_oauth_client_id?: string;
+    hubspot_oauth_client_secret?: string;
+    stripe_secret_key?: string;
+    stripe_webhook_secret?: string;
+    stripe_price_id_paid?: string;
   };
 
   applySecret(
@@ -77,6 +91,11 @@ export async function ensureRuntimeSecrets(): Promise<void> {
 
   applySecret('crdb_mcp_api_key', secret.crdb_mcp_api_key, 'CRDB_MCP_API_KEY');
   applySecret(
+    'crdb_mcp_cluster_id',
+    secret.crdb_mcp_cluster_id,
+    'CRDB_MCP_CLUSTER_ID',
+  );
+  applySecret(
     'walkcroach_api_key',
     secret.walkcroach_api_key,
     'WALKCROACH_API_KEY',
@@ -87,6 +106,57 @@ export async function ensureRuntimeSecrets(): Promise<void> {
     'chrome_device_signing_key',
     secret.chrome_device_signing_key,
     'CHROME_DEVICE_SIGNING_KEY',
+  );
+  applySecret(
+    'google_oauth_client_id',
+    secret.google_oauth_client_id,
+    'GOOGLE_OAUTH_CLIENT_ID',
+  );
+  applySecret(
+    'google_oauth_client_secret',
+    secret.google_oauth_client_secret,
+    'GOOGLE_OAUTH_CLIENT_SECRET',
+  );
+  applySecret(
+    'slack_oauth_client_id',
+    secret.slack_oauth_client_id,
+    'SLACK_OAUTH_CLIENT_ID',
+  );
+  applySecret(
+    'slack_oauth_client_secret',
+    secret.slack_oauth_client_secret,
+    'SLACK_OAUTH_CLIENT_SECRET',
+  );
+  applySecret(
+    'stripe_oauth_client_id',
+    secret.stripe_oauth_client_id,
+    'STRIPE_OAUTH_CLIENT_ID',
+  );
+  applySecret(
+    'stripe_oauth_client_secret',
+    secret.stripe_oauth_client_secret,
+    'STRIPE_OAUTH_CLIENT_SECRET',
+  );
+  applySecret(
+    'hubspot_oauth_client_id',
+    secret.hubspot_oauth_client_id,
+    'HUBSPOT_OAUTH_CLIENT_ID',
+  );
+  applySecret(
+    'hubspot_oauth_client_secret',
+    secret.hubspot_oauth_client_secret,
+    'HUBSPOT_OAUTH_CLIENT_SECRET',
+  );
+  applySecret('stripe_secret_key', secret.stripe_secret_key, 'STRIPE_SECRET_KEY');
+  applySecret(
+    'stripe_webhook_secret',
+    secret.stripe_webhook_secret,
+    'STRIPE_WEBHOOK_SECRET',
+  );
+  applySecret(
+    'stripe_price_id_paid',
+    secret.stripe_price_id_paid,
+    'STRIPE_PRICE_ID_PAID',
   );
 
   // Lambda uses the execution role for Bedrock (IAM). Bearer tokens expire (~12h)

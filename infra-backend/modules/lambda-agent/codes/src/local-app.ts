@@ -61,7 +61,7 @@ export async function handleLocalRequest(
       });
       await runPromptStream(promptMatch[1]!, body, (chunk) => {
         res.write(chunk);
-      });
+      }, access.auth.ownerId);
       res.end();
       return;
     }

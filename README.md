@@ -1,6 +1,6 @@
 # WalkCroach
 
-Agentic memory-first AI platform — one CockroachDB memory layer across a web builder, browser copilot, and IDE agent.
+Agentic memory-first AI platform — one CockroachDB memory layer across a web builder, browser copilot, IDE agent, and CLI.
 
 Built for the **CockroachDB × AWS Hackathon — Build with Agentic Memory**.
 
@@ -11,18 +11,22 @@ walkcroach/
 ├── web/                              # SPA — own npm project
 ├── chrome/                           # Manifest V3 extension (WXT) — own npm project
 ├── ide/                              # VS Code extension — own npm project
+├── cli/                              # CLI (same agent engine as IDE) — own npm project
 ├── packages/agent-engine/            # Shared IDE/CLI agent engine (no vscode imports)
+├── packages/templates/               # Shared project templates
+├── skills/web/                       # WalkCroach Agent Skills (Web)
 ├── infra-backend/                    # Terraform + own npm workspaces
 │   ├── packages/{db,agent-harness}
-│   ├── modules/lambda-agent/codes/   # Web builder Lambda
-│   └── modules/lambda-chrome/codes/  # Chrome BFF Lambda
+│   └── modules/lambda-{agent,chrome,ide,creative}/
 ├── infra-web/                        # Terraform: S3, CloudFront, COOP/COEP
-└── ci-cd/                            # CodePipeline CloudFormation templates
+├── ci-cd/                            # CodePipeline CloudFormation templates
+├── tests/                            # Cross-surface integration + Playwright E2E
+└── docs/                             # Status audit, ops runbooks, archive
 ```
 
-`web/`, `chrome/`, `ide/`, `packages/agent-engine/`, and `infra-backend/` install dependencies **separately** (no root npm workspace).
+`web/`, `chrome/`, `ide/`, `cli/`, `packages/agent-engine/`, `infra-backend/`, and `tests/` install dependencies **separately** (no root npm workspace).
 
-See [docs/plan1.md](./docs/plan1.md) for the full phased implementation plan.
+See [docs/README.md](./docs/README.md) for documentation index and [docs/walkcroach-master-doc.md](./docs/walkcroach-master-doc.md) for current codebase status.
 
 ## Prerequisites
 
@@ -51,10 +55,13 @@ npm run dev
 cd ../infra-backend && npm run dev:chrome
 cd ../chrome && npm install && npm run dev
 
-# IDE extension (Phase 0) — F5 Extension Development Host
+# IDE extension
 cd ../packages/agent-engine && npm install && npm test && npm run build
 cd ../../ide && npm install && npm run build
 # then Run "Run WalkCroach IDE Extension" (see ide/README.md)
+
+# CLI
+cd ../cli && npm install && npm run build
 ```
 
 ## Licence

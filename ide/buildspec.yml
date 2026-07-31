@@ -19,7 +19,10 @@ phases:
         cd ide
         npm ci
         npm run typecheck
+        npm run test
         npm run build
+        # §7D — fail closed on a listing that would publish broken.
+        npm run check:publishable
         npm run package:vsix
 artifacts:
   files:

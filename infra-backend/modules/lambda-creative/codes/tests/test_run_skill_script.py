@@ -1,6 +1,7 @@
-"""Unit tests for allowlisted run_skill_script (Phase A7 / B4)."""
+"""Unit tests for allowlisted run_skill_script (Phase A7 / B4 / E3)."""
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -25,6 +26,7 @@ def test_allowlist_contains_pptx_gates():
     assert "validate_pptx" in ALLOWED_SCRIPTS
     assert "thumbnail_pptx" in ALLOWED_SCRIPTS
     assert "add_hd_image" in ALLOWED_SCRIPTS
+    assert "check_creative_a11y" in ALLOWED_SCRIPTS
 
 
 def test_unknown_script_rejected():
@@ -33,14 +35,50 @@ def test_unknown_script_rejected():
 
 
 def test_validate_pptx_exit_codes():
-    # Empty / missing file → fail
     missing = run_skill_script("validate_pptx", ["/no/such/deck.pptx", "--json"])
     assert missing.exit_code == 1
 
-    # Minimal valid OOXML zip is not enough (missing ppt parts) → fail
     with tempfile.TemporaryDirectory() as td:
         bad = Path(td) / "bad.pptx"
         with zipfile.ZipFile(bad, "w") as zf:
             zf.writestr("hello.txt", "no")
         bad_res = run_skill_script("validate_pptx", [str(bad), "--json"])
         assert bad_res.exit_code == 1
+
+
+def test_flyer_templates_exist():
+    root = Path(os.environ["WALKCROACH_WEB_SKILLS_DIR"])
+    for name in ("sale", "event", "announcement"):
+        assert (root / "walkcroach-flyer" / "templates" / f"{name}.html").is_file()
+
+
+def test_check_creative_a11y_html_without_img_ok():
+    root = Path(os.environ["WALKCROACH_WEB_SKILLS_DIR"])
+    sale = root / "walkcroach-flyer" / "templates" / "sale.html"
+    with tempfile.TemporaryDirectory() as td:
+        html = Path(td) / "flyer.html"
+        html.write_text(
+            "<!DOCTYPE html><html lang='en'><body><h1>Sale</h1></body></html>",
+            encoding="utf-8",
+        )
+        brief = Path(td) / "brief.json"
+        brief.write_text(json.dumps({"estimatedImages": 0}), encoding="utf-8")
+        res = run_skill_script(
+            "check_creative_a11y",
+            [str(html), "--brief", str(brief), "--json"],
+        )
+        assert res.ok, res.stderr or res.stdout
+    assert sale.is_file()
+
+
+def test_check_creative_a11y_brief_requires_alt_when_images():
+    with tempfile.TemporaryDirectory() as td:
+        html = Path(td) / "flyer.html"
+        html.write_text("<html><body></body></html>", encoding="utf-8")
+        brief = Path(td) / "brief.json"
+        brief.write_text(json.dumps({"estimatedImages": 1}), encoding="utf-8")
+        res = run_skill_script(
+            "check_creative_a11y",
+            [str(html), "--brief", str(brief), "--json"],
+        )
+        assert res.exit_code == 1

@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { getCreativeQuota, type CreativeQuota } from '../../api/client';
 
 /**
- * Rolling daily image-generation cap pill for Chat (web plan Phase A6).
- * Hard cap applies to every owner; paid users also spend 5 credits/image.
+ * Rolling creative hard-cap pills (images /24h · video /72h) + upgrade affordance.
  */
 export function ImageQuotaPill() {
   const [quota, setQuota] = useState<CreativeQuota | null>(null);
@@ -29,15 +29,51 @@ export function ImageQuotaPill() {
         ? 'border-amber-400/40 bg-amber-400/10 text-amber-300'
         : 'border-signal/30 bg-signal/10 text-signal';
 
+  const videoRemaining = quota.video.remaining ?? quota.video.limit;
+  const videoTone =
+    videoRemaining === 0
+      ? 'border-red-400/40 bg-red-400/10 text-red-300'
+      : 'border-signal/30 bg-signal/10 text-signal';
+
+  const videoTitle =
+    videoRemaining === 0
+      ? `Video resets around ${quota.video.resetAt ?? '—'}`
+      : '1× ≤30s video per rolling 72 hours (paid)';
+
   return (
-    <div
-      className={`interactive flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-mono text-[11px] ${tone}`}
-      title={`Image generations reset within 24 hours. ${quota.plan === 'paid' ? 'Paid plan: 5 credits per image.' : 'Free plan.'}`}
-    >
-      <span className="inline-block h-1.5 w-1.5 rounded-full bg-current" />
-      <span>
-        images {remaining}/{limit}
-      </span>
+    <div className="flex flex-wrap items-center gap-2">
+      <div
+        className={`interactive flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-mono text-[11px] ${tone}`}
+        title={
+          quota.plan === 'paid'
+            ? 'Paid plan: 5 credits per image · ≤3 / 24h'
+            : 'Images require Paid plan'
+        }
+      >
+        <span className="inline-block h-1.5 w-1.5 rounded-full bg-current" />
+        <span>
+          images {remaining}/{limit}
+        </span>
+      </div>
+      <div
+        className={`interactive flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-mono text-[11px] ${videoTone}`}
+        title={videoTitle}
+      >
+        <span className="inline-block h-1.5 w-1.5 rounded-full bg-current" />
+        <span>
+          {videoRemaining === 0
+            ? 'video locked'
+            : `video ${videoRemaining}/${quota.video.limit}`}
+        </span>
+      </div>
+      {quota.plan !== 'paid' && (
+        <Link
+          to="/app/settings"
+          className="interactive rounded-full border border-signal/40 bg-signal/10 px-2.5 py-1 font-mono text-[11px] text-signal hover:bg-signal/20"
+        >
+          upgrade
+        </Link>
+      )}
     </div>
   );
 }

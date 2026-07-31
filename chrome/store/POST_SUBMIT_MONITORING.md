@@ -30,6 +30,14 @@ Log group: `walkcroach/chrome/{env}` (or the Lambda log group for `walkcroach-{e
 | `chrome.oauth.token` (`ok`) | Extension redeemed the code — sign-in **completed** |
 | `chrome.oauth.refresh` (`ok`) | Cognito refresh proxy result |
 | `chrome.stream.error` / route errors | Failures without page body |
+| `chrome.propose.ok` / `.empty` / `.parse_failed` | Structured extraction outcome (D1) |
+| `chrome.capture.price_append` (`changed`) | Price re-check; `changed:false` means the price held |
+| `chrome.screenshot.presign` (`mode`) | `put` = direct-to-S3, `direct` = falling back through Lambda |
+| `chrome.screenshot.upload` / `.commit` | Screenshot stored |
+| `chrome.screenshot.key_mismatch` | **Should never fire.** A stored key outside the owner's namespace |
+| `chrome.connector.propose` / `.execute` / `.decline` | Connector lifecycle (E) |
+| `chrome.connector.unknown_action` | Model or client proposed an action outside the catalogue |
+| `chrome.profiles.served` / `.unconfigured` | Signed site-profile bundle |
 
 **Never** alert on or log `extractedText` / draft bodies.
 
@@ -81,6 +89,44 @@ install. If installs look healthy but summarize volume is near zero, suspect the
 step: users are seeing the prompt and declining, or the panel is stuck in the `unknown`
 page-access state. Both are panel UX problems, not backend faults.
 
+## Phase D–F additions
+
+### Extraction quality
+
+`chrome.propose.parse_failed` and `chrome.propose.empty` separate two different
+problems that used to look identical. `parse_failed` is a model or prompt
+regression; `empty` means the user ran a sector action on the wrong kind of page,
+which is a profile-matching question, not a model one. A rise in `empty` on one
+host usually means a site profile needs its `pathIncludes` tightened.
+
+### Screenshot upload path
+
+`chrome.screenshot.presign` reports `mode`. Steady state after the store ID is
+added to bucket CORS should be overwhelmingly `put`. Sustained `direct` means CORS
+is wrong or the extension ID changed, and every screenshot is being pushed through
+Lambda — it still works, but it costs invocation time and API Gateway payload.
+
+### Connectors
+
+```
+connector_success = count(chrome.connector.execute ok=true)
+                  / count(chrome.connector.execute)
+```
+
+Watch alongside the Web equivalent: a gap between the two surfaces for the same
+account means a Chrome-specific regression, since both call the identical shared
+`executeRun`. `chrome.connector.unknown_action` should be flat at zero — a
+non-zero rate means something is proposing actions the catalogue does not define,
+which is either a prompt regression or an attempt at one.
+
+### Security signals that should never fire
+
+| Metric | Meaning if it appears |
+|---|---|
+| `chrome.screenshot.key_mismatch` | A capture row referenced an object outside its owner's namespace. Investigate immediately — corrupt data or tampering. |
+| `chrome.connector.unknown_action` | Deny-by-default caught a proposal outside the catalogue. |
+| `redirectUri is not allowed` 400s | Extension ID drift, or a forged redirect. |
+
 ## Suggested alarms (staging → prod)
 
 - Error rate on chrome Lambda > baseline for 15m
@@ -88,3 +134,7 @@ page-access state. Both are panel UX problems, not backend faults.
 - **Sign-in success ratio < 0.7 over 1h** (≥10 starts) — Bug B regression
 - **Any `redirectUri is not allowed` 400s** after a release
 - Sudden drop in `chrome.capture.save` after update (possible UX / extract / permission regression)
+- **Any** `chrome.screenshot.key_mismatch` — page a human
+- **Any** `chrome.connector.unknown_action` sustained over an hour
+- Connector execute success ratio < 0.8 over 1h with ≥10 attempts
+- `chrome.screenshot.presign mode=direct` > 20% once bucket CORS is deployed

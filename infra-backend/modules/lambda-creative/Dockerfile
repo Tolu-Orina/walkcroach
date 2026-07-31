@@ -12,8 +12,9 @@ RUN microdnf install -y \
       poppler-utils \
       fontconfig \
       dejavu-sans-fonts \
+      ffmpeg \
     && microdnf clean all \
-    || (yum install -y libreoffice-impress poppler-utils fontconfig && yum clean all)
+    || (yum install -y libreoffice-impress poppler-utils fontconfig ffmpeg && yum clean all)
 
 COPY infra-backend/modules/lambda-creative/codes/requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt

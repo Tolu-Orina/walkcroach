@@ -20,6 +20,7 @@ ALLOWED_SCRIPTS: dict[str, str] = {
     "check_flyer_pdf": "walkcroach-flyer/scripts/check_flyer_pdf.py",
     "pdf_to_images": "walkcroach-pdf/scripts/pdf_to_images.py",
     "assert_reel_still": "walkcroach-video-studio/scripts/assert_reel_still.py",
+    "check_creative_a11y": "walkcroach-creative-a11y/scripts/check_creative_a11y.py",
 }
 
 

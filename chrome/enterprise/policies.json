@@ -1,18 +1,16 @@
 {
-  "_comment": "Chrome Enterprise policy stub (NFR-C08). Replace EXTENSION_ID after CWS publish. Import via Google Admin / Windows registry / managed Chrome as appropriate.",
-  "ExtensionInstallAllowlist": ["EXTENSION_ID_REPLACE_ME"],
+  "_comment": "WalkCroach Chrome — managed-install SAMPLE (NFR-C08). Read enterprise/README.md before applying; it explains two settings that were wrong in the previous version of this file. Replace EXTENSION_ID_REPLACE_ME with the ID the Chrome Web Store assigns on first publish (see chrome/VERSIONING.md).",
+  "ExtensionInstallForcelist": [
+    "EXTENSION_ID_REPLACE_ME;https://clients2.google.com/service/update2/crx"
+  ],
   "ExtensionSettings": {
-    "*": {
-      "installation_mode": "blocked"
-    },
     "EXTENSION_ID_REPLACE_ME": {
-      "installation_mode": "allowed",
+      "installation_mode": "force_installed",
+      "update_url": "https://clients2.google.com/service/update2/crx",
       "toolbar_pin": "force_pinned",
-      "runtime_allowed_hosts": [
-        "https://awbcf4clij.execute-api.eu-west-2.amazonaws.com",
-        "https://walkcroach.conquerorfoundation.com"
-      ],
-      "runtime_blocked_hosts": []
+      "_comment_hosts": "Leave both empty unless you intend to bound page access. runtime_allowed_hosts is an ALLOWLIST of sites the extension may interact with — setting it to the API and web domains, as an earlier version of this file did, prevents WalkCroach from reading any page the user allows, which disables the product. runtime_blocked_hosts takes precedence and is the safer tool.",
+      "runtime_blocked_hosts": [],
+      "runtime_allowed_hosts": []
     }
   }
 }

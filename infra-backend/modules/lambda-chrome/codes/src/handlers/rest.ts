@@ -45,6 +45,7 @@ import {
   handleListMyProjects,
 } from './link.js';
 import { handleTelemetry } from './telemetry.js';
+import { handleGetCredits } from './credits.js';
 import { jsonResponse, CORS_HEADERS } from '../http.js';
 import type { HttpRequest } from '../event.js';
 import { isUuid, parseJsonBody } from '../util.js';
@@ -297,6 +298,10 @@ export async function handleChromeRest(
     /\/chrome\/v1\/auth\/upgrade\/?$/.test(path)
   ) {
     return handleUpgradeAuth(auth, req.body);
+  }
+
+  if (req.method === 'GET' && /\/chrome\/v1\/credits\/?$/.test(path)) {
+    return handleGetCredits(auth);
   }
 
   if (

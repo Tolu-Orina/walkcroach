@@ -5,7 +5,10 @@ import {
   runAgentLoop,
   loadMcpConfigFromSecrets,
   SECRET_KEYS,
+  describeMissingCredentials,
   normalizeLocalRepoKey,
+  resolveInferenceCredentials,
+  withInferenceCredentials,
   type AgentEvent,
   type ProjectMemoryBridge,
   type SharedSkillsBridge,
@@ -16,7 +19,8 @@ import {
   createSharedSkillsBridge,
   ideMe,
 } from '../lib/api.js';
-import { getSecret } from '../lib/config.js';
+import { getSecret, loadConfig } from '../lib/config.js';
+import { EXIT, NoCredentialsError } from '../lib/exit-codes.js';
 import { OutputSink, type OutputMode } from '../lib/output.js';
 
 const execFileAsync = promisify(execFile);
@@ -108,6 +112,27 @@ export async function runAgentCommand(opts: RunCommandOpts): Promise<number> {
 
   let exitCode = 0;
 
+  // BYOK (Part 1 §4A). Inference runs on the user's own AWS credentials, so
+  // check before starting: a run that fails 30 seconds in on an auth error is
+  // a much worse way to learn this than one line up front.
+  const credentials = await resolveInferenceCredentials(
+    { get: getSecret },
+    { region: (await loadConfig()).bedrockRegion },
+  );
+  if (!credentials.configured) {
+    // Typed, so `--json` carries `code: "no_credentials"` — distinct from an
+    // auth failure, because signing in does not fix it.
+    const [message, ...rest] = describeMissingCredentials('cli').split('\n');
+    sink.failure(
+      new NoCredentialsError(message ?? '', rest.join(' ').trim() || undefined),
+    );
+    return EXIT.USAGE;
+  }
+
+  /** Every Bedrock call in this run sees the user's stored key, if there is one. */
+  const runLoop = () =>
+    withInferenceCredentials({ get: getSecret }, () => runAgentLoop(loopOpts));
+
   if (opts.mode === 'tui') {
     const { runTui } = await import('../tui/render.js');
     // Subscribe TUI before the loop so early approval_request events are not missed.
@@ -128,9 +153,9 @@ export async function runAgentCommand(opts: RunCommandOpts): Promise<number> {
     });
 
     try {
-      await runAgentLoop(loopOpts);
+      await runLoop();
     } catch (err) {
-      exitCode = 1;
+      exitCode = EXIT.RUN_FAILED;
       const message = err instanceof Error ? err.message : String(err);
       host.emit({ type: 'error', message, fatal: true });
     }
@@ -139,9 +164,9 @@ export async function runAgentCommand(opts: RunCommandOpts): Promise<number> {
     await tuiDone;
   } else {
     try {
-      await runAgentLoop(loopOpts);
+      await runLoop();
     } catch (err) {
-      exitCode = 1;
+      exitCode = EXIT.RUN_FAILED;
       const message = err instanceof Error ? err.message : String(err);
       sink.result(false, { error: message });
       return exitCode;

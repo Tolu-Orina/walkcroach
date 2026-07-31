@@ -106,6 +106,47 @@ export const defaultProviderCall: ProviderCall = async ({
       url.searchParams.set('limit', String(args.limit ?? 10));
       return callJson(url.toString(), { headers: auth });
     }
+    case 'sheets.read_range': {
+      const sid = encodeURIComponent(String(args.spreadsheetId));
+      const range = encodeURIComponent(String(args.range));
+      return callJson(
+        `https://sheets.googleapis.com/v4/spreadsheets/${sid}/values/${range}`,
+        { headers: auth },
+      );
+    }
+    case 'sheets.append_row': {
+      const sid = encodeURIComponent(String(args.spreadsheetId));
+      const range = encodeURIComponent(String(args.range));
+      const cells = String(args.values ?? '')
+        .split(',')
+        .map((c) => c.trim());
+      return callJson(
+        `https://sheets.googleapis.com/v4/spreadsheets/${sid}/values/${range}:append?valueInputOption=USER_ENTERED`,
+        {
+          method: 'POST',
+          headers: json,
+          body: JSON.stringify({ values: [cells] }),
+        },
+      );
+    }
+    case 'hubspot.list_contacts': {
+      const url = new URL('https://api.hubapi.com/crm/v3/objects/contacts');
+      url.searchParams.set('limit', String(args.limit ?? 10));
+      url.searchParams.set('properties', 'email,firstname,lastname');
+      return callJson(url.toString(), { headers: auth });
+    }
+    case 'hubspot.create_contact': {
+      const properties: Record<string, string> = {
+        email: String(args.email),
+      };
+      if (args.firstname) properties.firstname = String(args.firstname);
+      if (args.lastname) properties.lastname = String(args.lastname);
+      return callJson('https://api.hubapi.com/crm/v3/objects/contacts', {
+        method: 'POST',
+        headers: json,
+        body: JSON.stringify({ properties }),
+      });
+    }
   }
 };
 
@@ -294,5 +335,32 @@ export function summarise(
         })),
       };
     }
+    case 'sheets.read_range':
+      return {
+        range: raw.range ?? null,
+        values: ((raw.values as unknown[]) ?? []).slice(0, 50),
+      };
+    case 'sheets.append_row':
+      return {
+        updatedRange: raw.updates
+          ? (raw.updates as { updatedRange?: string }).updatedRange
+          : raw.tableRange ?? null,
+      };
+    case 'hubspot.list_contacts': {
+      const results = (raw.results as Array<Record<string, unknown>>) ?? [];
+      return {
+        contacts: results.slice(0, 25).map((c) => {
+          const props = (c.properties ?? {}) as Record<string, unknown>;
+          return {
+            id: c.id,
+            email: props.email ?? null,
+            firstname: props.firstname ?? null,
+            lastname: props.lastname ?? null,
+          };
+        }),
+      };
+    }
+    case 'hubspot.create_contact':
+      return { id: raw.id };
   }
 }

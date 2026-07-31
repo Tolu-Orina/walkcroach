@@ -36,6 +36,24 @@ export function getNovaCanvasModelId(): string {
   );
 }
 
+/** Nova Reel (video) — typically us-east-1; see getBedrockReelRegion(). */
+export function getNovaReelModelId(): string {
+  return (
+    process.env.NOVA_REEL_MODEL_ID ??
+    process.env.BEDROCK_NOVA_REEL_MODEL_ID ??
+    'amazon.nova-reel-v1:1'
+  );
+}
+
+/** Reel async invoke region (often us-east-1 even when chat is elsewhere). */
+export function getBedrockReelRegion(): string {
+  return (
+    process.env.BEDROCK_REEL_REGION ??
+    process.env.NOVA_REEL_REGION ??
+    getBedrockRegion()
+  );
+}
+
 /**
  * True when a Bedrock error is the "unresolvable model id/inference profile"
  * class (e.g. ValidationException: "The provided model identifier is

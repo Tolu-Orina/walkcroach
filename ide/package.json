@@ -1,7 +1,7 @@
 {
   "name": "walkcroach-ide",
   "displayName": "WalkCroach IDE",
-  "description": "WalkCroach agentic coding assistant — local agent, CockroachDB tools, and optional cross-surface memory via WalkCroach Web.",
+  "description": "WalkCroach agentic coding assistant \u2014 local agent, CockroachDB tools, and optional cross-surface memory via WalkCroach Web.",
   "version": "0.1.0",
   "publisher": "walkcroach",
   "private": false,
@@ -27,6 +27,7 @@
   "activationEvents": [
     "onView:walkcroach.sidebar",
     "onCommand:walkcroach.ping",
+    "onCommand:walkcroach.showLatency",
     "onCommand:walkcroach.openPanel",
     "onCommand:walkcroach.configureCockroach",
     "onCommand:walkcroach.signIn",
@@ -108,6 +109,11 @@
         "command": "walkcroach.viewSharedSkills",
         "title": "View Shared Skills",
         "category": "WalkCroach"
+      },
+      {
+        "command": "walkcroach.showLatency",
+        "title": "Show Latency Report",
+        "category": "WalkCroach"
       }
     ],
     "configuration": {
@@ -150,13 +156,19 @@
         },
         "walkcroach.ide.reasoningEffort": {
           "type": "string",
-          "enum": ["", "off", "low", "medium", "high"],
+          "enum": [
+            "",
+            "off",
+            "low",
+            "medium",
+            "high"
+          ],
           "enumDescriptions": [
             "Use the default (medium)",
             "Disable extended thinking",
-            "Low effort — fastest, least reasoning",
-            "Medium effort — same tier as WalkCroach Web App Builder",
-            "High effort — slowest, most thorough (disables the output-token cap)"
+            "Low effort \u2014 fastest, least reasoning",
+            "Medium effort \u2014 same tier as WalkCroach Web App Builder",
+            "High effort \u2014 slowest, most thorough (disables the output-token cap)"
           ],
           "default": "",
           "description": "Nova 2 Lite extended-thinking tier for the agent loop. Empty uses the default (medium)."
@@ -176,8 +188,10 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "check:bundle": "node scripts/check-bundle-size.mjs",
-    "package:vsix": "npm run build && npm run check:bundle && npx --yes @vscode/vsce package --no-dependencies -o walkcroach-ide.vsix",
-    "vscode:prepublish": "npm run build"
+    "package:vsix": "npm run build && npm run check:bundle && npm run check:publishable && npx --yes @vscode/vsce package --no-dependencies -o walkcroach-ide.vsix",
+    "vscode:prepublish": "npm run build",
+    "check:publishable": "node scripts/check-publishable.mjs",
+    "publish:ovsx": "npm run package:vsix && npm run check:publishable && npx --yes ovsx publish walkcroach-ide.vsix"
   },
   "dependencies": {
     "@walkcroach/agent-engine": "file:../packages/agent-engine",
@@ -195,5 +209,16 @@
     "react-dom": "^19.1.0",
     "typescript": "^5.8.0",
     "vitest": "^3.2.7"
-  }
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "coding-assistant",
+    "cockroachdb",
+    "bedrock",
+    "walkcroach",
+    "mcp",
+    "byok"
+  ],
+  "qna": "https://github.com/Tolu-Orina/walkcroach/issues"
 }

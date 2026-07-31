@@ -30,8 +30,20 @@ function queryFromEvent(e: Record<string, unknown>): string {
   return '';
 }
 
+function decodeBody(
+  body: string | undefined,
+  isBase64Encoded: unknown,
+): string | undefined {
+  if (body == null || body === '') return body ?? undefined;
+  if (isBase64Encoded === true) {
+    return Buffer.from(body, 'base64').toString('utf8');
+  }
+  return body;
+}
+
 export function normalizeEvent(event: unknown): HttpRequest {
   const e = event as Record<string, unknown>;
+  const isBase64 = e.isBase64Encoded;
 
   // HTTP API v2
   if (e.version === '2.0' || e.requestContext) {
@@ -41,7 +53,7 @@ export function normalizeEvent(event: unknown): HttpRequest {
       return {
         method: String(http.method),
         path: String(e.rawPath ?? http.path),
-        body: (e.body as string | undefined) ?? undefined,
+        body: decodeBody(e.body as string | undefined, isBase64),
         pathParameters:
           (e.pathParameters as Record<string, string | undefined>) ?? {},
         headers: normalizeHeaders(
@@ -56,7 +68,7 @@ export function normalizeEvent(event: unknown): HttpRequest {
   return {
     method: String(e.httpMethod ?? 'GET'),
     path: String(e.path ?? '/'),
-    body: (e.body as string | undefined) ?? undefined,
+    body: decodeBody(e.body as string | undefined, isBase64),
     pathParameters:
       (e.pathParameters as Record<string, string | undefined>) ?? {},
     headers: normalizeHeaders(

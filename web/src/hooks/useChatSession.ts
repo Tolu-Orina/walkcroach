@@ -6,6 +6,9 @@ import {
   getSession,
   listChatSessions,
   confirmCreativeRender,
+  confirmVideoJob,
+  executeConnectorRun,
+  declineConnectorRun,
   streamPrompt,
 } from '../api/client';
 import type { AgentEvent, ChatMessage } from '../api/types';
@@ -13,17 +16,44 @@ import type { ChatAttachment } from '../features/chat/ChatComposer';
 
 export type PendingCreativeBrief = {
   assetId: string;
-  kind: 'slide_deck';
+  kind: 'slide_deck' | 'flyer' | 'video';
   brief: {
     title?: string;
     subtitle?: string;
+    headline?: string;
+    support?: string;
+    cta?: string;
+    brand?: string;
+    eyebrow?: string;
+    template?: string;
+    philosophy?: { name?: string; notes?: string };
+    voiceoverScript?: string;
+    durationSec?: number;
+    aspect?: string;
+    shots?: Array<{ text?: string; title?: string }>;
     slides?: Array<{ title?: string; bullets?: string[] }>;
   };
   credits: number;
   estimatedImages: number;
   remainingImages: number;
   imageDailyLimit: number;
+  remainingVideo?: number;
+  videoLimit?: number;
+  videoResetAt?: string;
   stub?: boolean;
+};
+
+export type PendingConnectorAction = {
+  runId: string;
+  action: string;
+  title: string;
+  consequence: string;
+  write: boolean;
+  irreversible: boolean;
+  weight: number;
+  rows: Array<{ label: string; value: string }>;
+  needsConnection?: string;
+  connectUrl?: string;
 };
 
 function uid(): string {
@@ -133,6 +163,13 @@ export function useChatSession(opts?: {
   const [pendingCreative, setPendingCreative] =
     useState<PendingCreativeBrief | null>(null);
   const [creativeBusy, setCreativeBusy] = useState(false);
+  const [pendingConnector, setPendingConnector] =
+    useState<PendingConnectorAction | null>(null);
+  const [connectorBusy, setConnectorBusy] = useState(false);
+  const [upgradePrompt, setUpgradePrompt] = useState<{
+    message: string;
+    feature?: string;
+  } | null>(null);
   const assistantBuf = useRef('');
   const abortRef = useRef<AbortController | null>(null);
 
@@ -177,6 +214,32 @@ export function useChatSession(opts?: {
               content: event.message,
             },
           ]);
+        } else if (event.type === 'upgrade_required') {
+          setUpgradePrompt({
+            message: event.message,
+            feature: event.feature,
+          });
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: uid(),
+              role: 'system',
+              content: event.message,
+            },
+          ]);
+        } else if (event.type === 'connector_action_proposed') {
+          setPendingConnector({
+            runId: event.runId,
+            action: event.action,
+            title: event.title,
+            consequence: event.consequence,
+            write: event.write,
+            irreversible: event.irreversible,
+            weight: event.weight,
+            rows: event.rows ?? [],
+            needsConnection: event.needsConnection,
+            connectUrl: event.connectUrl,
+          });
         } else if (event.type === 'creative_brief_ready') {
           setPendingCreative({
             assetId: event.assetId,
@@ -188,24 +251,73 @@ export function useChatSession(opts?: {
             imageDailyLimit: event.imageDailyLimit,
             stub: event.stub,
           });
-        } else if (event.type === 'creative_asset_ready') {
+        } else if (event.type === 'video_brief_ready') {
+          setPendingCreative({
+            assetId: event.jobId,
+            kind: 'video',
+            brief: event.brief as PendingCreativeBrief['brief'],
+            credits: event.credits,
+            estimatedImages: event.estimatedImages,
+            remainingImages: event.remainingImages,
+            imageDailyLimit: event.imageDailyLimit,
+            remainingVideo: event.remainingVideo,
+            videoLimit: event.videoLimit,
+            videoResetAt: event.videoResetAt,
+            stub: event.stub,
+          });
+        } else if (event.type === 'video_job_updated') {
           setPendingCreative(null);
           setMessages((prev) => [
             ...prev,
             {
               id: uid(),
               role: 'assistant',
-              content: `Your deck is ready (${event.slideCount} slides).`,
-              deck: {
-                assetId: event.assetId,
-                downloadName: event.downloadName,
-                slideCount: event.slideCount,
+              content: `Video job ${event.status}.`,
+              videoJob: {
+                jobId: event.jobId,
+                status: event.status,
+                durationSec: event.durationSec,
+                aspect: event.aspect,
                 creditsCharged: event.creditsCharged,
-                previewUrl: event.previewDataUrl ?? null,
-                downloadUrl: null,
               },
             },
           ]);
+        } else if (event.type === 'creative_asset_ready') {
+          setPendingCreative(null);
+          if (event.kind === 'flyer') {
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: uid(),
+                role: 'assistant',
+                content: 'Your flyer is ready.',
+                flyer: {
+                  assetId: event.assetId,
+                  downloadName: event.downloadName,
+                  creditsCharged: event.creditsCharged,
+                  previewUrl: event.previewDataUrl ?? null,
+                  downloadUrl: null,
+                },
+              },
+            ]);
+          } else {
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: uid(),
+                role: 'assistant',
+                content: `Your deck is ready (${event.slideCount ?? 0} slides).`,
+                deck: {
+                  assetId: event.assetId,
+                  downloadName: event.downloadName,
+                  slideCount: event.slideCount ?? 0,
+                  creditsCharged: event.creditsCharged,
+                  previewUrl: event.previewDataUrl ?? null,
+                  downloadUrl: null,
+                },
+              },
+            ]);
+          }
         } else if (event.type === 'image_generated') {
           setMessages((prev) => [
             ...prev,
@@ -476,42 +588,115 @@ export function useChatSession(opts?: {
     if (!pendingCreative || creativeBusy) return;
     setCreativeBusy(true);
     try {
+      if (pendingCreative.kind === 'video') {
+        const result = await confirmVideoJob(pendingCreative.assetId);
+        if (!result.ok && result.error) {
+          const msg =
+            result.error === 'video_quota_exceeded'
+              ? `Video unavailable until ${result.resetAt ?? 'the 72h window resets'}.`
+              : `Could not start video: ${result.error}`;
+          setMessages((prev) => [
+            ...prev,
+            { id: uid(), role: 'system', content: msg },
+          ]);
+          return;
+        }
+        setPendingCreative(null);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: uid(),
+            role: 'assistant',
+            content: 'Video job started — this can take a few minutes.',
+            videoJob: {
+              jobId: result.jobId,
+              status: result.status,
+              durationSec: pendingCreative.brief.durationSec ?? 30,
+              aspect: pendingCreative.brief.aspect ?? '16:9',
+              creditsCharged: result.creditsCharged ?? pendingCreative.credits,
+            },
+          },
+        ]);
+        return;
+      }
+
       const result = await confirmCreativeRender(pendingCreative.assetId);
       if (!result.ok && result.error) {
+        if (result.error === 'paid_plan_required') {
+          setUpgradePrompt({
+            message:
+              'Creatives require the Paid plan (~$20/mo). Upgrade to render slides and flyers.',
+            feature: pendingCreative.kind,
+          });
+        } else if (result.error === 'insufficient_credits') {
+          setUpgradePrompt({
+            message:
+              'Not enough credits for this creative. Upgrade or wait for the monthly grant reset.',
+            feature: pendingCreative.kind,
+          });
+        }
         setMessages((prev) => [
           ...prev,
           {
             id: uid(),
             role: 'system',
-            content: `Could not render deck: ${result.error}`,
+            content: `Could not render: ${result.error}`,
           },
         ]);
         return;
       }
       setPendingCreative(null);
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: uid(),
-          role: 'assistant',
-          content: `Your deck is ready${result.slideCount ? ` (${result.slideCount} slides)` : ''}.`,
-          deck: {
-            assetId: result.assetId,
-            downloadName: result.downloadName ?? 'deck.pptx',
-            slideCount: result.slideCount ?? 0,
-            creditsCharged: pendingCreative.credits,
-            previewUrl: result.previewUrl ?? null,
-            downloadUrl: result.downloadUrl ?? null,
+      if (pendingCreative.kind === 'flyer') {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: uid(),
+            role: 'assistant',
+            content: 'Your flyer is ready.',
+            flyer: {
+              assetId: result.assetId,
+              downloadName: result.downloadName ?? 'flyer.pdf',
+              creditsCharged: pendingCreative.credits,
+              previewUrl:
+                result.previewUrl ??
+                (result as { previewDataUrl?: string | null }).previewDataUrl ??
+                null,
+              downloadUrl: result.downloadUrl ?? null,
+            },
           },
-        },
-      ]);
+        ]);
+      } else {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: uid(),
+            role: 'assistant',
+            content: `Your deck is ready${result.slideCount ? ` (${result.slideCount} slides)` : ''}.`,
+            deck: {
+              assetId: result.assetId,
+              downloadName: result.downloadName ?? 'deck.pptx',
+              slideCount: result.slideCount ?? 0,
+              creditsCharged: pendingCreative.credits,
+              previewUrl: result.previewUrl ?? null,
+              downloadUrl: result.downloadUrl ?? null,
+            },
+          },
+        ]);
+      }
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/paid_plan|insufficient_credits/i.test(msg)) {
+        setUpgradePrompt({
+          message: msg,
+          feature: pendingCreative?.kind,
+        });
+      }
       setMessages((prev) => [
         ...prev,
         {
           id: uid(),
           role: 'system',
-          content: err instanceof Error ? err.message : String(err),
+          content: msg,
         },
       ]);
     } finally {
@@ -523,9 +708,73 @@ export function useChatSession(opts?: {
     setPendingCreative(null);
     setMessages((prev) => [
       ...prev,
-      { id: uid(), role: 'system', content: 'Deck cancelled — no credits charged.' },
+      {
+        id: uid(),
+        role: 'system',
+        content:
+          pendingCreative?.kind === 'video'
+            ? 'Video cancelled — no credits charged.'
+            : pendingCreative?.kind === 'flyer'
+              ? 'Flyer cancelled — no credits charged.'
+              : 'Deck cancelled — no credits charged.',
+      },
     ]);
-  }, []);
+  }, [pendingCreative?.kind]);
+
+  const confirmConnector = useCallback(async () => {
+    if (!pendingConnector?.runId || connectorBusy) return;
+    setConnectorBusy(true);
+    try {
+      const result = await executeConnectorRun(pendingConnector.runId);
+      setPendingConnector(null);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: uid(),
+          role: 'assistant',
+          content: `Done: ${pendingConnector.title}. ${
+            result.creditsCharged
+              ? `(${result.creditsCharged} credits)`
+              : ''
+          }\n\`\`\`json\n${JSON.stringify(result.result, null, 2).slice(0, 2000)}\n\`\`\``,
+        },
+      ]);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/paid_plan|402|insufficient_credits/i.test(msg)) {
+        setUpgradePrompt({
+          message: msg,
+          feature: pendingConnector?.action,
+        });
+      }
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: uid(),
+          role: 'system',
+          content: msg,
+        },
+      ]);
+    } finally {
+      setConnectorBusy(false);
+    }
+  }, [pendingConnector, connectorBusy]);
+
+  const declineConnector = useCallback(() => {
+    const runId = pendingConnector?.runId;
+    setPendingConnector(null);
+    if (runId) {
+      void declineConnectorRun(runId).catch(() => undefined);
+    }
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: uid(),
+        role: 'system',
+        content: 'Connector action declined — nothing was sent.',
+      },
+    ]);
+  }, [pendingConnector?.runId]);
 
   const hasUserMessages = messages.some((m) => m.role === 'user');
 
@@ -548,5 +797,11 @@ export function useChatSession(opts?: {
     creativeBusy,
     confirmCreative,
     declineCreative,
+    pendingConnector,
+    connectorBusy,
+    confirmConnector,
+    declineConnector,
+    upgradePrompt,
+    dismissUpgrade: () => setUpgradePrompt(null),
   };
 }

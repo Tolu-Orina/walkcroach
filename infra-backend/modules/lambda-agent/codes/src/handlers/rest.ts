@@ -21,13 +21,19 @@ import { getUsageSummary } from './billing.js';
 import {
   getEntitlement,
   peekHardQuota,
+  peekVideoQuota,
   HARD_QUOTAS,
 } from './billing.js';
 import {
   handleConfirmCreativeRender,
   handleCreativeDownloadUrl,
   handleListCreativeAssets,
+  handleRememberCreative,
 } from './creative.js';
+import {
+  handleConfirmVideoJob,
+  handleGetVideoJob,
+} from './video.js';
 import {
   handleListDeployments,
   handleTriggerDeploy,
@@ -59,6 +65,22 @@ import {
   handleListCodeArtefacts,
 } from './codeArtefacts.js';
 import { handleListMyApps } from './apps.js';
+import {
+  handleBillingCheckout,
+  handleBillingPortal,
+  handleBillingStatus,
+  handleStripeWebhook,
+} from './stripeBilling.js';
+import {
+  handleConnectorOauthCallback,
+  handleConnectorOauthStart,
+  handleDeclineConnectorRun,
+  handleDisconnectConnectorWeb,
+  handleExecuteConnectorRun,
+  handleListConnectorRuns,
+  handleListConnectorsWeb,
+  handleProposeConnectorAction,
+} from './connectors.js';
 
 export type RestResult = {
   statusCode: number;
@@ -1126,6 +1148,72 @@ export async function handleRest(
     }
   }
 
+  /* ── Phase G billing ──────────────────────────────────────────── */
+
+  if (
+    method === 'POST' &&
+    (path === '/webhooks/stripe' || path.endsWith('/webhooks/stripe'))
+  ) {
+    const db = createDbClient();
+    try {
+      const sig =
+        headers['stripe-signature'] ??
+        headers['Stripe-Signature'] ??
+        headers['STRIPE-SIGNATURE'];
+      return await handleStripeWebhook(db, rawBody ?? '', sig);
+    } finally {
+      await db.close();
+    }
+  }
+
+  if (
+    method === 'GET' &&
+    (path === '/billing/status' || path.endsWith('/billing/status'))
+  ) {
+    const authResult = await requireAuth(headers);
+    if ('error' in authResult) {
+      return jsonResponse(authResult.status, { error: authResult.error });
+    }
+    const db = createDbClient();
+    try {
+      return await handleBillingStatus(db, authResult);
+    } finally {
+      await db.close();
+    }
+  }
+
+  if (
+    method === 'POST' &&
+    (path === '/billing/checkout' || path.endsWith('/billing/checkout'))
+  ) {
+    const authResult = await requireAuth(headers);
+    if ('error' in authResult) {
+      return jsonResponse(authResult.status, { error: authResult.error });
+    }
+    const db = createDbClient();
+    try {
+      return await handleBillingCheckout(db, authResult);
+    } finally {
+      await db.close();
+    }
+  }
+
+  if (
+    method === 'POST' &&
+    (path === '/billing/portal' || path.endsWith('/billing/portal'))
+  ) {
+    const authResult = await requireAuth(headers);
+    if ('error' in authResult) {
+      return jsonResponse(authResult.status, { error: authResult.error });
+    }
+    const db = createDbClient();
+    try {
+      return await handleBillingPortal(db, authResult);
+    } finally {
+      await db.close();
+    }
+  }
+
   if (
     method === 'GET' &&
     (path === '/me/creative-quota' || path.endsWith('/me/creative-quota'))
@@ -1136,14 +1224,20 @@ export async function handleRest(
     }
     const db = createDbClient();
     try {
-      const [plan, image] = await Promise.all([
+      const [plan, image, video] = await Promise.all([
         getEntitlement(db, authResult.ownerId),
         peekHardQuota(db, authResult.ownerId, 'image_gen_daily'),
+        peekVideoQuota(db, authResult.ownerId),
       ]);
       return jsonResponse(200, {
         plan,
         image: { ...image, unit: 'day' },
-        video: { ...HARD_QUOTAS.video_gen_3day, unit: '3 days' },
+        video: {
+          ...video,
+          label: HARD_QUOTAS.video_gen_3day.label,
+          interval: HARD_QUOTAS.video_gen_3day.interval,
+          unit: '3 days',
+        },
       });
     } finally {
       await db.close();
@@ -1204,6 +1298,64 @@ export async function handleRest(
         authResult,
         creativeDownloadMatch[1],
       );
+    } finally {
+      await db.close();
+    }
+  }
+
+  const creativeRememberMatch = path.match(
+    /\/creative-assets\/([^/]+)\/remember\/?$/,
+  );
+  if (method === 'POST' && creativeRememberMatch?.[1]) {
+    const authResult = await requireAuth(headers);
+    if ('error' in authResult) {
+      return jsonResponse(authResult.status, { error: authResult.error });
+    }
+    const db = createDbClient();
+    try {
+      let body: { projectId?: string; note?: string } = {};
+      try {
+        body = JSON.parse(rawBody || '{}') as {
+          projectId?: string;
+          note?: string;
+        };
+      } catch {
+        return jsonResponse(400, { error: 'invalid_json' });
+      }
+      return await handleRememberCreative(
+        db,
+        authResult,
+        creativeRememberMatch[1],
+        body,
+      );
+    } finally {
+      await db.close();
+    }
+  }
+
+  const videoConfirmMatch = path.match(/\/video-jobs\/([^/]+)\/confirm\/?$/);
+  if (method === 'POST' && videoConfirmMatch?.[1]) {
+    const authResult = await requireAuth(headers);
+    if ('error' in authResult) {
+      return jsonResponse(authResult.status, { error: authResult.error });
+    }
+    const db = createDbClient();
+    try {
+      return await handleConfirmVideoJob(db, authResult, videoConfirmMatch[1]);
+    } finally {
+      await db.close();
+    }
+  }
+
+  const videoGetMatch = path.match(/\/video-jobs\/([^/]+)\/?$/);
+  if (method === 'GET' && videoGetMatch?.[1]) {
+    const authResult = await requireAuth(headers);
+    if ('error' in authResult) {
+      return jsonResponse(authResult.status, { error: authResult.error });
+    }
+    const db = createDbClient();
+    try {
+      return await handleGetVideoJob(db, authResult, videoGetMatch[1]);
     } finally {
       await db.close();
     }
@@ -1291,6 +1443,177 @@ export async function handleRest(
           citations: Array.isArray(m.citations) ? m.citations : null,
         })),
       });
+    } finally {
+      await db.close();
+    }
+  }
+
+  /* ── Phase F connectors ───────────────────────────────────────── */
+
+  if (
+    method === 'GET' &&
+    (path === '/connectors' || path.endsWith('/connectors'))
+  ) {
+    const authResult = await requireAuth(headers);
+    if ('error' in authResult) {
+      return jsonResponse(authResult.status, { error: authResult.error });
+    }
+    const db = createDbClient();
+    try {
+      return await handleListConnectorsWeb(db, authResult);
+    } finally {
+      await db.close();
+    }
+  }
+
+  if (
+    method === 'GET' &&
+    (path === '/connectors/runs' || path.endsWith('/connectors/runs'))
+  ) {
+    const authResult = await requireAuth(headers);
+    if ('error' in authResult) {
+      return jsonResponse(authResult.status, { error: authResult.error });
+    }
+    const db = createDbClient();
+    try {
+      const qs = new URLSearchParams(queryString.startsWith('?') ? queryString.slice(1) : queryString);
+      return await handleListConnectorRuns(db, authResult, qs.get('limit') ?? undefined);
+    } finally {
+      await db.close();
+    }
+  }
+
+  if (
+    method === 'POST' &&
+    (path === '/connectors/propose' || path.endsWith('/connectors/propose'))
+  ) {
+    const authResult = await requireAuth(headers);
+    if ('error' in authResult) {
+      return jsonResponse(authResult.status, { error: authResult.error });
+    }
+    let body: { action?: string; args?: unknown; sessionId?: string } = {};
+    try {
+      body = JSON.parse(rawBody || '{}') as typeof body;
+    } catch {
+      return jsonResponse(400, { error: 'invalid_json' });
+    }
+    const db = createDbClient();
+    try {
+      return await handleProposeConnectorAction(db, authResult, body);
+    } finally {
+      await db.close();
+    }
+  }
+
+  if (
+    method === 'POST' &&
+    (path === '/connectors/oauth/callback' ||
+      path.endsWith('/connectors/oauth/callback'))
+  ) {
+    const authResult = await requireAuth(headers);
+    if ('error' in authResult) {
+      return jsonResponse(authResult.status, { error: authResult.error });
+    }
+    let body: { code?: string; state?: string } = {};
+    try {
+      body = JSON.parse(rawBody || '{}') as typeof body;
+    } catch {
+      return jsonResponse(400, { error: 'invalid_json' });
+    }
+    const db = createDbClient();
+    try {
+      return await handleConnectorOauthCallback(db, authResult, body);
+    } finally {
+      await db.close();
+    }
+  }
+
+  const connectorOauthStart = path.match(
+    /\/connectors\/([^/]+)\/oauth\/start\/?$/,
+  );
+  if (method === 'POST' && connectorOauthStart?.[1]) {
+    const authResult = await requireAuth(headers);
+    if ('error' in authResult) {
+      return jsonResponse(authResult.status, { error: authResult.error });
+    }
+    let body: { surface?: string } = {};
+    try {
+      body = JSON.parse(rawBody || '{}') as typeof body;
+    } catch {
+      body = {};
+    }
+    const db = createDbClient();
+    try {
+      return await handleConnectorOauthStart(
+        db,
+        authResult,
+        connectorOauthStart[1],
+        body,
+      );
+    } finally {
+      await db.close();
+    }
+  }
+
+  const connectorDisconnect = path.match(/\/connectors\/([^/]+)\/?$/);
+  if (
+    method === 'DELETE' &&
+    connectorDisconnect?.[1] &&
+    connectorDisconnect[1] !== 'runs' &&
+    connectorDisconnect[1] !== 'propose' &&
+    connectorDisconnect[1] !== 'oauth'
+  ) {
+    const authResult = await requireAuth(headers);
+    if ('error' in authResult) {
+      return jsonResponse(authResult.status, { error: authResult.error });
+    }
+    const db = createDbClient();
+    try {
+      return await handleDisconnectConnectorWeb(
+        db,
+        authResult,
+        connectorDisconnect[1],
+      );
+    } finally {
+      await db.close();
+    }
+  }
+
+  const connectorExecute = path.match(
+    /\/connectors\/runs\/([^/]+)\/execute\/?$/,
+  );
+  if (method === 'POST' && connectorExecute?.[1]) {
+    const authResult = await requireAuth(headers);
+    if ('error' in authResult) {
+      return jsonResponse(authResult.status, { error: authResult.error });
+    }
+    const db = createDbClient();
+    try {
+      return await handleExecuteConnectorRun(
+        db,
+        authResult,
+        connectorExecute[1],
+      );
+    } finally {
+      await db.close();
+    }
+  }
+
+  const connectorDecline = path.match(
+    /\/connectors\/runs\/([^/]+)\/decline\/?$/,
+  );
+  if (method === 'POST' && connectorDecline?.[1]) {
+    const authResult = await requireAuth(headers);
+    if ('error' in authResult) {
+      return jsonResponse(authResult.status, { error: authResult.error });
+    }
+    const db = createDbClient();
+    try {
+      return await handleDeclineConnectorRun(
+        db,
+        authResult,
+        connectorDecline[1],
+      );
     } finally {
       await db.close();
     }

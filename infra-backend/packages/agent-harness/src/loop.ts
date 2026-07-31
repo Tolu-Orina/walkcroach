@@ -14,11 +14,30 @@ import {
   type ParsedToolUse,
 } from './bedrock.js';
 import { recallProjectMemory, writeMemoryEntry } from './memory.js';
+import {
+  embedAndStoreCreativeAsset,
+  recallCreativeAssets,
+  saveCreativeToProjectMemory,
+} from './creative-memory.js';
+import { recallWorkflowRuns } from './workflow-memory.js';
+import { getSharedMcpClient, isMcpWriteTool } from './mcp.js';
+import { moderateCreativeCopy } from './creative-moderation.js';
+import {
+  configuredProviders,
+  describeAction,
+  getAction,
+  getConnector,
+  listConnectors,
+  recordProposal,
+  toConnectorView,
+  validateActionArgs,
+  type ActionId,
+} from '@walkcroach/connectors';
 import { refreshProjectMemorySummary } from './project-memory.js';
 import { loadWebSkill, webSkillsCatalogText } from './web-skills.js';
 import { generateCanvasImage } from './image-gen.js';
-import { generateCreativeBrief } from './creative-brief.js';
-import { invokeRenderPptx } from './creative-client.js';
+import { generateCreativeBrief, generateFlyerBrief, generateVideoBrief } from './creative-brief.js';
+import { invokeComposeVideo } from './creative-client.js';
 import { randomUUID } from 'node:crypto';
 import {
   formatProjectKnowledgeBlock,
@@ -70,12 +89,56 @@ export type CreativeLimits = {
   imageDailyLimit: number;
   /** Deck render credit cost (paid only). */
   pptxCreditCost: number;
+  /** Flyer render credit cost (paid only). */
+  flyerCreditCost: number;
+  /** Video job credit cost (paid only). */
+  videoCreditCost: number;
+  /** Remaining video slots in the rolling 72h window (0 or 1). */
+  videoRemaining: number;
+  videoLimit: number;
+  videoResetAt?: string;
   ownerId?: string;
   /** BFF-injected debit — agent-harness must not import billing directly. */
   debitCredits?: (
     actionType: string,
     metadata?: Record<string, unknown>,
   ) => Promise<{ ok: boolean; remaining: number }>;
+  /**
+   * BFF-injected atomic hard-quota consume (Phase H1). Prefer this over
+   * in-memory `imageDailyRemaining -= 1` so concurrent turns cannot bypass
+   * the 3/24h Canvas cap.
+   */
+  consumeHardQuota?: (amount?: number) => Promise<{
+    ok: boolean;
+    used: number;
+    limit: number;
+    resetAt?: string;
+  }>;
+  /** Roll back a failed Canvas reservation. */
+  releaseHardQuota?: (amount?: number) => Promise<void>;
+  /** Refund credits after a failed creative/video start. */
+  refundCredits?: (
+    actionType: string,
+    amount: number,
+    metadata?: Record<string, unknown>,
+  ) => Promise<{ remaining: number }>;
+  /**
+   * BFF-injected REST confirm for decks/flyers — agent must not render with
+   * confirmed=true alone (propose→confirm→execute).
+   */
+  confirmCreativeAsset?: (assetId: string) => Promise<{
+    ok: boolean;
+    status?: string;
+    error?: string;
+    downloadName?: string;
+  }>;
+  /** BFF-injected video confirm/start (REST also exposes POST /video-jobs/:id/confirm). */
+  startVideoJob?: (jobId: string) => Promise<{
+    ok: boolean;
+    status?: string;
+    error?: string;
+    remainingCredits?: number;
+  }>;
 };
 
 export function defaultCreativeLimits(): CreativeLimits {
@@ -85,6 +148,10 @@ export function defaultCreativeLimits(): CreativeLimits {
     imageDailyRemaining: IMAGE_GEN_DAILY_LIMIT,
     imageDailyLimit: IMAGE_GEN_DAILY_LIMIT,
     pptxCreditCost: 20,
+    flyerCreditCost: 10,
+    videoCreditCost: 270,
+    videoRemaining: 0,
+    videoLimit: 1,
   };
 }
 
@@ -138,8 +205,14 @@ ${antiLeak}`
         ? `You are WalkCroach Chat — a helpful assistant for the WalkCroach ecosystem.
 ${webSearchLine}
 ${mode === 'project_chat' ? 'You are working inside a Project — obey standing instructions and use project documents when relevant.' : 'You may use recall_project_memory / remember_preference when a project is linked.'}
-You can generate images with generate_image when the user asks for a visual — it is hard-capped at 3 per rolling day for everyone; paying users also spend 5 credits per image.
+You can generate images with generate_image when the user asks for a visual — paid plan only, 5 credits each, hard-capped at 3 per rolling day. Free users must upgrade.
 For slide decks, call load_skill("walkcroach-pptx") then generate_creative_brief (paid). Wait for the user to confirm the ConfirmCard before render_pptx with confirmed=true.
+For flyers/posters, call load_skill("walkcroach-flyer") and load_skill("walkcroach-creative-philosophy"), then generate_flyer_brief (paid). Wait for ConfirmCard before render_flyer with confirmed=true.
+For ≤30s video ads, call load_skill("walkcroach-video-studio") then generate_video_brief (paid). Wait for ConfirmCard before start_video_job. One Nova Reel MULTI_SHOT_AUTOMATED job at durationSeconds=30 (not five 6s clips). Hard cap: 1 video / 72h.
+When the user asks for “another like X” or “like last time”, call recall_creative before drafting a new brief.
+When they want to keep a finished creative, call save_creative_memory (project-linked).
+For email / calendar / Slack / Sheets / Stripe / HubSpot, call load_skill("walkcroach-connectors"), then list_connectors if needed, then propose_connector_action. NEVER claim you sent/scheduled anything until the user confirms the ConfirmCard (REST execute). Use recall_workflow_runs for “what did we send last week”.
+For CockroachDB Managed MCP (when configured), use cockroach_mcp — write tools need confirmed=true after explicit user approval.
 When the request matches a creative task (image, slides, flyer, video), load the matching skill with load_skill first for correct steps and QA.
 You cannot edit app files or run terminals in Chat mode — suggest opening App Builder for that.
 ${antiLeak}`
@@ -342,6 +415,495 @@ async function executeServerTool(params: {
       };
     }
 
+    if (tool.name === 'recall_creative') {
+      const query = String(tool.input.query ?? '').slice(0, 2000);
+      const limit = Number(tool.input.limit ?? 5);
+      const ownerId = creative.ownerId;
+      if (!query) {
+        return {
+          events,
+          result: {
+            toolUseId: tool.toolUseId,
+            status: 'error',
+            content: [{ text: 'recall_creative requires query.' }],
+          },
+        };
+      }
+      if (!ownerId) {
+        return {
+          events,
+          result: {
+            toolUseId: tool.toolUseId,
+            status: 'error',
+            content: [{ text: 'recall_creative requires an authenticated owner.' }],
+          },
+        };
+      }
+      const kindFilter =
+        tool.input.kind === 'slide_deck' ||
+        tool.input.kind === 'flyer' ||
+        tool.input.kind === 'image'
+          ? [String(tool.input.kind)]
+          : undefined;
+      const hits = await recallCreativeAssets({
+        db,
+        ownerId,
+        query,
+        limit,
+        kinds: kindFilter,
+      });
+      events.push(
+        memoryRecalledEvent(
+          hits.map((h) => ({
+            kind: `creative:${h.kind}`,
+            text: `${h.title} — ${h.summary.slice(0, 240)}`,
+            sourceSurface: 'web',
+          })),
+        ),
+      );
+      await appendBuildEvent(
+        db,
+        sessionId,
+        tool.name,
+        tool.input,
+        `hits=${hits.length}`,
+      );
+      return {
+        events,
+        result: {
+          toolUseId: tool.toolUseId,
+          status: 'success',
+          content: [
+            {
+              text:
+                hits.length === 0
+                  ? 'No matching creatives yet.'
+                  : hits
+                      .map(
+                        (h) =>
+                          `[${h.kind}] id=${h.id} (dist=${h.distance.toFixed(3)}) ${h.title}`,
+                      )
+                      .join('\n'),
+            },
+          ],
+        },
+      };
+    }
+
+    if (tool.name === 'save_creative_memory') {
+      const assetId = String(tool.input.assetId ?? '');
+      if (!assetId) {
+        return {
+          events,
+          result: {
+            toolUseId: tool.toolUseId,
+            status: 'error',
+            content: [{ text: 'save_creative_memory requires assetId.' }],
+          },
+        };
+      }
+      if (!projectId) {
+        return {
+          events,
+          result: {
+            toolUseId: tool.toolUseId,
+            status: 'error',
+            content: [
+              {
+                text: 'save_creative_memory needs a linked project — open Project Chat or App Builder.',
+              },
+            ],
+          },
+        };
+      }
+      const { rows } = await db.query<{
+        id: string;
+        kind: string;
+        brief: Record<string, unknown>;
+        owner_id: string;
+        status: string;
+      }>(
+        `SELECT id, kind, brief, owner_id, status FROM creative_assets WHERE id = $1::uuid`,
+        [assetId],
+      );
+      const row = rows[0];
+      if (!row || row.status !== 'ready') {
+        return {
+          events,
+          result: {
+            toolUseId: tool.toolUseId,
+            status: 'error',
+            content: [{ text: 'Creative not found or not ready.' }],
+          },
+        };
+      }
+      if (creative.ownerId && row.owner_id !== creative.ownerId) {
+        return {
+          events,
+          result: {
+            toolUseId: tool.toolUseId,
+            status: 'error',
+            content: [{ text: 'Not allowed to save this creative.' }],
+          },
+        };
+      }
+      const title =
+        (typeof row.brief?.title === 'string' && row.brief.title) ||
+        (typeof row.brief?.headline === 'string' && row.brief.headline) ||
+        row.kind;
+      const memId = await saveCreativeToProjectMemory({
+        db,
+        projectId,
+        assetId,
+        kind: row.kind,
+        title,
+        note:
+          typeof tool.input.note === 'string' ? tool.input.note : undefined,
+      });
+      await appendBuildEvent(
+        db,
+        sessionId,
+        tool.name,
+        { assetId, memId },
+        `saved`,
+      );
+      return {
+        events,
+        result: {
+          toolUseId: tool.toolUseId,
+          status: 'success',
+          content: [{ text: `Saved creative ${assetId} to project memory (${memId}).` }],
+        },
+      };
+    }
+
+    if (tool.name === 'list_connectors') {
+      const ownerId = creative.ownerId;
+      if (!ownerId) {
+        return {
+          events,
+          result: {
+            toolUseId: tool.toolUseId,
+            status: 'error',
+            content: [{ text: 'list_connectors requires an authenticated owner.' }],
+          },
+        };
+      }
+      const rows = await listConnectors(db, ownerId);
+      const byProvider = new Map(rows.map((r) => [r.provider, r]));
+      const providers = configuredProviders().map((p) => {
+        const row = byProvider.get(p.id);
+        return {
+          id: p.id,
+          label: p.label,
+          tier: p.tier,
+          connected: Boolean(row && row.status === 'connected'),
+          connection: row ? toConnectorView(row) : null,
+        };
+      });
+      const connectUrl = (() => {
+        const base = (process.env.WEB_APP_URL ?? '').replace(/\/$/, '');
+        return base ? `${base}/app/settings/connections` : '/app/settings/connections';
+      })();
+      await appendBuildEvent(db, sessionId, tool.name, {}, `n=${providers.length}`);
+      return {
+        events,
+        result: {
+          toolUseId: tool.toolUseId,
+          status: 'success',
+          content: [
+            {
+              text:
+                providers.length === 0
+                  ? `No OAuth apps configured yet. User can connect at ${connectUrl} once credentials are set.`
+                  : JSON.stringify({ providers, connectUrl }, null, 2),
+            },
+          ],
+        },
+      };
+    }
+
+    if (tool.name === 'propose_connector_action') {
+      const ownerId = creative.ownerId;
+      const actionId = String(tool.input.action ?? '').trim();
+      if (!ownerId) {
+        return {
+          events,
+          result: {
+            toolUseId: tool.toolUseId,
+            status: 'error',
+            content: [{ text: 'propose_connector_action requires an authenticated owner.' }],
+          },
+        };
+      }
+      const action = getAction(actionId);
+      if (!action) {
+        return {
+          events,
+          result: {
+            toolUseId: tool.toolUseId,
+            status: 'error',
+            content: [{ text: `unknown action: ${actionId}` }],
+          },
+        };
+      }
+      const validated = validateActionArgs(actionId, tool.input.args ?? {});
+      if (!validated.ok) {
+        return {
+          events,
+          result: {
+            toolUseId: tool.toolUseId,
+            status: 'error',
+            content: [{ text: validated.error }],
+          },
+        };
+      }
+      const connector = await getConnector(db, ownerId, action.provider);
+      const connectUrl = (() => {
+        const base = (process.env.WEB_APP_URL ?? '').replace(/\/$/, '');
+        return base ? `${base}/app/settings/connections` : '/app/settings/connections';
+      })();
+      if (!connector || connector.status === 'revoked') {
+        events.push({
+          type: 'connector_action_proposed',
+          runId: '',
+          action: action.id,
+          title: action.label,
+          consequence: action.consequence,
+          write: action.write,
+          irreversible: action.irreversible,
+          weight: action.weight,
+          rows: describeAction(action.id as ActionId, validated.args),
+          needsConnection: action.provider,
+          connectUrl,
+        });
+        return {
+          events,
+          result: {
+            toolUseId: tool.toolUseId,
+            status: 'error',
+            content: [
+              {
+                text: `${action.label} needs ${action.provider} connected first. Direct the user to ${connectUrl}.`,
+              },
+            ],
+          },
+        };
+      }
+      const run = await recordProposal(db, {
+        ownerId,
+        connectorId: connector.id,
+        surface: 'web',
+        action: action.id,
+        proposed: { action: action.id, args: validated.args },
+        sessionId,
+      });
+      events.push({
+        type: 'connector_action_proposed',
+        runId: run.id,
+        action: action.id,
+        title: action.label,
+        consequence: action.consequence,
+        write: action.write,
+        irreversible: action.irreversible,
+        weight: action.weight,
+        rows: describeAction(action.id as ActionId, validated.args),
+      });
+      await appendBuildEvent(
+        db,
+        sessionId,
+        tool.name,
+        { action: action.id, runId: run.id },
+        'proposed',
+      );
+      return {
+        events,
+        result: {
+          toolUseId: tool.toolUseId,
+          status: 'success',
+          content: [
+            {
+              text:
+                `Proposed ${action.id} (run ${run.id}). ConfirmCard shown — ` +
+                `do NOT claim execution until the user confirms. Credits on confirm: ${action.weight}.`,
+            },
+          ],
+        },
+      };
+    }
+
+    if (tool.name === 'recall_workflow_runs') {
+      const query = String(tool.input.query ?? '').slice(0, 2000);
+      const limit = Number(tool.input.limit ?? 5);
+      const ownerId = creative.ownerId;
+      if (!query) {
+        return {
+          events,
+          result: {
+            toolUseId: tool.toolUseId,
+            status: 'error',
+            content: [{ text: 'recall_workflow_runs requires query.' }],
+          },
+        };
+      }
+      if (!ownerId) {
+        return {
+          events,
+          result: {
+            toolUseId: tool.toolUseId,
+            status: 'error',
+            content: [
+              { text: 'recall_workflow_runs requires an authenticated owner.' },
+            ],
+          },
+        };
+      }
+      const hits = await recallWorkflowRuns({ db, ownerId, query, limit });
+      events.push(
+        memoryRecalledEvent(
+          hits.map((h) => ({
+            kind: `workflow:${h.action}`,
+            text: `${h.status} — ${h.summary.slice(0, 240)}`,
+            sourceSurface: 'web',
+          })),
+        ),
+      );
+      await appendBuildEvent(
+        db,
+        sessionId,
+        tool.name,
+        tool.input,
+        `hits=${hits.length}`,
+      );
+      return {
+        events,
+        result: {
+          toolUseId: tool.toolUseId,
+          status: 'success',
+          content: [
+            {
+              text:
+                hits.length === 0
+                  ? 'No matching workflow runs yet.'
+                  : hits
+                      .map(
+                        (h) =>
+                          `[${h.action}] id=${h.id} status=${h.status} (dist=${h.distance.toFixed(3)}) ${h.summary.slice(0, 160)}`,
+                      )
+                      .join('\n'),
+            },
+          ],
+        },
+      };
+    }
+
+    if (tool.name === 'cockroach_mcp') {
+      try {
+        const client = await getSharedMcpClient();
+        if (!client) {
+          return {
+            events,
+            result: {
+              toolUseId: tool.toolUseId,
+              status: 'error',
+              content: [
+                {
+                  text: 'CockroachDB Managed MCP is not configured (set CRDB_MCP_API_KEY).',
+                },
+              ],
+            },
+          };
+        }
+        if (tool.input.listOnly === true) {
+          const tools = client.listTools();
+          return {
+            events,
+            result: {
+              toolUseId: tool.toolUseId,
+              status: 'success',
+              content: [
+                {
+                  text:
+                    tools.length === 0
+                      ? 'No MCP tools listed.'
+                      : tools
+                          .map(
+                            (t) =>
+                              `${t.name}${t.description ? ` — ${t.description}` : ''}`,
+                          )
+                          .join('\n'),
+                },
+              ],
+            },
+          };
+        }
+        const mcpTool = String(tool.input.tool ?? '').trim();
+        if (!mcpTool) {
+          return {
+            events,
+            result: {
+              toolUseId: tool.toolUseId,
+              status: 'error',
+              content: [
+                {
+                  text: 'cockroach_mcp requires tool, or listOnly=true.',
+                },
+              ],
+            },
+          };
+        }
+        if (isMcpWriteTool(mcpTool) && tool.input.confirmed !== true) {
+          return {
+            events,
+            result: {
+              toolUseId: tool.toolUseId,
+              status: 'error',
+              content: [
+                {
+                  text: `MCP tool "${mcpTool}" is treated as write/mutating. Ask the user to approve, then call cockroach_mcp again with confirmed=true.`,
+                },
+              ],
+            },
+          };
+        }
+        const args =
+          tool.input.args &&
+          typeof tool.input.args === 'object' &&
+          !Array.isArray(tool.input.args)
+            ? (tool.input.args as Record<string, unknown>)
+            : {};
+        const out = await client.callTool(mcpTool, args);
+        await appendBuildEvent(
+          db,
+          sessionId,
+          tool.name,
+          { tool: mcpTool },
+          `ok chars=${out.length}`,
+        );
+        return {
+          events,
+          result: {
+            toolUseId: tool.toolUseId,
+            status: 'success',
+            content: [{ text: out.slice(0, 12_000) }],
+          },
+        };
+      } catch (err) {
+        return {
+          events,
+          result: {
+            toolUseId: tool.toolUseId,
+            status: 'error',
+            content: [
+              {
+                text: err instanceof Error ? err.message : 'MCP call failed',
+              },
+            ],
+          },
+        };
+      }
+    }
+
     if (tool.name === 'web_search') {
       const query = String(tool.input.query ?? '');
       const limit = Number(tool.input.limit ?? 5);
@@ -458,8 +1020,42 @@ async function executeServerTool(params: {
         };
       }
 
-      // Hard daily cap — applies to every owner, paid or free.
+      // Profitability (§7.1): images are paid-only. Free → upgrade CTA.
+      if (!creative.isPaid) {
+        events.push({
+          type: 'upgrade_required',
+          reason: 'paid_plan_required',
+          feature: 'generate_image',
+          message:
+            'Image generation is on the Paid plan (~$20/mo). Upgrade to unlock Nova Canvas (≤3/day).',
+        });
+        return {
+          events,
+          result: {
+            toolUseId: tool.toolUseId,
+            status: 'error',
+            content: [
+              {
+                text: 'Image generation requires a Paid plan. Tell the user to upgrade in Settings → Usage & billing.',
+              },
+            ],
+          },
+        };
+      }
+
+      // Hard daily cap — applies even on paid (margin protection).
       if (creative.imageDailyRemaining <= 0) {
+        const { creativeMetric } = await import('./metrics.js');
+        creativeMetric('CreativeQuotaDenied', {
+          feature: 'generate_image',
+          tier: creative.isPaid ? 'paid' : 'free',
+        });
+        events.push({
+          type: 'upgrade_required',
+          reason: 'image_quota_exceeded',
+          feature: 'generate_image',
+          message: `Daily image limit reached (${creative.imageDailyLimit}/${creative.imageDailyLimit}). Resets within 24 hours.`,
+        });
         events.push({
           type: 'warning',
           message: `Daily image limit reached (${creative.imageDailyLimit}/${creative.imageDailyLimit}). Resets within 24 hours.`,
@@ -478,13 +1074,95 @@ async function executeServerTool(params: {
         };
       }
 
-      // Paid gate: image gen spends credits only for paying users.
-      if (creative.isPaid && creative.imageCreditCost > 0) {
-        events.push({
-          type: 'image_credit_required',
-          credits: creative.imageCreditCost,
-          prompt,
+      // Debit first, then atomic quota, then Canvas — so failed debit never
+      // burns a daily slot. Quota release + credit refund on Canvas failure.
+      if (creative.imageCreditCost > 0 && creative.debitCredits) {
+        const debit = await creative.debitCredits('generate_image', {
+          prompt: prompt.slice(0, 120),
         });
+        if (!debit.ok) {
+          events.push({
+            type: 'upgrade_required',
+            reason: 'insufficient_credits',
+            feature: 'generate_image',
+            message: `Not enough credits for an image (${creative.imageCreditCost} needed, ${debit.remaining} left).`,
+          });
+          return {
+            events,
+            result: {
+              toolUseId: tool.toolUseId,
+              status: 'error',
+              content: [
+                {
+                  text: `Insufficient credits for generate_image (need ${creative.imageCreditCost}, have ${debit.remaining}).`,
+                },
+              ],
+            },
+          };
+        }
+      }
+
+      let quotaReserved = false;
+      if (creative.consumeHardQuota) {
+        const consumed = await creative.consumeHardQuota(1);
+        if (!consumed.ok) {
+          const { creativeMetric } = await import('./metrics.js');
+          creativeMetric('CreativeQuotaDenied', {
+            feature: 'generate_image',
+            tier: 'paid',
+          });
+          if (creative.imageCreditCost > 0 && creative.refundCredits) {
+            await creative.refundCredits(
+              'generate_image',
+              creative.imageCreditCost,
+              { reason: 'quota_denied_after_debit' },
+            );
+          }
+          creative.imageDailyRemaining = 0;
+          events.push({
+            type: 'upgrade_required',
+            reason: 'image_quota_exceeded',
+            feature: 'generate_image',
+            message: `Daily image limit reached (${consumed.limit}/${consumed.limit}). Resets within 24 hours.`,
+          });
+          return {
+            events,
+            result: {
+              toolUseId: tool.toolUseId,
+              status: 'error',
+              content: [
+                {
+                  text: `Daily image generation limit reached (${consumed.limit} per rolling 24 hours).`,
+                },
+              ],
+            },
+          };
+        }
+        quotaReserved = true;
+        creative.imageDailyRemaining = Math.max(
+          0,
+          consumed.limit - consumed.used,
+        );
+      }
+
+      let img: Awaited<ReturnType<typeof generateCanvasImage>>;
+      try {
+        img = await generateCanvasImage({ prompt, aspect, negativePrompt });
+      } catch (err) {
+        if (quotaReserved && creative.releaseHardQuota) {
+          await creative.releaseHardQuota(1);
+          creative.imageDailyRemaining = Math.min(
+            creative.imageDailyLimit,
+            creative.imageDailyRemaining + 1,
+          );
+        }
+        if (creative.imageCreditCost > 0 && creative.refundCredits) {
+          await creative.refundCredits(
+            'generate_image',
+            creative.imageCreditCost,
+            { reason: 'canvas_failed' },
+          );
+        }
         return {
           events,
           result: {
@@ -492,15 +1170,54 @@ async function executeServerTool(params: {
             status: 'error',
             content: [
               {
-                text: `This image costs ${creative.imageCreditCost} credits (paid plan). The user must confirm the spend — do not retry generate_image until they explicitly approve the cost.`,
+                text: `Image generation failed: ${err instanceof Error ? err.message : String(err)}`,
               },
             ],
           },
         };
       }
-
-      const img = await generateCanvasImage({ prompt, aspect, negativePrompt });
-      creative.imageDailyRemaining -= 1;
+      if (!creative.consumeHardQuota) {
+        creative.imageDailyRemaining -= 1;
+      }
+      {
+        const { creativeMetric } = await import('./metrics.js');
+        creativeMetric('ImageGenCount', {
+          feature: 'canvas',
+          tier: creative.isPaid ? 'paid' : 'free',
+        });
+      }
+      const ownerId = creative.ownerId ?? 'anonymous';
+      const altText = `Generated image: ${prompt.slice(0, 180)}`;
+      await db.query(
+        `INSERT INTO creative_assets
+           (id, project_id, owner_id, session_id, kind, brief, status, s3_key,
+            download_name, images_consumed, alt_text, credits_charged)
+         VALUES ($1::uuid, $2::uuid, $3, $4::uuid, 'image', $5::jsonb, 'ready', $6,
+                 $7, 1, $8, $9)`,
+        [
+          img.assetId,
+          projectId,
+          ownerId,
+          sessionId,
+          JSON.stringify({ title: prompt.slice(0, 120), prompt, altText }),
+          img.storageKey ?? null,
+          `${img.assetId}.png`,
+          altText,
+          creative.imageCreditCost,
+        ],
+      );
+      try {
+        await embedAndStoreCreativeAsset({
+          db,
+          assetId: img.assetId,
+          kind: 'image',
+          brief: { title: prompt.slice(0, 120), prompt },
+          altText,
+          downloadName: `${img.assetId}.png`,
+        });
+      } catch {
+        /* embedding optional if Titan unavailable locally */
+      }
       await appendBuildEvent(
         db,
         sessionId,
@@ -536,8 +1253,11 @@ async function executeServerTool(params: {
     if (tool.name === 'generate_creative_brief') {
       if (!creative.isPaid) {
         events.push({
-          type: 'warning',
-          message: 'Slide decks require a paid WalkCroach plan.',
+          type: 'upgrade_required',
+          reason: 'paid_plan_required',
+          feature: 'slides',
+          message:
+            'Slide decks require Paid (~$20/mo). Upgrade to unlock Nova Pro briefs and pptx render.',
         });
         return {
           events,
@@ -572,6 +1292,27 @@ async function executeServerTool(params: {
             : undefined,
         tone: typeof tool.input.tone === 'string' ? tool.input.tone : undefined,
       });
+      const mod = await moderateCreativeCopy({
+        title: brief.title,
+        slides: brief.slides,
+      });
+      if (!mod.ok) {
+        return {
+          events,
+          result: {
+            toolUseId: tool.toolUseId,
+            status: 'error',
+            content: [
+              {
+                text:
+                  `Marketing moderation blocked this deck brief (${mod.source}): ` +
+                  mod.reasons.join('; ') +
+                  '. Soften absolute claims and regenerate.',
+              },
+            ],
+          },
+        };
+      }
       const assetId = randomUUID();
       const ownerId = creative.ownerId ?? 'anonymous';
       await db.query(
@@ -653,91 +1394,9 @@ async function executeServerTool(params: {
         };
       }
 
-      const ownerId = creative.ownerId ?? 'anonymous';
-      let assetId = typeof tool.input.assetId === 'string' ? tool.input.assetId : '';
-      let brief: Record<string, unknown> | null =
-        tool.input.brief && typeof tool.input.brief === 'object'
-          ? (tool.input.brief as Record<string, unknown>)
-          : null;
-
-      if (assetId) {
-        const { rows } = await db.query<{
-          brief: Record<string, unknown>;
-          status: string;
-          owner_id: string;
-        }>(
-          `SELECT brief, status, owner_id FROM creative_assets WHERE id = $1::uuid`,
-          [assetId],
-        );
-        const row = rows[0];
-        if (!row || row.owner_id !== ownerId) {
-          return {
-            events,
-            result: {
-              toolUseId: tool.toolUseId,
-              status: 'error',
-              content: [{ text: `Unknown creative asset ${assetId}` }],
-            },
-          };
-        }
-        brief = row.brief;
-      } else {
-        assetId = randomUUID();
-        if (!brief) {
-          return {
-            events,
-            result: {
-              toolUseId: tool.toolUseId,
-              status: 'error',
-              content: [{ text: 'render_pptx requires assetId or brief.' }],
-            },
-          };
-        }
-        await db.query(
-          `INSERT INTO creative_assets
-             (id, project_id, owner_id, session_id, kind, brief, status)
-           VALUES ($1::uuid, $2::uuid, $3, $4::uuid, 'slide_deck', $5::jsonb, 'generating')`,
-          [assetId, projectId, ownerId, sessionId, JSON.stringify(brief)],
-        );
-      }
-
-      await db.query(
-        `UPDATE creative_assets SET status = 'generating', updated_at = now() WHERE id = $1::uuid`,
-        [assetId],
-      );
-
-      // Debit before render (BFF injects debitCredits). Fail closed if unpaid.
-      if (creative.debitCredits) {
-        const debit = await creative.debitCredits('render_pptx', { assetId });
-        if (!debit.ok) {
-          return {
-            events,
-            result: {
-              toolUseId: tool.toolUseId,
-              status: 'error',
-              content: [
-                {
-                  text: `Insufficient credits for render_pptx (${debit.remaining} remaining; need ${creative.pptxCreditCost}).`,
-                },
-              ],
-            },
-          };
-        }
-      }
-
-      const rendered = await invokeRenderPptx({
-        brief: brief!,
-        ownerId,
-        assetId,
-      });
-
-      if (!rendered.ok) {
-        await db.query(
-          `UPDATE creative_assets
-           SET status = 'failed', error = $2, updated_at = now()
-           WHERE id = $1::uuid`,
-          [assetId, (rendered.error ?? 'render failed').slice(0, 1000)],
-        );
+      const assetId =
+        typeof tool.input.assetId === 'string' ? tool.input.assetId.trim() : '';
+      if (!assetId) {
         return {
           events,
           result: {
@@ -745,47 +1404,48 @@ async function executeServerTool(params: {
             status: 'error',
             content: [
               {
-                text:
-                  `render_pptx failed: ${rendered.error ?? 'unknown'}` +
-                  (rendered.stdout ? `\nvalidate: ${rendered.stdout}` : ''),
+                text: 'render_pptx requires assetId from generate_creative_brief. Confirm via the ConfirmCard (REST) — agent-side render is disabled.',
               },
             ],
           },
         };
       }
-
-      await db.query(
-        `UPDATE creative_assets
-         SET status = 'ready',
-             s3_key = $2,
-             preview_s3_key = $3,
-             download_name = $4,
-             credits_charged = $5,
-             updated_at = now()
-         WHERE id = $1::uuid`,
-        [
-          assetId,
-          rendered.s3Key ?? null,
-          rendered.previewS3Key ?? null,
-          rendered.downloadName ?? 'deck.pptx',
-          creative.pptxCreditCost,
-        ],
-      );
-      await appendBuildEvent(
-        db,
-        sessionId,
-        tool.name,
-        { assetId },
-        `s3=${rendered.s3Key} slides=${rendered.slideCount}`,
-      );
+      if (!creative.confirmCreativeAsset) {
+        return {
+          events,
+          result: {
+            toolUseId: tool.toolUseId,
+            status: 'error',
+            content: [
+              {
+                text: 'Confirm the deck with the ConfirmCard in the UI. Agent-side confirmed=true render is disabled (propose→confirm→execute).',
+              },
+            ],
+          },
+        };
+      }
+      const confirmed = await creative.confirmCreativeAsset(assetId);
+      if (!confirmed.ok) {
+        return {
+          events,
+          result: {
+            toolUseId: tool.toolUseId,
+            status: 'error',
+            content: [
+              {
+                text: `render_pptx confirm failed: ${confirmed.error ?? 'unknown'}`,
+              },
+            ],
+          },
+        };
+      }
       events.push({
         type: 'creative_asset_ready',
         assetId,
         kind: 'slide_deck',
-        downloadName: rendered.downloadName ?? 'deck.pptx',
-        s3Key: rendered.s3Key ?? '',
-        previewS3Key: rendered.previewS3Key,
-        slideCount: rendered.slideCount ?? 0,
+        downloadName: confirmed.downloadName ?? 'deck.pptx',
+        s3Key: '',
+        slideCount: 0,
         creditsCharged: creative.pptxCreditCost,
       });
       return {
@@ -795,10 +1455,475 @@ async function executeServerTool(params: {
           status: 'success',
           content: [
             {
+              text: `Deck confirm accepted (asset ${assetId}, status ${confirmed.status ?? 'ready'}). The client shows the download.`,
+            },
+          ],
+        },
+      };
+    }
+
+    if (tool.name === 'generate_flyer_brief') {
+      if (!creative.isPaid) {
+        events.push({
+          type: 'upgrade_required',
+          reason: 'paid_plan_required',
+          feature: 'flyer',
+          message:
+            'Flyers require Paid (~$20/mo). Upgrade to unlock flyer studio.',
+        });
+        return {
+          events,
+          result: {
+            toolUseId: tool.toolUseId,
+            status: 'error',
+            content: [
+              {
+                text: 'generate_flyer_brief is paid-only. Tell the user to upgrade — do not invent a flyer.',
+              },
+            ],
+          },
+        };
+      }
+      const topic = String(tool.input.topic ?? '').slice(0, 2000);
+      if (!topic) {
+        return {
+          events,
+          result: {
+            toolUseId: tool.toolUseId,
+            status: 'error',
+            content: [{ text: 'generate_flyer_brief requires topic.' }],
+          },
+        };
+      }
+      const tmpl =
+        tool.input.template === 'event' || tool.input.template === 'announcement'
+          ? tool.input.template
+          : 'sale';
+      const { brief, stub } = await generateFlyerBrief({
+        topic,
+        template: tmpl,
+        brand:
+          typeof tool.input.brand === 'string' ? tool.input.brand : undefined,
+        audience:
+          typeof tool.input.audience === 'string'
+            ? tool.input.audience
+            : undefined,
+      });
+      const mod = await moderateCreativeCopy({
+        title: brief.title,
+        headline: brief.headline,
+        support: brief.support,
+        cta: brief.cta,
+      });
+      if (!mod.ok) {
+        return {
+          events,
+          result: {
+            toolUseId: tool.toolUseId,
+            status: 'error',
+            content: [
+              {
+                text:
+                  `Marketing moderation blocked this flyer (${mod.source}): ` +
+                  mod.reasons.join('; ') +
+                  '. Soften absolute claims and regenerate.',
+              },
+            ],
+          },
+        };
+      }
+      const assetId = randomUUID();
+      const ownerId = creative.ownerId ?? 'anonymous';
+      await db.query(
+        `INSERT INTO creative_assets
+           (id, project_id, owner_id, session_id, kind, brief, status, images_consumed)
+         VALUES ($1::uuid, $2::uuid, $3, $4::uuid, 'flyer', $5::jsonb, 'proposed', $6)`,
+        [
+          assetId,
+          projectId,
+          ownerId,
+          sessionId,
+          JSON.stringify(brief),
+          brief.estimatedImages,
+        ],
+      );
+      await appendBuildEvent(
+        db,
+        sessionId,
+        tool.name,
+        { topic, assetId, template: brief.template },
+        `philosophy=${brief.philosophy.name} stub=${stub}`,
+      );
+      events.push({
+        type: 'creative_brief_ready',
+        assetId,
+        kind: 'flyer',
+        brief: brief as unknown as Record<string, unknown>,
+        credits: creative.flyerCreditCost,
+        estimatedImages: brief.estimatedImages,
+        remainingImages: creative.imageDailyRemaining,
+        imageDailyLimit: creative.imageDailyLimit,
+        stub,
+      });
+      return {
+        events,
+        result: {
+          toolUseId: tool.toolUseId,
+          status: 'success',
+          content: [
+            {
               text:
-                `Deck ready (asset ${assetId}, ${rendered.slideCount} slides). ` +
-                `Download: ${rendered.downloadName}. ` +
-                (rendered.previewNote ? `Preview note: ${rendered.previewNote}` : 'Thumbnail grid available.'),
+                `Flyer brief ready (asset ${assetId}, template=${brief.template}, ` +
+                `philosophy "${brief.philosophy.name}", ${creative.flyerCreditCost} credits). ` +
+                `A ConfirmCard is shown. Do NOT call render_flyer until they confirm. ` +
+                `Brief JSON:\n${JSON.stringify(brief)}`,
+            },
+          ],
+        },
+      };
+    }
+
+    if (tool.name === 'render_flyer') {
+      if (!creative.isPaid) {
+        return {
+          events,
+          result: {
+            toolUseId: tool.toolUseId,
+            status: 'error',
+            content: [{ text: 'render_flyer is paid-only.' }],
+          },
+        };
+      }
+      if (tool.input.confirmed !== true) {
+        events.push({
+          type: 'warning',
+          message: 'Confirm the flyer spend before rendering.',
+        });
+        return {
+          events,
+          result: {
+            toolUseId: tool.toolUseId,
+            status: 'error',
+            content: [
+              {
+                text: 'render_flyer requires confirmed=true after the user accepts the ConfirmCard.',
+              },
+            ],
+          },
+        };
+      }
+
+      const assetId =
+        typeof tool.input.assetId === 'string' ? tool.input.assetId.trim() : '';
+      if (!assetId) {
+        return {
+          events,
+          result: {
+            toolUseId: tool.toolUseId,
+            status: 'error',
+            content: [
+              {
+                text: 'render_flyer requires assetId from generate_flyer_brief. Confirm via the ConfirmCard (REST).',
+              },
+            ],
+          },
+        };
+      }
+      if (!creative.confirmCreativeAsset) {
+        return {
+          events,
+          result: {
+            toolUseId: tool.toolUseId,
+            status: 'error',
+            content: [
+              {
+                text: 'Confirm the flyer with the ConfirmCard in the UI. Agent-side confirmed=true render is disabled.',
+              },
+            ],
+          },
+        };
+      }
+      const confirmed = await creative.confirmCreativeAsset(assetId);
+      if (!confirmed.ok) {
+        return {
+          events,
+          result: {
+            toolUseId: tool.toolUseId,
+            status: 'error',
+            content: [
+              {
+                text: `render_flyer confirm failed: ${confirmed.error ?? 'unknown'}`,
+              },
+            ],
+          },
+        };
+      }
+      events.push({
+        type: 'creative_asset_ready',
+        assetId,
+        kind: 'flyer',
+        downloadName: confirmed.downloadName ?? 'flyer.pdf',
+        s3Key: '',
+        creditsCharged: creative.flyerCreditCost,
+      });
+      return {
+        events,
+        result: {
+          toolUseId: tool.toolUseId,
+          status: 'success',
+          content: [
+            {
+              text: `Flyer confirm accepted (asset ${assetId}, status ${confirmed.status ?? 'ready'}). The client shows the download.`,
+            },
+          ],
+        },
+      };
+    }
+
+    if (tool.name === 'generate_video_brief') {
+      if (!creative.isPaid) {
+        events.push({
+          type: 'upgrade_required',
+          reason: 'paid_plan_required',
+          feature: 'video',
+          message:
+            'Video Studio requires Paid (~$20/mo). One ≤30s video / 72h after upgrade.',
+        });
+        return {
+          events,
+          result: {
+            toolUseId: tool.toolUseId,
+            status: 'error',
+            content: [
+              {
+                text: 'generate_video_brief is paid-only. Tell the user to upgrade — do not invent a video.',
+              },
+            ],
+          },
+        };
+      }
+      if (creative.videoRemaining <= 0) {
+        return {
+          events,
+          result: {
+            toolUseId: tool.toolUseId,
+            status: 'error',
+            content: [
+              {
+                text:
+                  `Video hard cap reached (1 per 72h). ` +
+                  (creative.videoResetAt
+                    ? `Next slot around ${creative.videoResetAt}.`
+                    : 'Try again after the rolling window resets.'),
+              },
+            ],
+          },
+        };
+      }
+      const topic = String(tool.input.topic ?? '').slice(0, 2000);
+      if (!topic) {
+        return {
+          events,
+          result: {
+            toolUseId: tool.toolUseId,
+            status: 'error',
+            content: [{ text: 'generate_video_brief requires topic.' }],
+          },
+        };
+      }
+      const aspect =
+        tool.input.aspect === '9:16' ? ('9:16' as const) : ('16:9' as const);
+      const { brief, stub } = await generateVideoBrief({
+        topic,
+        brand:
+          typeof tool.input.brand === 'string' ? tool.input.brand : undefined,
+        audience:
+          typeof tool.input.audience === 'string'
+            ? tool.input.audience
+            : undefined,
+        aspect,
+      });
+      const mod = await moderateCreativeCopy({
+        title: brief.title,
+        voiceoverScript: brief.voiceoverScript,
+        reelPrompt: brief.reelPrompt,
+      });
+      if (!mod.ok) {
+        return {
+          events,
+          result: {
+            toolUseId: tool.toolUseId,
+            status: 'error',
+            content: [
+              {
+                text:
+                  `Marketing moderation blocked this video brief (${mod.source}): ` +
+                  mod.reasons.join('; ') +
+                  '. Soften absolute claims and regenerate.',
+              },
+            ],
+          },
+        };
+      }
+      if (brief.estimatedImages > 0 && brief.estimatedImages > creative.imageDailyRemaining) {
+        return {
+          events,
+          result: {
+            toolUseId: tool.toolUseId,
+            status: 'error',
+            content: [
+              {
+                text:
+                  `Not enough image quota for video stills ` +
+                  `(need ${brief.estimatedImages}, have ${creative.imageDailyRemaining}/` +
+                  `${creative.imageDailyLimit} today).`,
+              },
+            ],
+          },
+        };
+      }
+      const jobId = randomUUID();
+      const ownerId = creative.ownerId ?? 'anonymous';
+      const shotList = [
+        {
+          taskType: 'MULTI_SHOT_AUTOMATED',
+          reelPrompt: brief.reelPrompt,
+          title: brief.title,
+          brand: brief.brand,
+        },
+      ];
+      await db.query(
+        `INSERT INTO video_jobs (
+           id, project_id, owner_id, session_id, shot_list, voiceover_script,
+           duration_sec, aspect, status, images_consumed
+         ) VALUES (
+           $1::uuid, $2::uuid, $3, $4::uuid, $5::jsonb, $6,
+           $7, $8, 'proposed', $9
+         )`,
+        [
+          jobId,
+          projectId,
+          ownerId,
+          sessionId,
+          JSON.stringify(shotList),
+          brief.voiceoverScript,
+          brief.durationSec,
+          brief.aspect,
+          0,
+        ],
+      );
+      await appendBuildEvent(
+        db,
+        sessionId,
+        tool.name,
+        { topic, jobId, aspect: brief.aspect },
+        `duration=${brief.durationSec}s automated stub=${stub}`,
+      );
+      events.push({
+        type: 'video_brief_ready',
+        jobId,
+        brief: brief as unknown as Record<string, unknown>,
+        credits: creative.videoCreditCost,
+        estimatedImages: 0,
+        remainingImages: creative.imageDailyRemaining,
+        imageDailyLimit: creative.imageDailyLimit,
+        remainingVideo: creative.videoRemaining,
+        videoLimit: creative.videoLimit,
+        videoResetAt: creative.videoResetAt,
+        stub,
+      });
+      return {
+        events,
+        result: {
+          toolUseId: tool.toolUseId,
+          status: 'success',
+          content: [
+            {
+              text:
+                `Video brief ready (job ${jobId}, one ${brief.durationSec}s MULTI_SHOT_AUTOMATED Reel job, ` +
+                `${creative.videoCreditCost} credits). ` +
+                `ConfirmCard shown — do NOT call start_video_job until they confirm.`,
+            },
+          ],
+        },
+      };
+    }
+
+    if (tool.name === 'start_video_job') {
+      if (!creative.isPaid) {
+        return {
+          events,
+          result: {
+            toolUseId: tool.toolUseId,
+            status: 'error',
+            content: [{ text: 'start_video_job is paid-only.' }],
+          },
+        };
+      }
+      if (tool.input.confirmed !== true) {
+        return {
+          events,
+          result: {
+            toolUseId: tool.toolUseId,
+            status: 'error',
+            content: [
+              {
+                text: 'start_video_job requires confirmed=true after the user accepts the ConfirmCard.',
+              },
+            ],
+          },
+        };
+      }
+      const jobId = String(tool.input.jobId ?? '');
+      if (!jobId) {
+        return {
+          events,
+          result: {
+            toolUseId: tool.toolUseId,
+            status: 'error',
+            content: [{ text: 'start_video_job requires jobId.' }],
+          },
+        };
+      }
+      if (!creative.startVideoJob) {
+        return {
+          events,
+          result: {
+            toolUseId: tool.toolUseId,
+            status: 'error',
+            content: [
+              {
+                text: 'start_video_job is not wired — use ConfirmCard (POST /video-jobs/:id/confirm).',
+              },
+            ],
+          },
+        };
+      }
+      const started = await creative.startVideoJob(jobId);
+      if (!started.ok) {
+        return {
+          events,
+          result: {
+            toolUseId: tool.toolUseId,
+            status: 'error',
+            content: [{ text: started.error ?? 'video start failed' }],
+          },
+        };
+      }
+      events.push({
+        type: 'video_job_updated',
+        jobId,
+        status: started.status ?? 'queued',
+        creditsCharged: creative.videoCreditCost,
+      });
+      return {
+        events,
+        result: {
+          toolUseId: tool.toolUseId,
+          status: 'success',
+          content: [
+            {
+              text: `Video job ${jobId} status=${started.status ?? 'queued'}. Poll GET /video-jobs/${jobId}.`,
             },
           ],
         },

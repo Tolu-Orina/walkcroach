@@ -1,15 +1,31 @@
 type CreativeBriefReady = {
-  assetId: string;
-  kind: 'slide_deck';
+  assetId?: string;
+  jobId?: string;
+  kind: 'slide_deck' | 'flyer' | 'video';
   brief: {
     title?: string;
     subtitle?: string;
+    headline?: string;
+    support?: string;
+    cta?: string;
+    brand?: string;
+    eyebrow?: string;
+    template?: string;
+    philosophy?: { name?: string; notes?: string };
+    voiceoverScript?: string;
+    reelPrompt?: string;
+    durationSec?: number;
+    aspect?: string;
+    shots?: Array<{ title?: string; text?: string; bullets?: string[] }>;
     slides?: Array<{ title?: string; bullets?: string[] }>;
   };
   credits: number;
   estimatedImages: number;
   remainingImages: number;
   imageDailyLimit: number;
+  remainingVideo?: number;
+  videoLimit?: number;
+  videoResetAt?: string;
   stub?: boolean;
 };
 
@@ -21,8 +37,7 @@ type ConfirmCardProps = {
 };
 
 /**
- * Propose → confirm → execute card for Creative Studio decks (Phase B5 / A6).
- * Shows slide count, estimated images, credits, and remaining image quota.
+ * Propose → confirm → execute card for Creative + Video Studio.
  */
 export function CreativeConfirmCard({
   pending,
@@ -30,25 +45,40 @@ export function CreativeConfirmCard({
   onConfirm,
   onDecline,
 }: ConfirmCardProps) {
+  const isFlyer = pending.kind === 'flyer';
+  const isVideo = pending.kind === 'video';
   const slideCount = pending.brief.slides?.length ?? 0;
-  const title = pending.brief.title ?? 'Untitled deck';
+  const title =
+    pending.brief.headline ??
+    pending.brief.title ??
+    (isVideo ? 'Untitled video' : isFlyer ? 'Untitled flyer' : 'Untitled deck');
+
+  const studioLabel = isVideo
+    ? 'Video Studio'
+    : isFlyer
+      ? 'Creative Studio · Flyer'
+      : 'Creative Studio · Slides';
 
   return (
     <div
       className="rounded-[var(--radius-surface)] border border-signal/35 bg-raised/80 p-4"
       role="region"
-      aria-label="Confirm slide deck"
+      aria-label={
+        isVideo ? 'Confirm video' : isFlyer ? 'Confirm flyer' : 'Confirm slide deck'
+      }
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="font-mono text-[10px] uppercase tracking-wide text-signal">
-            Creative Studio · Slides
+            {studioLabel}
           </p>
           <h3 className="mt-1 truncate font-display text-lg font-bold text-paper">
             {title}
           </h3>
-          {pending.brief.subtitle && (
-            <p className="mt-0.5 text-sm text-mist">{pending.brief.subtitle}</p>
+          {(pending.brief.support || pending.brief.subtitle) && (
+            <p className="mt-0.5 text-sm text-mist">
+              {pending.brief.support ?? pending.brief.subtitle}
+            </p>
           )}
         </div>
         {pending.stub && (
@@ -59,13 +89,51 @@ export function CreativeConfirmCard({
       </div>
 
       <dl className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <div className="rounded-[var(--radius-control)] border border-line/80 bg-ink/40 px-2.5 py-2">
-          <dt className="font-mono text-[10px] uppercase text-mist">Slides</dt>
-          <dd className="mt-0.5 text-sm font-semibold text-paper">
-            {slideCount + 1}
-            <span className="font-normal text-mist"> incl. title</span>
-          </dd>
-        </div>
+        {isVideo && (
+          <>
+            <div className="rounded-[var(--radius-control)] border border-line/80 bg-ink/40 px-2.5 py-2">
+              <dt className="font-mono text-[10px] uppercase text-mist">Reel</dt>
+              <dd className="mt-0.5 text-sm font-semibold text-paper">
+                1 job
+                <span className="font-normal text-mist"> automated</span>
+              </dd>
+            </div>
+            <div className="rounded-[var(--radius-control)] border border-line/80 bg-ink/40 px-2.5 py-2">
+              <dt className="font-mono text-[10px] uppercase text-mist">Duration</dt>
+              <dd className="mt-0.5 text-sm font-semibold text-paper">
+                {pending.brief.durationSec ?? 30}s
+              </dd>
+            </div>
+          </>
+        )}
+        {isFlyer ? (
+          <>
+            <div className="rounded-[var(--radius-control)] border border-line/80 bg-ink/40 px-2.5 py-2">
+              <dt className="font-mono text-[10px] uppercase text-mist">
+                Template
+              </dt>
+              <dd className="mt-0.5 text-sm font-semibold text-paper">
+                {pending.brief.template ?? 'sale'}
+              </dd>
+            </div>
+            <div className="rounded-[var(--radius-control)] border border-line/80 bg-ink/40 px-2.5 py-2">
+              <dt className="font-mono text-[10px] uppercase text-mist">
+                Philosophy
+              </dt>
+              <dd className="mt-0.5 truncate text-sm font-semibold text-paper">
+                {pending.brief.philosophy?.name ?? '—'}
+              </dd>
+            </div>
+          </>
+        ) : !isVideo ? (
+          <div className="rounded-[var(--radius-control)] border border-line/80 bg-ink/40 px-2.5 py-2">
+            <dt className="font-mono text-[10px] uppercase text-mist">Slides</dt>
+            <dd className="mt-0.5 text-sm font-semibold text-paper">
+              {slideCount + 1}
+              <span className="font-normal text-mist"> incl. title</span>
+            </dd>
+          </div>
+        ) : null}
         <div className="rounded-[var(--radius-control)] border border-line/80 bg-ink/40 px-2.5 py-2">
           <dt className="font-mono text-[10px] uppercase text-mist">Images</dt>
           <dd className="mt-0.5 text-sm font-semibold text-paper">
@@ -82,13 +150,60 @@ export function CreativeConfirmCard({
             {pending.credits}
           </dd>
         </div>
-        <div className="rounded-[var(--radius-control)] border border-line/80 bg-ink/40 px-2.5 py-2">
-          <dt className="font-mono text-[10px] uppercase text-mist">Format</dt>
-          <dd className="mt-0.5 text-sm font-semibold text-paper">.pptx · 16:9</dd>
-        </div>
+        {isVideo && (
+          <div className="rounded-[var(--radius-control)] border border-line/80 bg-ink/40 px-2.5 py-2">
+            <dt className="font-mono text-[10px] uppercase text-mist">Video slot</dt>
+            <dd className="mt-0.5 text-sm font-semibold text-paper">
+              {pending.remainingVideo ?? 0}/{pending.videoLimit ?? 1}
+              <span className="font-normal text-mist"> /72h</span>
+            </dd>
+          </div>
+        )}
+        {!isFlyer && !isVideo && (
+          <div className="rounded-[var(--radius-control)] border border-line/80 bg-ink/40 px-2.5 py-2">
+            <dt className="font-mono text-[10px] uppercase text-mist">Format</dt>
+            <dd className="mt-0.5 text-sm font-semibold text-paper">
+              .pptx · 16:9
+            </dd>
+          </div>
+        )}
+        {isFlyer && (
+          <div className="rounded-[var(--radius-control)] border border-line/80 bg-ink/40 px-2.5 py-2">
+            <dt className="font-mono text-[10px] uppercase text-mist">Format</dt>
+            <dd className="mt-0.5 text-sm font-semibold text-paper">
+              .pdf · A4
+            </dd>
+          </div>
+        )}
+        {isVideo && (
+          <div className="rounded-[var(--radius-control)] border border-line/80 bg-ink/40 px-2.5 py-2">
+            <dt className="font-mono text-[10px] uppercase text-mist">Format</dt>
+            <dd className="mt-0.5 text-sm font-semibold text-paper">
+              .mp4 · {pending.brief.aspect ?? '16:9'}
+            </dd>
+          </div>
+        )}
       </dl>
 
-      {slideCount > 0 && (
+      {isFlyer && pending.brief.cta && (
+        <p className="mt-3 border-t border-line/60 pt-3 text-[13px] text-mist">
+          CTA:{' '}
+          <span className="font-semibold text-signal">{pending.brief.cta}</span>
+        </p>
+      )}
+
+      {isVideo && pending.brief.voiceoverScript && (
+        <p className="mt-3 line-clamp-3 border-t border-line/60 pt-3 text-[13px] text-mist">
+          VO: {pending.brief.voiceoverScript}
+        </p>
+      )}
+      {isVideo && pending.brief.reelPrompt && (
+        <p className="mt-2 line-clamp-2 text-[12px] text-mist/80">
+          Reel: {pending.brief.reelPrompt}
+        </p>
+      )}
+
+      {!isFlyer && !isVideo && slideCount > 0 && (
         <ol className="mt-3 max-h-40 space-y-1 overflow-y-auto border-t border-line/60 pt-3">
           {pending.brief.slides!.map((s, i) => (
             <li key={`${s.title}-${i}`} className="text-[13px] text-mist">
@@ -108,7 +223,11 @@ export function CreativeConfirmCard({
           onClick={onConfirm}
           className="interactive rounded-[var(--radius-control)] bg-signal px-4 py-2 text-sm font-semibold text-ink disabled:opacity-50"
         >
-          {busy ? 'Rendering…' : `Confirm · ${pending.credits} credits`}
+          {busy
+            ? isVideo
+              ? 'Starting…'
+              : 'Rendering…'
+            : `Confirm · ${pending.credits} credits`}
         </button>
         <button
           type="button"

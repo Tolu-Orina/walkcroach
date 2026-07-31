@@ -37,6 +37,9 @@ describe('protocol allowlist', () => {
       'CONTINUE_TASK',
       'CLEAR_SESSION',
       'REVERT_TO_TURN',
+      // Wired end to end: App.tsx posts it, webviewProvider.ts handles it,
+      // protocol.ts parses it. The allowlist had it; this list had not caught up.
+      'SYNC_UI_TURNS',
     ]);
   });
 

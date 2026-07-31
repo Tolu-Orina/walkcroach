@@ -42,6 +42,15 @@ export type RecallSource = {
   distance: number;
 };
 
+type WorkflowHit = {
+  id: string;
+  action: string;
+  result: Record<string, unknown> | null;
+  executed_at: string | null;
+  provider: string | null;
+  distance: number;
+};
+
 export type RecallSourcesEvent = {
   type: 'recall_sources';
   sources: RecallSource[];
@@ -80,6 +89,8 @@ export async function* streamRecall(
   const t0 = Date.now();
   const db = createDbClient();
   let hits: RecallHit[] = [];
+  let runHits: WorkflowHit[] = [];
+  let vecForRuns = '';
   try {
     if (scope === 'workspace' && b.workspaceId) {
       const owned = await db.query(
@@ -94,6 +105,7 @@ export async function* streamRecall(
 
     const embedding = await embedText(question);
     const vec = formatVector(embedding);
+    vecForRuns = vec;
 
     if (scope === 'workspace') {
       const { rows } = await db.query<RecallHit>(
@@ -131,6 +143,38 @@ export async function* streamRecall(
       );
       hits = rows;
     }
+    /*
+      E8 — actions are memory too.
+
+      "What did we send last week" is a question about `workflow_runs`, not about
+      saved pages, and answering it only in Web Chat would make the memory layer
+      surface-specific. Runs are searched in the same embedding space and merged
+      by distance, so a single answer can cite a saved quote and the email that
+      went out about it.
+
+      Scoped to executed runs: a proposal the user declined is auditable in
+      history, but it is not something that happened, and recalling it as if it
+      were would be actively misleading.
+    */
+    try {
+      const { rows } = await db.query<WorkflowHit>(
+        `SELECT r.id, r.action, r.result, r.executed_at,
+                c.provider,
+                r.embedding <=> $2::vector AS distance
+         FROM workflow_runs r
+         LEFT JOIN connectors c ON c.id = r.connector_id
+         WHERE r.owner_id = $1
+           AND r.status = 'executed'
+           AND r.embedding IS NOT NULL
+         ORDER BY r.embedding <=> $2::vector
+         LIMIT 4`,
+        [auth.ownerId, vecForRuns],
+      );
+      runHits = rows;
+    } catch {
+      // Pre-migration databases have no workflow_runs; recall still works.
+      runHits = [];
+    }
   } finally {
     await db.close();
   }
@@ -152,7 +196,14 @@ export async function* streamRecall(
     } satisfies RecallSourcesEvent;
   }
 
-  if (!hits.length) {
+  if (runHits.length) {
+    yield {
+      type: 'recall_sources',
+      sources: runHits.map(runToSource),
+    } satisfies RecallSourcesEvent;
+  }
+
+  if (!hits.length && !runHits.length) {
     yield {
       type: 'token',
       text: 'I do not have any saved captures that match that yet. Save a page to a workspace first.',
@@ -160,6 +211,14 @@ export async function* streamRecall(
     yield { type: 'done', reason: 'complete' };
     return;
   }
+
+  const runContext = runHits
+    .map(
+      (r, i) =>
+        `[A${i + 1}] Action: ${r.action}${r.provider ? ` via ${r.provider}` : ''}, executed ${r.executed_at ?? 'recently'}
+${JSON.stringify(r.result ?? {}).slice(0, 500)}`,
+    )
+    .join('\n\n');
 
   const context = hits
     .map(
@@ -169,14 +228,26 @@ export async function* streamRecall(
     .join('\n\n');
 
   for await (const ev of streamConverse({
-    system:
-      'You are WalkCroach recall. Answer using only the user\'s saved captures below. Cite which capture (by title/url) you used. If unsure, say so.',
+    system: [
+      'You are WalkCroach recall.',
+      'Answer using only the saved captures and actions below. They are numbered.',
+      'Cite captures by their number like [2], and actions like [A1].',
+      'The panel renders the numbered sources beside your answer, so do not repeat their URLs.',
+      'Actions listed are things that already happened. Never describe a capture as an action, or an action as something still to do.',
+      'If the material does not answer the question, say so plainly rather than guessing.',
+    ].join(' '),
     messages: [
       {
         role: 'user',
         content: [
           {
-            text: `Saved captures:\n${context}\n\nQuestion: ${question}`,
+            text: [
+              hits.length ? `Saved captures:\n${context}` : '',
+              runHits.length ? `Actions you took:\n${runContext}` : '',
+              `Question: ${question}`,
+            ]
+              .filter(Boolean)
+              .join('\n\n'),
           },
         ],
       },
@@ -197,4 +268,41 @@ function toSource(hit: RecallHit): RecallSource {
     capturedAt: hit.captured_at,
     distance: hit.distance,
   };
+}
+
+/**
+ * Present an executed action as a recall source.
+ *
+ * Reuses the capture source shape so the panel renders both in one list — from a
+ * user's point of view "the quote I saved" and "the email I sent about it" are
+ * the same kind of memory, and splitting them into two UIs would be an
+ * implementation detail leaking into the product.
+ */
+function runToSource(hit: WorkflowHit): RecallSource {
+  return {
+    captureId: hit.id,
+    url: '',
+    title: describeRun(hit),
+    captureType: 'action',
+    workspace: hit.provider,
+    inWebProject: false,
+    capturedAt: hit.executed_at ?? new Date().toISOString(),
+    distance: hit.distance,
+  };
+}
+
+function describeRun(hit: WorkflowHit): string {
+  const result = hit.result ?? {};
+  switch (hit.action) {
+    case 'gmail.send':
+      return 'Email sent';
+    case 'gmail.draft':
+      return 'Email drafted';
+    case 'calendar.create_event':
+      return `Calendar event: ${String(result.summary ?? 'created')}`;
+    case 'slack.post_message':
+      return 'Posted to Slack';
+    default:
+      return hit.action;
+  }
 }

@@ -36,7 +36,7 @@ describe('authLogin', () => {
     stdoutSpy.mockRestore();
   });
 
-  it('returns 1 when no token in non-TTY', async () => {
+  it('never opens a browser without a TTY — it names the flags instead', async () => {
     const origTTY = process.stdin.isTTY;
     Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
     const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
@@ -46,7 +46,7 @@ describe('authLogin', () => {
     stderrSpy.mockRestore();
   });
 
-  it('returns 1 for empty token', async () => {
+  it('rejects an explicitly blank --token instead of falling through', async () => {
     const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     const code = await authLogin({ token: '  ' });
     expect(code).toBe(1);

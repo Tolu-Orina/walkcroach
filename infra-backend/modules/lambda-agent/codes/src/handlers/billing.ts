@@ -1,179 +1,82 @@
-import type { DbClient } from '@walkcroach/db';
-
-export const FREE_MONTHLY_CREDITS = Number(process.env.FREE_MONTHLY_CREDITS ?? 100);
-
-export const CREDIT_COSTS: Record<string, number> = {
-  agent_turn: 1,
-  deploy: 5,
-  db_provision: 10,
-  inline_edit: 0,
-  generate_image: 5,
-  render_pptx: 20,
-};
-
-type BalanceRow = {
-  owner_id: string;
-  monthly_credits: number;
-  used_this_month: number;
-  period_start: Date;
-};
-
-async function ensureBalanceRow(db: DbClient, ownerId: string): Promise<BalanceRow> {
-  await db.query(
-    `INSERT INTO credit_balances (owner_id, monthly_credits, used_this_month)
-     VALUES ($1, $2, 0)
-     ON CONFLICT (owner_id) DO NOTHING`,
-    [ownerId, FREE_MONTHLY_CREDITS],
-  );
-
-  const { rows } = await db.query<BalanceRow>(
-    `SELECT owner_id, monthly_credits, used_this_month, period_start
-     FROM credit_balances WHERE owner_id = $1`,
-    [ownerId],
-  );
-  const row = rows[0]!;
-
-  const monthStart = new Date();
-  monthStart.setUTCDate(1);
-  monthStart.setUTCHours(0, 0, 0, 0);
-  if (row.period_start < monthStart) {
-    await db.query(
-      `UPDATE credit_balances
-       SET used_this_month = 0, period_start = date_trunc('month', now()), updated_at = now()
-       WHERE owner_id = $1 AND period_start < date_trunc('month', now())`,
-      [ownerId],
-    );
-    row.used_this_month = 0;
-  }
-
-  return row;
-}
-
-export async function getUsageSummary(
-  db: DbClient,
-  ownerId: string,
-): Promise<{
-  monthlyCredits: number;
-  used: number;
-  remaining: number;
-  costs: typeof CREDIT_COSTS;
-}> {
-  const balance = await ensureBalanceRow(db, ownerId);
-  const remaining = Math.max(0, balance.monthly_credits - balance.used_this_month);
-  return {
-    monthlyCredits: balance.monthly_credits,
-    used: balance.used_this_month,
-    remaining,
-    costs: CREDIT_COSTS,
-  };
-}
-
-export async function assertCredits(
-  db: DbClient,
-  ownerId: string,
-  actionType: string,
-): Promise<{ ok: true } | { ok: false; remaining: number }> {
-  const cost = CREDIT_COSTS[actionType] ?? 0;
-  if (cost === 0) return { ok: true };
-  const summary = await getUsageSummary(db, ownerId);
-  if (summary.remaining < cost) {
-    return { ok: false, remaining: summary.remaining };
-  }
-  return { ok: true };
-}
-
 /**
- * Atomically debit credits. Safe under concurrent requests (no TOCTOU with assertCredits).
- * Returns ok:false when the balance cannot cover the cost.
+ * Web billing: Stripe checkout, webhooks, and the billing portal.
+ *
+ * The credit ledger itself now lives in `@walkcroach/ledger` so the Chrome BFF
+ * can debit the same pool — it was previously able to read the balance but not
+ * charge against it. Re-exported here so this module's public surface is
+ * unchanged for existing callers and tests.
  */
-export async function debitCredits(
-  db: DbClient,
-  ownerId: string,
-  actionType: string,
-  projectId?: string,
-  metadata: Record<string, unknown> = {},
-): Promise<{ ok: true; remaining: number } | { ok: false; remaining: number }> {
-  const cost = CREDIT_COSTS[actionType] ?? 0;
-  await ensureBalanceRow(db, ownerId);
+import type { DbClient } from '@walkcroach/db';
+import {
+  CREDIT_COSTS,
+  ensureBalanceRow,
+  grantForPlan,
+  FREE_MONTHLY_CREDITS,
+  PAID_MONTHLY_CREDITS,
+  assertCredits,
+  debitCredits,
+  refundCredits,
+  getEntitlement,
+  getEntitlementRow,
+  getUsageSummary,
+  type Entitlement,
+  type EntitlementRow,
+} from '@walkcroach/ledger';
 
-  if (cost > 0) {
-    const { rows } = await db.query<{
-      monthly_credits: number;
-      used_this_month: number;
-    }>(
-      `UPDATE credit_balances
-       SET
-         used_this_month = CASE
-           WHEN period_start < date_trunc('month', now()) THEN $2
-           ELSE used_this_month + $2
-         END,
-         period_start = CASE
-           WHEN period_start < date_trunc('month', now()) THEN date_trunc('month', now())
-           ELSE period_start
-         END,
-         updated_at = now()
-       WHERE owner_id = $1
-         AND (
-           CASE
-             WHEN period_start < date_trunc('month', now()) THEN monthly_credits
-             ELSE monthly_credits - used_this_month
-           END
-         ) >= $2
-       RETURNING monthly_credits, used_this_month`,
-      [ownerId, cost],
-    );
+export {
+  CREDIT_COSTS,
+  FREE_MONTHLY_CREDITS,
+  PAID_MONTHLY_CREDITS,
+  assertCredits,
+  debitCredits,
+  refundCredits,
+  getEntitlement,
+  getEntitlementRow,
+  getUsageSummary,
+};
+export type { Entitlement, EntitlementRow };
 
-    if (!rows[0]) {
-      const summary = await getUsageSummary(db, ownerId);
-      return { ok: false, remaining: summary.remaining };
-    }
-  }
-
-  await db.query(
-    `INSERT INTO usage_ledger (owner_id, project_id, action_type, credits, metadata)
-     VALUES ($1, $2::uuid, $3, $4, $5::jsonb)`,
-    [
-      ownerId,
-      projectId ?? null,
-      actionType,
-      cost,
-      JSON.stringify(metadata),
-    ],
-  );
-
-  const summary = await getUsageSummary(db, ownerId);
-  return { ok: true, remaining: summary.remaining };
-}
-
-/* ------------------------------ entitlements ----------------------------- */
-
-export type Entitlement = 'free' | 'paid';
-
-/** Owner plan — rows created lazily; missing row means 'free'. */
-export async function getEntitlement(
-  db: DbClient,
-  ownerId: string,
-): Promise<Entitlement> {
-  const { rows } = await db.query<{ plan: string }>(
-    `SELECT plan FROM entitlements WHERE owner_id = $1`,
-    [ownerId],
-  );
-  const plan = rows[0]?.plan;
-  return plan === 'paid' ? 'paid' : 'free';
-}
-
-/** Flip an owner to a plan; used by Phase A2 admin hook and later Stripe webhook. */
+/** Flip an owner to a plan; used by admin hook and Stripe webhook. */
 export async function setEntitlement(
   db: DbClient,
   ownerId: string,
   plan: Entitlement,
+  stripeCustomerId?: string | null,
 ): Promise<void> {
   await db.query(
-    `INSERT INTO entitlements (owner_id, plan, plan_started_at, updated_at)
-     VALUES ($1, $2, now(), now())
+    `INSERT INTO entitlements (owner_id, plan, stripe_customer_id, plan_started_at, updated_at)
+     VALUES ($1, $2, $3, now(), now())
      ON CONFLICT (owner_id)
-     DO UPDATE SET plan = EXCLUDED.plan, plan_started_at = now(), updated_at = now()`,
-    [ownerId, plan],
+     DO UPDATE SET
+       plan = EXCLUDED.plan,
+       stripe_customer_id = COALESCE(EXCLUDED.stripe_customer_id, entitlements.stripe_customer_id),
+       plan_started_at = CASE
+         WHEN entitlements.plan IS DISTINCT FROM EXCLUDED.plan THEN now()
+         ELSE entitlements.plan_started_at
+       END,
+       updated_at = now()`,
+    [ownerId, plan, stripeCustomerId ?? null],
+  );
+}
+
+/**
+ * Apply plan + credit grant ceiling together (Phase G2).
+ * Does not wipe used_this_month — upgrading mid-cycle raises the ceiling only.
+ */
+export async function applySubscriptionPlan(
+  db: DbClient,
+  ownerId: string,
+  plan: Entitlement,
+  stripeCustomerId?: string | null,
+): Promise<void> {
+  await setEntitlement(db, ownerId, plan, stripeCustomerId);
+  const grant = grantForPlan(plan);
+  await ensureBalanceRow(db, ownerId);
+  await db.query(
+    `UPDATE credit_balances
+     SET monthly_credits = $2, updated_at = now()
+     WHERE owner_id = $1`,
+    [ownerId, grant],
   );
 }
 
@@ -207,14 +110,25 @@ export type QuotaCheck =
 
 /**
  * Atomic check-and-increment on a rolling window. Returns ok:false without
- * mutating when the cap is already reached.
+ * mutating when the cap would be exceeded. `amount` is for deck/flyer paths
+ * that reserve multiple Canvas stills in one confirm (Phase H1).
  */
 export async function consumeHardQuota(
   db: DbClient,
   ownerId: string,
   key: HardQuotaKey,
+  amount = 1,
 ): Promise<QuotaCheck> {
   const q = HARD_QUOTAS[key];
+  const n = Math.max(1, Math.floor(amount));
+  if (n > q.limit) {
+    return {
+      ok: false,
+      used: q.limit,
+      limit: q.limit,
+      resetAt: new Date().toISOString(),
+    };
+  }
   await db.query(
     `INSERT INTO usage_counters (owner_id, counter_key, window_start, count)
      VALUES ($1, $2, now(), 0)
@@ -228,8 +142,8 @@ export async function consumeHardQuota(
     `UPDATE usage_counters
      SET
        count = CASE
-         WHEN window_start + interval '${q.interval}' < now() THEN 1
-         ELSE count + 1
+         WHEN window_start + interval '${q.interval}' < now() THEN $4::int
+         ELSE count + $4::int
        END,
        window_start = CASE
          WHEN window_start + interval '${q.interval}' < now() THEN now()
@@ -238,11 +152,13 @@ export async function consumeHardQuota(
      WHERE owner_id = $1
        AND counter_key = $2
        AND (
-         window_start + interval '${q.interval}' < now()
-         OR count < $3
-       )
+         CASE
+           WHEN window_start + interval '${q.interval}' < now() THEN 0
+           ELSE count
+         END
+       ) + $4::int <= $3
      RETURNING count, window_start + interval '${q.interval}' AS reset_at`,
-    [ownerId, key, q.limit],
+    [ownerId, key, q.limit, n],
   );
   if (!rows[0]) {
     const { rows: cur } = await db.query<{ count: number; reset_at: Date }>(
@@ -258,6 +174,28 @@ export async function consumeHardQuota(
     };
   }
   return { ok: true, used: rows[0].count, limit: q.limit };
+}
+
+/**
+ * Release previously consumed hard-quota slots (debit failed / Canvas failed).
+ * Never drops below 0; no-op when the rolling window has already reset.
+ */
+export async function releaseHardQuota(
+  db: DbClient,
+  ownerId: string,
+  key: HardQuotaKey,
+  amount = 1,
+): Promise<void> {
+  const q = HARD_QUOTAS[key];
+  const n = Math.max(1, Math.floor(amount));
+  await db.query(
+    `UPDATE usage_counters
+     SET count = GREATEST(0, count - $3::int)
+     WHERE owner_id = $1
+       AND counter_key = $2
+       AND window_start + interval '${q.interval}' >= now()`,
+    [ownerId, key, n],
+  );
 }
 
 /** Peek without consuming — for the Chat quota pill. */
@@ -285,4 +223,54 @@ export async function peekHardQuota(
     remaining: Math.max(0, q.limit - used),
     resetAt: rows[0]?.reset_at?.toISOString() ?? new Date().toISOString(),
   };
+}
+
+/**
+ * Video hard cap — authoritative source is `video_jobs` (§5.2), not
+ * usage_counters. In-flight + successful jobs in the last 72h count;
+ * failed / proposed / declined do not (retry allowed).
+ */
+export async function peekVideoQuota(
+  db: DbClient,
+  ownerId: string,
+): Promise<{ used: number; limit: number; remaining: number; resetAt: string }> {
+  const limit = HARD_QUOTAS.video_gen_3day.limit;
+  const { rows } = await db.query<{ used: number; oldest: Date | null }>(
+    `SELECT
+       COUNT(*)::int AS used,
+       MIN(created_at) AS oldest
+     FROM video_jobs
+     WHERE owner_id = $1
+       AND status IN ('queued', 'generating', 'composing', 'ready')
+       AND created_at > now() - interval '72 hours'`,
+    [ownerId],
+  );
+  const used = rows[0]?.used ?? 0;
+  const oldest = rows[0]?.oldest;
+  const resetAt = oldest
+    ? new Date(oldest.getTime() + 72 * 60 * 60 * 1000).toISOString()
+    : new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString();
+  return {
+    used,
+    limit,
+    remaining: Math.max(0, limit - used),
+    resetAt,
+  };
+}
+
+/** Assert a video slot is free before debit / start. */
+export async function assertVideoQuota(
+  db: DbClient,
+  ownerId: string,
+): Promise<QuotaCheck> {
+  const peek = await peekVideoQuota(db, ownerId);
+  if (peek.remaining <= 0) {
+    return {
+      ok: false,
+      used: peek.used,
+      limit: peek.limit,
+      resetAt: peek.resetAt,
+    };
+  }
+  return { ok: true, used: peek.used, limit: peek.limit };
 }

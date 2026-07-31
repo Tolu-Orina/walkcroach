@@ -6,11 +6,12 @@ Manual weekend pass. Check each box on **local** then **prod**.
 
 Before promoting backend + web:
 
-1. Apply DB migrations through **014** (`npm run migrate -w @walkcroach/db` against prod CRDB). Required: `010`–`012` (docs/sessions/attachments), `013` (`tool_invocations`), `014` (`e2b_sandbox_*`).
+1. Apply DB migrations through **025** (`npm run migrate -w @walkcroach/db` against prod CRDB). Required for modern Web: `010`–`019` (docs/sessions/RAG/skills), **`020`–`025`** (connectors, creatives, video jobs, workflow/vector). Legacy note: Builder E2B needs at least `014`.
 2. Runtime secret `walkcroach/{env}/runtime` must include at least:
    - `crdb_connection_string`
    - `e2b_api_key` (Builder cloud sandbox; omit only if intentional WC-only)
    - `chrome_device_signing_key` (Chrome device sessions; otherwise Chrome returns 503)
+   - Full key catalogue (connectors + Stripe Billing): [`runtime-secrets-and-ssm.md`](./runtime-secrets-and-ssm.md)
 3. Confirm CloudFront still sends COOP/COEP (WebContainer fallback).
 4. Smoke: Chat new thread, Project docs create, Builder prompt → preview, Deploy (optional).
 

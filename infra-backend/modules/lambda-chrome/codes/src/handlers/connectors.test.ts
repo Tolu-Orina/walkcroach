@@ -27,6 +27,30 @@ vi.mock('@walkcroach/db', () => ({
   }),
 }));
 
+const ledger = {
+  entitlement: 'paid' as 'free' | 'paid',
+  allow: true,
+  debited: [] as Array<{ action: string }>,
+};
+
+vi.mock('@walkcroach/ledger', () => ({
+  getEntitlement: async () => ledger.entitlement,
+  assertCredits: async () =>
+    ledger.allow ? { ok: true } : { ok: false, remaining: 0 },
+  debitCredits: async (
+    _db: unknown,
+    _owner: string,
+    action: string,
+  ) => {
+    ledger.debited.push({ action });
+    return { ok: true, remaining: 97 };
+  },
+}));
+
+vi.mock('@walkcroach/agent-harness', () => ({
+  embedAndStoreWorkflowRun: async () => {},
+}));
+
 vi.mock('@walkcroach/connectors', async () => {
   const actual =
     await vi.importActual<typeof import('@walkcroach/connectors')>(
@@ -90,6 +114,9 @@ beforeEach(() => {
   process.env.GOOGLE_OAUTH_CLIENT_ID = 'gid';
   process.env.GOOGLE_OAUTH_CLIENT_SECRET = 'gsecret';
   process.env.WEB_APP_URL = 'https://walkcroach.test';
+  ledger.entitlement = 'paid';
+  ledger.allow = true;
+  ledger.debited.length = 0;
   delete process.env.SLACK_OAUTH_CLIENT_ID;
   delete process.env.STRIPE_OAUTH_CLIENT_ID;
 });
@@ -246,13 +273,65 @@ describe('propose', () => {
 });
 
 describe('execute', () => {
+  function pendingWrite() {
+    queue.push({ match: /SELECT action FROM workflow_runs/, rows: [{ action: 'gmail.send' }] });
+  }
+
   it('delegates to the shared execute path, passing only the run id', async () => {
     // No arguments cross this boundary: the payload is re-read server-side, so
     // confirming cannot substitute a different recipient.
+    pendingWrite();
     const res = await handleExecuteRun(cognito, RUN);
     expect(res.statusCode).toBe(200);
     expect(executed).toEqual([RUN]);
     expect(body(res).result).toEqual({ messageId: 'm-1' });
+  });
+
+  it('409s when the run is no longer pending', async () => {
+    queue.push({ match: /SELECT action FROM workflow_runs/, rows: [] });
+    const res = await handleExecuteRun(cognito, RUN);
+    expect(res.statusCode).toBe(409);
+    expect(executed).toHaveLength(0);
+  });
+
+  it('debits the shared credit pool, which Chrome previously bypassed', async () => {
+    // Before this, connector actions run from the side panel were free — the
+    // "shared pool" was in practice a Web-only limit.
+    pendingWrite();
+    const res = await handleExecuteRun(cognito, RUN);
+    expect(ledger.debited).toEqual([{ action: 'connector_write' }]);
+    expect(body(res).creditsCharged).toBe(2);
+    expect(body(res).remainingCredits).toBe(97);
+  });
+
+  it('refuses when the balance cannot cover the action, before executing', async () => {
+    pendingWrite();
+    ledger.allow = false;
+    const res = await handleExecuteRun(cognito, RUN);
+    expect(res.statusCode).toBe(402);
+    expect(body(res).error).toBe('insufficient_credits');
+    expect(executed).toHaveLength(0);
+  });
+
+  it('gates connector writes behind a paid plan, matching Web', async () => {
+    pendingWrite();
+    ledger.entitlement = 'free';
+    const res = await handleExecuteRun(cognito, RUN);
+    expect(res.statusCode).toBe(402);
+    expect(body(res).error).toBe('upgrade_required');
+    expect(executed).toHaveLength(0);
+  });
+
+  it('allows a read action on a free plan', async () => {
+    queue.push({
+      match: /SELECT action FROM workflow_runs/,
+      rows: [{ action: 'calendar.list_events' }],
+    });
+    ledger.entitlement = 'free';
+    const res = await handleExecuteRun(cognito, RUN);
+    expect(res.statusCode).toBe(200);
+    expect(ledger.debited).toEqual([{ action: 'connector_read' }]);
+    expect(body(res).creditsCharged).toBe(1);
   });
 });
 

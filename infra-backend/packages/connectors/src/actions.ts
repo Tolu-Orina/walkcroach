@@ -28,8 +28,12 @@ export type ActionId =
   | 'gmail.draft'
   | 'gmail.send'
   | 'slack.post_message'
+  | 'sheets.append_row'
+  | 'sheets.read_range'
   | 'stripe.balance'
-  | 'stripe.recent_payments';
+  | 'stripe.recent_payments'
+  | 'hubspot.list_contacts'
+  | 'hubspot.create_contact';
 
 export type FieldSpec =
   | { kind: 'string'; required: boolean; max: number; label: string }
@@ -44,6 +48,16 @@ export type ActionDef = {
   label: string;
   /** True for anything that changes state or leaves the account. */
   write: boolean;
+  /**
+   * True only when the effect cannot be taken back by the user.
+   *
+   * Deliberately separate from `write`. Both confirm cards used to badge every
+   * write as "irreversible", which put that word directly above
+   * `gmail.draft`'s own text saying "Nothing is sent." A badge that contradicts
+   * the sentence beneath it teaches users to ignore it — and the one action
+   * where it genuinely matters is `gmail.send`.
+   */
+  irreversible: boolean;
   /** One sentence stating the consequence, shown on the confirm card. */
   consequence: string;
   /** Credit weight (master §4.3 / web §7.2). */
@@ -57,6 +71,7 @@ export const ACTIONS: Record<ActionId, ActionDef> = {
     provider: 'google_calendar',
     label: 'Check calendar',
     write: false,
+    irreversible: false,
     consequence: 'Reads events in a date range.',
     weight: 1,
     fields: {
@@ -76,6 +91,7 @@ export const ACTIONS: Record<ActionId, ActionDef> = {
     provider: 'google_calendar',
     label: 'Create calendar event',
     write: true,
+    irreversible: true,
     consequence: 'Adds an event to your calendar and invites any guests listed.',
     weight: 2,
     fields: {
@@ -102,6 +118,7 @@ export const ACTIONS: Record<ActionId, ActionDef> = {
     provider: 'gmail',
     label: 'Create email draft',
     write: true,
+    irreversible: false,
     consequence: 'Saves a draft in your mailbox. Nothing is sent.',
     weight: 1,
     fields: {
@@ -116,6 +133,7 @@ export const ACTIONS: Record<ActionId, ActionDef> = {
     provider: 'gmail',
     label: 'Send email',
     write: true,
+    irreversible: true,
     consequence: 'Sends this email from your account immediately. This cannot be undone.',
     weight: 2,
     fields: {
@@ -130,6 +148,7 @@ export const ACTIONS: Record<ActionId, ActionDef> = {
     provider: 'slack',
     label: 'Post to Slack',
     write: true,
+    irreversible: true,
     consequence: 'Posts this message to the channel, visible to everyone in it.',
     weight: 2,
     fields: {
@@ -137,11 +156,64 @@ export const ACTIONS: Record<ActionId, ActionDef> = {
       text: { kind: 'text', required: true, max: 4000, label: 'Message' },
     },
   },
+  'sheets.append_row': {
+    id: 'sheets.append_row',
+    provider: 'google_sheets',
+    label: 'Append spreadsheet row',
+    write: true,
+    irreversible: false,
+    consequence: 'Appends one row to the spreadsheet range you specify.',
+    weight: 2,
+    fields: {
+      spreadsheetId: {
+        kind: 'string',
+        required: true,
+        max: 120,
+        label: 'Spreadsheet ID',
+      },
+      range: {
+        kind: 'string',
+        required: true,
+        max: 80,
+        label: 'Range (e.g. Sheet1!A:C)',
+      },
+      values: {
+        kind: 'text',
+        required: true,
+        max: 4000,
+        label: 'Values (comma-separated cells)',
+      },
+    },
+  },
+  'sheets.read_range': {
+    id: 'sheets.read_range',
+    provider: 'google_sheets',
+    label: 'Read spreadsheet range',
+    write: false,
+    irreversible: false,
+    consequence: 'Reads cell values from the spreadsheet range you specify.',
+    weight: 1,
+    fields: {
+      spreadsheetId: {
+        kind: 'string',
+        required: true,
+        max: 120,
+        label: 'Spreadsheet ID',
+      },
+      range: {
+        kind: 'string',
+        required: true,
+        max: 80,
+        label: 'Range (e.g. Sheet1!A1:D20)',
+      },
+    },
+  },
   'stripe.balance': {
     id: 'stripe.balance',
     provider: 'stripe',
     label: 'Check Stripe balance',
     write: false,
+    irreversible: false,
     consequence: 'Reads your current available and pending balance.',
     weight: 1,
     fields: {},
@@ -151,10 +223,47 @@ export const ACTIONS: Record<ActionId, ActionDef> = {
     provider: 'stripe',
     label: 'Recent Stripe payments',
     write: false,
+    irreversible: false,
     consequence: 'Reads your most recent successful payments.',
     weight: 1,
     fields: {
       limit: { kind: 'integer', required: false, min: 1, max: 25, label: 'Limit' },
+    },
+  },
+  'hubspot.list_contacts': {
+    id: 'hubspot.list_contacts',
+    provider: 'hubspot',
+    label: 'List HubSpot contacts',
+    write: false,
+    irreversible: false,
+    consequence: 'Reads a page of contacts from your HubSpot CRM.',
+    weight: 1,
+    fields: {
+      limit: { kind: 'integer', required: false, min: 1, max: 50, label: 'Limit' },
+    },
+  },
+  'hubspot.create_contact': {
+    id: 'hubspot.create_contact',
+    provider: 'hubspot',
+    label: 'Create HubSpot contact',
+    write: true,
+    irreversible: false,
+    consequence: 'Creates a contact in your HubSpot CRM.',
+    weight: 2,
+    fields: {
+      email: { kind: 'string', required: true, max: 254, label: 'Email' },
+      firstname: {
+        kind: 'string',
+        required: false,
+        max: 100,
+        label: 'First name',
+      },
+      lastname: {
+        kind: 'string',
+        required: false,
+        max: 100,
+        label: 'Last name',
+      },
     },
   },
 };
@@ -318,6 +427,12 @@ export function validateActionArgs(
     const to = new Date(String(args.timeMax));
     if (to.getTime() <= from.getTime()) {
       return { ok: false, error: 'To must be after From' };
+    }
+  }
+  if (actionId === 'hubspot.create_contact') {
+    const email = String(args.email ?? '');
+    if (!EMAIL.test(email)) {
+      return { ok: false, error: `Not a valid email address: ${email}` };
     }
   }
 

@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>{{brand}} — {{headline}}</title>
+  <style>
+    @page { size: A4; margin: 0; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 210mm; height: 297mm; }
+    body {
+      font-family: "Bricolage Grotesque", "Source Sans 3", Calibri, sans-serif;
+      background: {{bg}};
+      color: {{fg}};
+      overflow: hidden;
+    }
+    .hero {
+      position: absolute; inset: 0;
+      background:
+        linear-gradient(165deg, {{bg}} 0%, {{panel}} 55%, {{bg}} 100%);
+    }
+    .hero::after {
+      content: "";
+      position: absolute; inset: 0;
+      background:
+        radial-gradient(ellipse at 80% 20%, {{accent}}22 0%, transparent 50%),
+        radial-gradient(ellipse at 10% 90%, {{steel}}18 0%, transparent 45%);
+    }
+    .frame {
+      position: relative; z-index: 1;
+      height: 100%;
+      padding: 18mm 16mm 16mm;
+      display: flex;
+      flex-direction: column;
+    }
+    .brand {
+      font-size: 14pt;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: {{fg}};
+    }
+    .eyebrow {
+      margin-top: 28mm;
+      font-size: 11pt;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: {{steel}};
+      font-weight: 600;
+    }
+    .headline {
+      margin-top: 8mm;
+      font-size: 42pt;
+      line-height: 1.05;
+      font-weight: 800;
+      max-width: 160mm;
+      color: {{fg}};
+    }
+    .support {
+      margin-top: 8mm;
+      font-size: 14pt;
+      line-height: 1.45;
+      color: {{mist}};
+      max-width: 140mm;
+    }
+    .cta {
+      margin-top: auto;
+      display: inline-block;
+      background: {{accent}};
+      color: {{bg}};
+      font-weight: 800;
+      font-size: 13pt;
+      padding: 4.5mm 9mm;
+      border-radius: 2mm;
+      text-decoration: none;
+      width: fit-content;
+    }
+    .meta {
+      margin-top: 6mm;
+      font-size: 10pt;
+      color: {{mist}};
+    }
+    .stripe {
+      position: absolute;
+      left: 16mm; bottom: 12mm;
+      width: 18mm; height: 1.2mm;
+      background: {{accent}};
+    }
+  </style>
+</head>
+<body>
+  <div class="hero"></div>
+  <div class="frame">
+    <div class="brand">{{brand}}</div>
+    <div class="eyebrow">{{eyebrow}}</div>
+    <h1 class="headline">{{headline}}</h1>
+    <p class="support">{{support}}</p>
+    <a class="cta" href="#">{{cta}}</a>
+    <p class="meta">{{meta}}</p>
+  </div>
+  <div class="stripe" aria-hidden="true"></div>
+</body>
+</html>

@@ -1046,7 +1046,7 @@ export function App() {
         confirmLabel: proposal.title,
         summary: proposal.rows,
         fields: null,
-        irreversible: proposal.write,
+        irreversible: proposal.irreversible,
       };
     }
     if (pending.kind === 'selection') {

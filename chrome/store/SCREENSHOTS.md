@@ -37,28 +37,34 @@ For strictly live UI (toolbar + real Wikipedia), install `npm run zip:prod` unpa
 - [x] `04-sector.png`
 - [x] `05-recall.png`
 
-## Stale after v0.3.0 (Phase C redesign)
+## Regenerating (v0.5.1+)
 
-Every screenshot in this directory predates the Graphite Lumen redesign and shows
-the old green utility panel with the four-tab nav. **They must all be recaptured
-before the next store upload** — a listing that does not match the shipped UI is a
-review risk and a conversion problem.
+```bash
+cd chrome && npm run build && npm run screenshots
+```
 
-Recapture must cover, per plan F2:
+`capture.mjs` loads the **real built extension** in Chromium and photographs the
+actual panel, then composites it onto a branded 1280×800 backdrop with a caption.
+It replaced a hand-written `_fixture.html` mock, which had already drifted from
+the shipped UI — the failure mode store screenshots are most prone to, and the one
+a reviewer notices fastest.
 
-| Shot | State |
-|---|---|
-| 1 | Page surface, populated — brand header, context, one amber CTA |
-| 2 | In-context site grant — Chrome's own prompt naming a single site |
-| 3 | Confirm card — "Save this page?" showing exactly what gets written |
-| 4 | Recall — cross-surface memory answer |
-| 5 | Account & sites — real allowed-site list with Revoke |
+Only two things are stubbed: the BFF (so captures need no deployed backend) and
+`chrome.runtime.sendMessage` (so a page-access state can be posed — Chrome will
+not grant a real site permission to an automated run). All layout, tokens, fonts
+and copy are the shipped code.
 
-Notes:
-- The panel now follows the browser colour scheme. Capture in **dark**, which
-  matches WalkCroach Web's default and the store listing artwork.
-- Capture at ~360px (Chrome's default panel width). The layout also adapts at
-  250px and 480px via container queries, but a 250px shot reads as cramped in a
-  listing.
-- The first-run coach mark only appears once per profile; clear
-  `wc_coach_seen_v1` from extension storage to capture it.
+| # | File | Scene |
+|---|------|-------|
+| 1 | `01-page.png` | Page surface — brand, context, one primary action |
+| 2 | `02-grant.png` | Per-site permission request naming a single site |
+| 3 | `03-confirm.png` | Confirm card — exactly what will be saved, screenshot opt-in |
+| 4 | `04-recall.png` | Recall answer with numbered cited sources |
+| 5 | `05-account.png` | Account — allowed sites, revoke, connections |
+
+The connectors list is stubbed **empty** on purpose: connectors are inert until an
+OAuth app is registered, and a screenshot must not imply otherwise
+(`SUBMISSION_CHECKLIST.md` §1).
+
+The script exits non-zero if any capture is suspiciously small, which is what an
+empty panel looks like when the stubs have drifted from the app.

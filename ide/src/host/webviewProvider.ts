@@ -14,6 +14,8 @@ import {
   CONTINUE_PROMPT,
   revertTurn,
   normalizeBedrockApiKey,
+  resolveInferenceCredentials,
+  withInferenceCredentials,
   type AgentTodo,
   type BedrockMessage,
   type PersistedChatTurn,
@@ -37,6 +39,7 @@ import {
 } from '../api/ideClient.js';
 import { VsCodeHostAdapter } from './VsCodeHostAdapter';
 import { MessageBridge } from './messageBridge';
+import { LatencyTracker, formatLatencyReport } from './latency';
 
 const execFileAsync = promisify(execFile);
 
@@ -93,6 +96,8 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
   private readonly auth: AuthService;
   private readonly output: vscode.OutputChannel;
   private readonly host: VsCodeHostAdapter;
+  /** §7E — measures the PRD's latency budgets. Local only; never transmitted. */
+  readonly latency = new LatencyTracker();
 
   constructor(private readonly context: vscode.ExtensionContext) {
     this.auth = new AuthService(context.secrets);
@@ -105,6 +110,9 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
 
     this.host = new VsCodeHostAdapter((event) => {
       if (event.type === 'token_delta') {
+        // NFR-D02: time to first streamed token. `stop` returns null once the
+        // pending start is consumed, so only the first token of a task counts.
+        this.latency.stop('firstToken');
         this.transcript += event.text;
       }
       if (event.type === 'approval_request') {
@@ -547,6 +555,8 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
     _context: vscode.WebviewViewResolveContext,
     _token: vscode.CancellationToken,
   ): void {
+    // NFR-D01: the panel counts as loaded when the webview reports READY.
+    this.latency.start('panelLoad');
     this.view = webviewView;
     const { webview } = webviewView;
 
@@ -604,38 +614,35 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
       Promise.resolve(this.context.secrets.get(k)),
     );
     this.mcpConfigured = Boolean(cfg);
-    const bedrockSecret = await this.context.secrets.get(
-      SECRET_KEYS.bedrockApiKey,
+    // BYOK (Part 1 §4A / CLI §C4). One resolution rule, in the engine, for
+    // both hosts. This used to be a second copy that checked only
+    // `AWS_ACCESS_KEY_ID`, so a developer on `AWS_PROFILE` — the most common
+    // setup — was told Bedrock was not configured while their runs worked
+    // perfectly. Disagreeing with the CLI about the same machine is exactly
+    // what "ships once in the engine" exists to prevent.
+    const inference = await resolveInferenceCredentials(
+      { get: (key) => Promise.resolve(this.context.secrets.get(key)) },
+      { region: this.getBedrockRegionOverride() },
     );
-    this.bedrockConfigured = Boolean(
-      bedrockSecret?.trim() ||
-        process.env.AWS_BEARER_TOKEN_BEDROCK?.trim() ||
-        process.env.AWS_ACCESS_KEY_ID?.trim(),
-    );
+    this.bedrockConfigured = inference.configured;
     const ccloud = await this.context.secrets.get(SECRET_KEYS.ccloudApiKey);
     this.ccloudConfigured = Boolean(ccloud?.trim() || cfg?.apiKey);
   }
 
-  /** Prefer SecretStorage Bedrock key via AWS_BEARER_TOKEN_BEDROCK for this run. */
+  /**
+   * Prefer the SecretStorage Bedrock key for this run (BYOK — Part 1 §4A).
+   *
+   * This was a private implementation here; it now delegates to the shared
+   * engine helper so the IDE and the CLI resolve credentials the same way.
+   * Two behaviour differences, both fixes: concurrent runs are serialised
+   * (two panels could previously restore each other's environment), and a
+   * pre-existing empty-string value is restored as empty rather than deleted.
+   */
   private async withBedrockSecretEnv<T>(fn: () => Promise<T>): Promise<T> {
-    const fromSecret = (
-      await this.context.secrets.get(SECRET_KEYS.bedrockApiKey)
-    )?.trim();
-    const normalized = fromSecret
-      ? normalizeBedrockApiKey(fromSecret)
-      : '';
-    const prevToken = process.env.AWS_BEARER_TOKEN_BEDROCK;
-    if (normalized) {
-      process.env.AWS_BEARER_TOKEN_BEDROCK = normalized;
-    }
-    try {
-      return await fn();
-    } finally {
-      if (normalized) {
-        if (prevToken === undefined) delete process.env.AWS_BEARER_TOKEN_BEDROCK;
-        else process.env.AWS_BEARER_TOKEN_BEDROCK = prevToken;
-      }
-    }
+    return withInferenceCredentials(
+      { get: (key) => Promise.resolve(this.context.secrets.get(key)) },
+      fn,
+    );
   }
 
   private async withBedrockRunOptions(): Promise<{
@@ -919,6 +926,7 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
   ): Promise<void> {
     switch (msg.type) {
       case 'READY':
+        this.latency.stop('panelLoad');
         await this.refreshCredentialStatus();
         await this.refreshAuthAndLink();
         if (this.host.loadTodos) {
@@ -966,6 +974,7 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
         this.snapshot();
         return;
       case 'SUBMIT_TASK':
+        this.latency.start('firstToken');
         this.clearAutoContinue(true);
         // Only reset checklist on a true new chat; follow-ups keep prior todos.
         if (this.sessionMessages.length === 0) {
@@ -1350,4 +1359,9 @@ function getNonce(): string {
     id += chars.charAt(Math.floor(Math.random() * chars.length));
   }
   return id;
+}
+
+/** §7E — human-readable latency report for the output channel. */
+export function renderLatencyReport(provider: { latency: LatencyTracker }): string {
+  return formatLatencyReport(provider.latency.reportAll());
 }

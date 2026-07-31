@@ -18,6 +18,7 @@ import { MAX_EXTRACT_CHARS } from '../lib/extract';
 import { hasOriginPermission, listGrantedOrigins } from '../lib/permissions';
 import { resolvePageAccess, type PageAccess } from '../lib/page-access';
 import { downscaleToJpeg, type CapturedScreenshot } from '../lib/screenshot';
+import { routeMessage, type RouterDeps } from '../lib/message-router';
 import {
   isUsableSelection,
   normalizeSelection,
@@ -260,164 +261,46 @@ async function currentAccess(): Promise<PageAccess> {
   return resolvePageAccess(tab, hasOriginPermission);
 }
 
-async function handleMessage(
+/**
+ * Bind real Chrome APIs to the router's interface.
+ *
+ * The routing logic itself lives in `lib/message-router.ts` so it can be tested
+ * without the extension runtime — this worker is a WXT entrypoint and calls
+ * `defineBackground` at module scope, which makes it unimportable from a test.
+ */
+const routerDeps: RouterDeps = {
+  getAccess: currentAccess,
+  extract: runExtract,
+  readCache: readCachedExtract,
+  writeCache: writeCachedExtract,
+  clearCache: async (tabId) => {
+    if (typeof tabId === 'number') await clearCachedExtract(tabId);
+    else await clearAllCachedExtracts();
+  },
+  listGrants: listGrantedOrigins,
+  insertDraft: async (tabId, text) => {
+    const injected = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: insertDraftText,
+      args: [text],
+    });
+    return (
+      (injected[0]?.result as { inserted: boolean; reason?: string } | undefined) ?? {
+        inserted: false,
+      }
+    );
+  },
+  takeSelection: takePendingSelection,
+  captureScreenshot: async () => {
+    const pngDataUrl = await chrome.tabs.captureVisibleTab({ format: 'png' });
+    return downscaleToJpeg(pngDataUrl);
+  },
+};
+
+function handleMessage(
   message: ExtensionMessage,
 ): Promise<Record<string, unknown>> {
-  switch (message.type) {
-    case 'PING':
-      return { ok: true, pong: true };
-
-    case 'GET_PAGE_CONTEXT': {
-      const access = await currentAccess();
-      return { ok: true, access };
-    }
-
-    /**
-     * Best-effort warm: spends a live `activeTab` window (or an existing grant)
-     * once, so the panel is instant later. Silent on failure by design — this
-     * runs on panel open, and a failure here is not a user-facing error.
-     */
-    case 'WARM_PAGE_CONTEXT': {
-      const access = await currentAccess();
-      if (access.status !== 'ready') {
-        // activeTab may still be live even when tab.url was hidden; try anyway.
-        if (access.status === 'unknown') {
-          const extract = await runExtract(access.tabId);
-          if (extract) {
-            await writeCachedExtract(access.tabId, extract);
-            return { ok: true, access, warmed: true };
-          }
-        }
-        return { ok: true, access, warmed: false };
-      }
-      const cached = await readCachedExtract(access.tabId, access.url);
-      if (cached) return { ok: true, access, warmed: true };
-      const extract = await runExtract(access.tabId);
-      if (extract) await writeCachedExtract(access.tabId, extract);
-      return { ok: true, access, warmed: Boolean(extract) };
-    }
-
-    case 'GET_ACTIVE_TAB_INFO': {
-      const access = await currentAccess();
-      if (access.status === 'no-tab' || access.status === 'unknown') {
-        return { ok: false, access };
-      }
-      if (access.status === 'restricted') {
-        return { ok: false, access };
-      }
-      return {
-        ok: true,
-        access,
-        tabId: access.tabId,
-        url: access.url,
-        title: access.title,
-      };
-    }
-
-    case 'GET_ACTIVE_EXTRACT': {
-      const access = await currentAccess();
-      if (access.status === 'ready') {
-        const cached = await readCachedExtract(access.tabId, access.url);
-        if (cached) return { ok: true, access, extract: cached, cached: true };
-      }
-      if (access.status === 'no-tab' || access.status === 'restricted') {
-        return { ok: false, access };
-      }
-      // 'needs-grant' and 'unknown' still get one attempt: a live activeTab
-      // window can satisfy them, and succeeding beats a correct refusal.
-      const extract = await runExtract(access.tabId);
-      if (!extract) return { ok: false, access };
-      await writeCachedExtract(access.tabId, extract);
-      return { ok: true, access, extract, cached: false };
-    }
-
-    case 'INSERT_DRAFT': {
-      const text = (message.payload as { text?: string } | undefined)?.text;
-      if (!text) return { ok: false, error: 'text required' };
-      const access = await currentAccess();
-      if (access.status === 'no-tab' || access.status === 'restricted') {
-        return { ok: false, access };
-      }
-      try {
-        const injected = await chrome.scripting.executeScript({
-          target: { tabId: access.tabId },
-          func: insertDraftText,
-          args: [text],
-        });
-        const result = injected[0]?.result as
-          | { inserted: boolean; reason?: string }
-          | undefined;
-        if (!result?.inserted) {
-          return {
-            ok: false,
-            error:
-              result?.reason ??
-              'no focused field — click into a text box on the page, then Insert again (or Copy)',
-          };
-        }
-        return { ok: true };
-      } catch {
-        return { ok: false, access, needsAccess: true };
-      }
-    }
-
-    case 'GET_GRANTED_ORIGINS':
-      return { ok: true, origins: await listGrantedOrigins() };
-
-    case 'REVOKE_ORIGIN': {
-      // Revoke itself happens in the panel (gesture context); the worker only
-      // reports the resulting list so both sides agree.
-      return { ok: true, origins: await listGrantedOrigins() };
-    }
-
-    /**
-     * Screenshot of the visible viewport (Phase D4).
-     *
-     * `captureVisibleTab` needs page access for the tab, so this reuses the same
-     * gate as extraction — a screenshot is at least as sensitive as page text and
-     * must not be reachable on a site the user has not allowed.
-     */
-    case 'CAPTURE_SCREENSHOT': {
-      const access = await currentAccess();
-      if (access.status !== 'ready') {
-        return { ok: false, access };
-      }
-      try {
-        const pngDataUrl = await chrome.tabs.captureVisibleTab({
-          format: 'png',
-        });
-        const shot = await downscaleToJpeg(pngDataUrl);
-        if (!shot) {
-          return { ok: false, error: 'could not encode the screenshot' };
-        }
-        return { ok: true, access, screenshot: shot satisfies CapturedScreenshot };
-      } catch (err) {
-        return {
-          ok: false,
-          access,
-          error:
-            err instanceof Error
-              ? err.message
-              : 'Chrome would not capture this tab',
-        };
-      }
-    }
-
-    case 'TAKE_PENDING_SELECTION': {
-      const selection = await takePendingSelection();
-      return { ok: true, selection };
-    }
-
-    case 'CLEAR_PAGE_CACHE': {
-      const tabId = (message.payload as { tabId?: number } | undefined)?.tabId;
-      if (typeof tabId === 'number') await clearCachedExtract(tabId);
-      else await clearAllCachedExtracts();
-      return { ok: true };
-    }
-
-    default:
-      return { ok: false, error: 'unhandled' };
-  }
+  return routeMessage(message, routerDeps);
 }
 
 /**
