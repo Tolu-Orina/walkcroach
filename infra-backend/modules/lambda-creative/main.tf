@@ -197,8 +197,12 @@ locals {
   # count cannot depend on a resource attribute, so the decision is made from
   # variables while the URI itself is built from the repository resource.
   creative_enabled = var.enabled
+  # Splat + one() rather than [0]: when enabled = false the data source has
+  # count = 0, and a literal [0] index is an error the conditional does not
+  # reliably protect. `[*]` on an empty resource is legal and yields [], which
+  # one() turns into null — never reached, because that branch is not taken.
   creative_image_uri = var.image_uri != "" ? var.image_uri : (
-    var.enabled ? "${aws_ecr_repository.creative.repository_url}@${data.aws_ecr_image.creative[0].image_digest}" : ""
+    var.enabled ? "${aws_ecr_repository.creative.repository_url}@${one(data.aws_ecr_image.creative[*].image_digest)}" : ""
   )
 }
 
