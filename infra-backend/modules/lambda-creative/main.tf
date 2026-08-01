@@ -76,7 +76,14 @@ variable "tags" {
 }
 
 resource "aws_ecr_repository" "creative" {
-  name                 = "${var.name_prefix}-creative"
+  # Environment-scoped, matching every other module in this stack
+  # (`${name_prefix}-${environment}-...`). dev, test and prod share one AWS
+  # account and region and are separated only by Terraform state key, so a name
+  # without the environment is a real collision between them, not a style
+  # difference: whichever environment applied second would fight over the same
+  # repository, and a mutable `latest` pushed by dev would silently change the
+  # digest prod resolves.
+  name                 = "${var.name_prefix}-${var.environment}-creative"
   image_tag_mutability = "MUTABLE"
   force_delete         = var.environment != "prod"
 
@@ -124,7 +131,7 @@ data "aws_iam_policy_document" "assume" {
 }
 
 resource "aws_iam_role" "creative" {
-  name               = "${var.name_prefix}-lambda-creative"
+  name               = "${var.name_prefix}-${var.environment}-lambda-creative"
   assume_role_policy = data.aws_iam_policy_document.assume.json
   tags               = var.tags
 }
@@ -162,7 +169,7 @@ resource "aws_iam_role_policy" "creative" {
 }
 
 resource "aws_cloudwatch_log_group" "creative" {
-  name              = "/aws/lambda/${var.name_prefix}-creative"
+  name              = "/aws/lambda/${var.name_prefix}-${var.environment}-creative"
   retention_in_days = 14
   tags              = var.tags
 }
@@ -198,7 +205,7 @@ locals {
 resource "aws_lambda_function" "creative" {
   count = local.creative_enabled ? 1 : 0
 
-  function_name = "${var.name_prefix}-creative"
+  function_name = "${var.name_prefix}-${var.environment}-creative"
   role          = aws_iam_role.creative.arn
   package_type  = "Image"
   image_uri     = local.creative_image_uri

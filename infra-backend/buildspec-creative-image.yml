@@ -25,9 +25,27 @@ phases:
   pre_build:
     commands:
       - REGION="${AWS_DEFAULT_REGION:-$AWS_REGION_DEFAULT}"
-      - NAME_PREFIX="${NAME_PREFIX:-walkcroach}"
       - ENVIRONMENT="${TF_VAR_environment:?TF_VAR_environment must be set}"
-      - REPO_NAME="${NAME_PREFIX}-${ENVIRONMENT}-creative"
+      - |
+        # Read the repository name from the SAME source Terraform uses, rather
+        # than reconstructing it here.
+        #
+        #   main.tf                      local.name_prefix = var.project_name
+        #   modules/lambda-creative      name = "${var.name_prefix}-${var.environment}-creative"
+        #
+        # The environment segment matters: dev, test and prod share one AWS
+        # account and region, separated only by Terraform state key, so the
+        # repository name is the only thing keeping their images apart.
+        #
+        # This lookup previously omitted it, found nothing, and — because a
+        # missing repo is treated as a first run — skipped the build silently.
+        # The plan then failed resolving the `latest` digest one stage later.
+        TFVARS="infra-backend/environments/${ENVIRONMENT}.tfvars"
+        [ -f "$TFVARS" ] || { echo "missing $TFVARS"; exit 1; }
+        PROJECT_NAME="$(sed -n 's/^[[:space:]]*project_name[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$TFVARS" | head -1)"
+        [ -n "$PROJECT_NAME" ] || { echo "no project_name in $TFVARS"; exit 1; }
+        REPO_NAME="${PROJECT_NAME}-${ENVIRONMENT}-creative"
+        echo "resolved repository name: $REPO_NAME (from $TFVARS)"
       - |
         # The repository is created by Terraform (unconditionally, ahead of the
         # function). If it is missing this is the first ever run, and there is
@@ -38,10 +56,18 @@ phases:
         if [ -z "$REPO_URL" ] || [ "$REPO_URL" = "None" ]; then
           echo "ECR repository $REPO_NAME does not exist yet."
           echo "Terraform creates it; re-run this pipeline after the first apply."
+          # Show what DOES exist. The skip path is indistinguishable from a
+          # name mismatch, so make the mismatch obvious in the log instead of
+          # letting it read as a normal first run.
+          echo "--- creative repositories currently in $REGION ---"
+          aws ecr describe-repositories --region "$REGION" \
+            --query 'repositories[?contains(repositoryName, `creative`)].repositoryName' \
+            --output text 2>/dev/null || echo "(none, or no permission to list)"
           echo "SKIP=1" > /tmp/creative.env
           exit 0
         fi
-        echo "REPO_URL=$REPO_URL" > /tmp/creative.env
+        echo "REPO_NAME=$REPO_NAME" > /tmp/creative.env
+        echo "REPO_URL=$REPO_URL" >> /tmp/creative.env
       - |
         # Tag = hash of every input to the image. `sort` keeps it stable across
         # machines; anything not listed here cannot change the built artefact.
