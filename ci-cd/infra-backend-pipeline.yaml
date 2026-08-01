@@ -505,7 +505,9 @@ Resources:
         BuildSpec: infra-backend/buildspec-creative-image.yml
       Tags:
         - Key: Project
-          Value: !Ref ProjectName
+          Value: WalkCroach
+        - Key: ManagedBy
+          Value: CloudFormation
 
   # CodeBuild Project - Backend (Lambda) Unit Tests
   BackendUnitTestBuild:
