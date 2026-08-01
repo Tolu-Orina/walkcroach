@@ -408,6 +408,28 @@ Resources:
                   - cloudwatch:DeleteDashboards
                   - cloudwatch:ListDashboards
                 Resource: '*'
+              # module.observability_memory — metric alarms. Separate from the
+              # dashboard grant above: alarms are a different action family, and
+              # `logs:*` does not reach them either. PutMetricAlarm takes no
+              # resource-level condition worth using here, so the alarm name
+              # prefix is the constraint.
+              #
+              # Tag actions are included because Terraform tags every alarm it
+              # creates and reads them back on refresh; without them the apply
+              # fails after the alarm already exists, which is worse than
+              # failing outright.
+              - Sid: ObservabilityAlarms
+                Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricAlarm
+                  - cloudwatch:DeleteAlarms
+                  - cloudwatch:DescribeAlarms
+                  - cloudwatch:EnableAlarmActions
+                  - cloudwatch:DisableAlarmActions
+                  - cloudwatch:ListTagsForResource
+                  - cloudwatch:TagResource
+                  - cloudwatch:UntagResource
+                Resource: '*'
 
   # CloudWatch Log Groups
   TerraformValidateLogGroup:
