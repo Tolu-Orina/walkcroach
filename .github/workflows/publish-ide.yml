@@ -42,7 +42,10 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # 22, not 20: Node 20 is past end-of-life. This job does not install a
+          # global npm, so it was not hit by the npm 12 engine bump — aligned
+          # anyway so both release paths build on the same runtime.
+          node-version: 22
 
       - name: Build the engine the extension bundles
         working-directory: packages/agent-engine

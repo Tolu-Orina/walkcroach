@@ -15,7 +15,8 @@ name: Publish CLI
 #   Repository:        walkcroach
 #   Workflow:          publish-cli.yml
 #   Environment:       npm-publish
-# Requires npm CLI >= 11.5.1, which is why the version is pinned below.
+# Requires npm CLI >= 11.5.1. Pin the major — `npm@latest` reached 12.x, which
+# requires Node >= 22.22.2 and broke this job on a Node 20 runner.
 
 on:
   push:
@@ -44,13 +45,16 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # 22, not 20: Node 20 is past end-of-life, and npm 12 requires >= 22.22.2.
+          node-version: 22
           registry-url: https://registry.npmjs.org
 
-      # Trusted publishing and automatic provenance need a recent npm; the
-      # one bundled with Node 20 predates both.
+      # Trusted publishing and automatic provenance need a recent npm; the one
+      # bundled with Node 22 (10.x) predates both. Pinned to the 11 major rather
+      # than `@latest` so a future npm major bumping its own Node floor cannot
+      # break releases again — which is exactly what npm 12 did.
       - name: Use npm >= 11.5.1
-        run: npm install -g npm@latest
+        run: npm install -g npm@^11
 
       - name: Build the private packages the CLI bundles
         run: |
