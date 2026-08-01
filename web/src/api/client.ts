@@ -910,6 +910,17 @@ export type ConnectorProviderView = {
   tier: number;
   disclosure: string;
   scopes: string[];
+  /**
+   * False for a provider we have announced but not shipped. Distinct from a
+   * provider with no credentials, which the API omits entirely — see
+   * `listableProviders` in @walkcroach/connectors.
+   *
+   * Optional because a Lambda older than this field simply will not send it;
+   * defaulting to connectable keeps those responses behaving as before.
+   */
+  connectable?: boolean;
+  /** Why it cannot be connected yet. Null/absent when it can. */
+  comingSoon?: string | null;
   connection: {
     id: string;
     provider: string;

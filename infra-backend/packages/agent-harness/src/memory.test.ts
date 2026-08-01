@@ -87,7 +87,7 @@ describe('writeMemoryEntryDetailed — supersede lifecycle', () => {
 
   it('retires the nearest entry when the new one restates it', async () => {
     const { db, calls } = fakeDb([
-      [/SELECT id, embedding <=>/, { rows: [{ id: 'old-1', distance: '0.04' }] }],
+      [/SELECT id, kind, embedding <=>/, { rows: [{ id: 'old-1', kind: 'preference', distance: '0.04' }] }],
       [/INSERT INTO memory_entries/, { rows: [{ id: 'new-1' }] }],
     ]);
 
@@ -102,7 +102,7 @@ describe('writeMemoryEntryDetailed — supersede lifecycle', () => {
 
   it('leaves a merely-related entry alone when it is beyond the threshold', async () => {
     const { db, calls } = fakeDb([
-      [/SELECT id, embedding <=>/, { rows: [{ id: 'old-1', distance: '0.42' }] }],
+      [/SELECT id, kind, embedding <=>/, { rows: [{ id: 'old-1', kind: 'preference', distance: '0.42' }] }],
       [/INSERT INTO memory_entries/, { rows: [{ id: 'new-1' }] }],
     ]);
 
@@ -114,32 +114,58 @@ describe('writeMemoryEntryDetailed — supersede lifecycle', () => {
 
   it('reads the neighbour BEFORE inserting, so the new row cannot supersede itself', async () => {
     const { db, calls } = fakeDb([
-      [/SELECT id, embedding <=>/, { rows: [] }],
+      [/SELECT id, kind, embedding <=>/, { rows: [] }],
       [/INSERT INTO memory_entries/, { rows: [{ id: 'new-1' }] }],
     ]);
 
     await writeMemoryEntryDetailed({ db, ...base });
 
-    const selectAt = calls.findIndex((c) => /SELECT id, embedding <=>/.test(c.sql));
+    const selectAt = calls.findIndex((c) => /SELECT id, kind, embedding <=>/.test(c.sql));
     const insertAt = calls.findIndex((c) => /INSERT INTO memory_entries/.test(c.sql));
     expect(selectAt).toBeGreaterThanOrEqual(0);
     expect(selectAt).toBeLessThan(insertAt);
   });
 
-  it('scopes the neighbour search to the same project and kind', async () => {
+  it('pins only the index prefix columns, filtering kind in the caller', async () => {
+    // `kind` is NOT a prefix column of memory_entries_recall_idx — recall does
+    // not pin it, so it cannot be one. Putting it in the WHERE clause would
+    // make CockroachDB refuse the index for this query (migrations 031/032).
     const { db, calls } = fakeDb([
-      [/SELECT id, embedding <=>/, { rows: [] }],
+      [/SELECT id, kind, embedding <=>/, { rows: [] }],
       [/INSERT INTO memory_entries/, { rows: [{ id: 'new-1' }] }],
     ]);
 
     await writeMemoryEntryDetailed({ db, ...base });
 
-    const select = calls.find((c) => /SELECT id, embedding <=>/.test(c.sql));
+    const select = calls.find((c) => /SELECT id, kind, embedding <=>/.test(c.sql));
     expect(select?.sql).toMatch(/project_id = \$1::uuid/);
-    expect(select?.sql).toMatch(/kind = \$2/);
     expect(select?.sql).toMatch(/superseded_by IS NULL/);
+    expect(select?.sql).not.toMatch(/kind = /);
     expect(select?.params?.[0]).toBe(base.projectId);
-    expect(select?.params?.[1]).toBe('preference');
+  });
+
+  it('supersedes only a same-kind neighbour, even when a nearer one differs', async () => {
+    const { db, calls } = fakeDb([
+      [
+        /SELECT id, kind, embedding <=>/,
+        {
+          rows: [
+            // Nearest overall, but the wrong kind — must be skipped.
+            { id: 'other', kind: 'decision', distance: '0.01' },
+            { id: 'old-1', kind: 'preference', distance: '0.05' },
+          ],
+        },
+      ],
+      [/INSERT INTO memory_entries/, { rows: [{ id: 'new-1' }] }],
+    ]);
+
+    const result = await writeMemoryEntryDetailed({ db, ...base });
+
+    expect(result.supersededId).toBe('old-1');
+    expect(calls.find((c) => /UPDATE memory_entries/.test(c.sql))?.params).toEqual([
+      'old-1',
+      'new-1',
+    ]);
   });
 
   it('skips the neighbour lookup entirely when superseding is disabled', async () => {
@@ -151,12 +177,12 @@ describe('writeMemoryEntryDetailed — supersede lifecycle', () => {
     const result = await writeMemoryEntryDetailed({ db, ...base });
 
     expect(result.supersededId).toBeNull();
-    expect(calls.some((c) => /SELECT id, embedding <=>/.test(c.sql))).toBe(false);
+    expect(calls.some((c) => /SELECT id, kind, embedding <=>/.test(c.sql))).toBe(false);
   });
 
   it('embeds once, outside the transaction, so a replay does not re-bill Bedrock', async () => {
     const { db } = fakeDb([
-      [/SELECT id, embedding <=>/, { rows: [] }],
+      [/SELECT id, kind, embedding <=>/, { rows: [] }],
       [/INSERT INTO memory_entries/, { rows: [{ id: 'new-1' }] }],
     ]);
 
@@ -205,18 +231,69 @@ describe('recallProjectMemory', () => {
     expect(calls[0]?.sql).toMatch(/superseded_by IS NULL/);
   });
 
-  it('applies the surface filter in SQL when one is supplied', async () => {
-    const { db, calls } = fakeDb([[/FROM memory_entries/, { rows: [] }]]);
+  it('applies the surface filter in the caller, never in SQL', async () => {
+    // An optional filter cannot be an index prefix column: the unfiltered call
+    // would stop constraining it and lose the index. So it is applied here.
+    const { db, calls } = fakeDb([
+      [
+        /FROM memory_entries/,
+        {
+          rows: [
+            { id: 'a', kind: 'decision', text: 'a', distance: 0.1, source_surface: 'web' },
+            { id: 'b', kind: 'decision', text: 'b', distance: 0.2, source_surface: 'ide' },
+            { id: 'c', kind: 'decision', text: 'c', distance: 0.3, source_surface: 'chrome' },
+          ],
+        },
+      ],
+    ]);
 
-    await recallProjectMemory({
+    const out = await recallProjectMemory({
       db,
       projectId,
       query: 'q',
       sourceSurfaces: ['chrome', 'ide'],
     });
 
-    expect(calls[0]?.sql).toMatch(/source_surface = ANY/);
-    expect(calls[0]?.params?.[3]).toEqual(['chrome', 'ide']);
+    expect(calls[0]?.sql).not.toMatch(/source_surface = ANY/);
+    expect(out.map((h) => h.sourceSurface)).toEqual(['ide', 'chrome']);
+  });
+
+  it('drops rows with a null distance, which only the scan fallback can return', () => {
+    // A row with no embedding is absent from the vector index but sorts with a
+    // NULL distance on an exact scan. Both paths must return the same thing.
+    return (async () => {
+      const { db } = fakeDb([
+        [
+          /FROM memory_entries/,
+          {
+            rows: [
+              { id: 'ok', kind: 'decision', text: 'ok', distance: 0.1, source_surface: 'web' },
+              { id: 'no-embedding', kind: 'decision', text: 'x', distance: null, source_surface: 'web' },
+            ],
+          },
+        ],
+      ]);
+      const out = await recallProjectMemory({ db, projectId, query: 'q' });
+      expect(out.map((h) => h.id)).toEqual(['ok']);
+    })();
+  });
+
+  it('carries no predicate beyond the two index prefix columns', async () => {
+    // The guard that would have caught this bug. CockroachDB refuses a vector
+    // index for ANY query with a predicate on a non-prefix column, so recall
+    // silently degraded to an exact scan for the project's whole history.
+    // If someone adds a filter here, this fails rather than the product
+    // quietly getting slower.
+    const { db, calls } = fakeDb([[/FROM memory_entries/, { rows: [] }]]);
+
+    await recallProjectMemory({ db, projectId, query: 'q', sourceSurfaces: ['ide'] });
+
+    const where = calls[0]!.sql.split(/WHERE/i)[1]!.split(/ORDER BY/i)[0]!;
+    const predicates = where
+      .split(/\s+AND\s+/i)
+      .map((p) => p.trim())
+      .filter(Boolean);
+    expect(predicates).toEqual(['project_id = $1::uuid', 'superseded_by IS NULL']);
   });
 
   it('constrains project_id, which is what lets the prefixed vector index engage', async () => {

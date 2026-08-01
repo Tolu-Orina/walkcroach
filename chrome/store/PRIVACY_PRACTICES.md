@@ -47,9 +47,29 @@ The live privacy policy includes the required affirmative Limited Use statement.
 
 ## Manifest alignment checklist
 
-Before upload, verify dashboard permissions list matches:
+Before upload, verify the dashboard permissions list matches the built manifest:
 
-- `storage`, `activeTab`, `scripting`, `sidePanel`
-- **One** API host only: `https://awbcf4clij.execute-api.eu-west-2.amazonaws.com/*` (or the baked `WALKCROACH_API_BASE` origin)
-- **No** page hosts: no `<all_urls>` / `http://*/*` / `https://*/*`
-- **No** `content_scripts` in the package manifest
+- `storage`, `activeTab`, `scripting`, `sidePanel`, `identity`, `contextMenus` —
+  all six, each justified in `PERMISSION_JUSTIFICATIONS.md`
+- **One** install-time host only: `https://awbcf4clij.execute-api.eu-west-2.amazonaws.com/*`
+  (or the baked `WALKCROACH_API_BASE` origin)
+- **Optional** host permissions: the broad http/https wildcards are expected and
+  correct — see below
+- **No** `<all_urls>` anywhere, no `tabs`, no `content_scripts`
+
+> **Correction (2026-08-01).** This section previously listed only four
+> permissions — omitting `identity` and `contextMenus`, both of which the
+> extension has requested since 0.2.0 — and told you to verify there were *no*
+> broad page hosts at all. That second instruction conflated two different
+> manifest fields, and filling the dashboard form from it would have
+> under-declared what the extension actually asks for:
+>
+> | Field | Granted | Broad value means |
+> |---|---|---|
+> | `host_permissions` | at **install** | "read and change all your data on all websites", held whether used or not. Must stay narrow — API host only. |
+> | `optional_host_permissions` | at **use**, per origin, revocable | "may *ask* about any site". Broad here is the documented side-panel pattern, and is what avoids the install-time warning. |
+>
+> The same confusion was baked into `scripts/zip-prod.mjs`, where it made a
+> store build impossible — fixed the same day. `tests/manifest.test.ts` asserts
+> the six-permission list, so this document and the shipped zip cannot drift
+> apart silently again.

@@ -15,7 +15,20 @@ variable "environment" {
 variable "bedrock_monthly_budget_usd" {
   type        = string
   description = "Monthly AWS Budget limit (USD) for Amazon Bedrock cost filter"
-  default     = "150"
+  default     = "50"
+}
+
+variable "bedrock_budget_alert_usd" {
+  type        = list(number)
+  description = <<-EOT
+    Absolute USD spend levels that each raise a budget notification.
+
+    Absolute rather than percentage-of-limit: a percentage silently rescales
+    when the limit changes, so lowering the cap from 150 to 50 would have turned
+    the old "80%" alert from $120 into $40 without anyone deciding that. These
+    are the actual dollar figures you want to hear about.
+  EOT
+  default     = [10, 20, 30, 40, 50]
 }
 
 variable "budget_alert_email" {
@@ -80,19 +93,25 @@ resource "aws_budgets_budget" "bedrock_creative" {
     use_blended                = false
   }
 
-  notification {
-    comparison_operator       = "GREATER_THAN"
-    threshold                 = 80
-    threshold_type            = "PERCENTAGE"
-    notification_type         = "ACTUAL"
-    subscriber_sns_topic_arns = [aws_sns_topic.creative_budget.arn]
+  # One notification per dollar level in var.bedrock_budget_alert_usd.
+  dynamic "notification" {
+    for_each = toset(var.bedrock_budget_alert_usd)
+    content {
+      comparison_operator       = "GREATER_THAN"
+      threshold                 = notification.value
+      threshold_type            = "ABSOLUTE_VALUE"
+      notification_type         = "ACTUAL"
+      subscriber_sns_topic_arns = [aws_sns_topic.creative_budget.arn]
+    }
   }
 
+  # Forecast crossing the cap warns before the money is spent rather than after.
+  # ACTUAL alerts are all retrospective by definition.
   notification {
     comparison_operator       = "GREATER_THAN"
-    threshold                 = 100
-    threshold_type            = "PERCENTAGE"
-    notification_type         = "ACTUAL"
+    threshold                 = tonumber(var.bedrock_monthly_budget_usd)
+    threshold_type            = "ABSOLUTE_VALUE"
+    notification_type         = "FORECASTED"
     subscriber_sns_topic_arns = [aws_sns_topic.creative_budget.arn]
   }
 

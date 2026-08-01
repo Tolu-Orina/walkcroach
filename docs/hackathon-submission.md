@@ -14,12 +14,12 @@
 
 | Required | Status |
 |---|---|
-| Public repo URL | ✅ `https://github.com/Tolu-Orina/walkcroach` — **TODO: confirm public** |
-| Installable artifacts | ✅ [`@walkcroach/cli@0.3.0`](https://www.npmjs.com/package/@walkcroach/cli) on npm **with SLSA provenance**; [`walkcroach.walkcroach-ide@0.2.0`](https://open-vsx.org/extension/walkcroach/walkcroach-ide) on Open VSX |
+| Public repo URL | ✅ [`github.com/Tolu-Orina/walkcroach`](https://github.com/Tolu-Orina/walkcroach) — public, MIT |
+| Installable artifacts | ✅ **All four surfaces reachable.** Web (above) · [`@walkcroach/cli@0.3.0`](https://www.npmjs.com/package/@walkcroach/cli) on npm **with SLSA provenance** · [`walkcroach.walkcroach-ide@0.2.0`](https://open-vsx.org/extension/walkcroach/walkcroach-ide) on Open VSX · WalkCroach Chrome **0.6.0 approved and live** on the Chrome Web Store |
 | Open-source licence detectable in About | ✅ MIT, [`LICENSE`](../LICENSE) at repo root |
 | README with setup + run instructions | ✅ [`README.md`](../README.md) — verified by following it from scratch |
 | Dependencies / example config | ✅ per-module `package.json`; [`.env.example`](../.env.example) |
-| **Functional demo app URL** | ❌ **TODO** — see §7 |
+| **Functional demo app URL** | ✅ [`walkcroach.conquerorfoundation.com`](https://walkcroach.conquerorfoundation.com) |
 | **Video < 3 min, public on YouTube/Vimeo** | ❌ **TODO** — script in §6 |
 | Which CockroachDB tools, and what the agent did with them | ✅ §2 |
 | Which AWS services, and how | ✅ §3 |
@@ -336,14 +336,45 @@ After, with the index hinted to demonstrate eligibility:
 
 `• vector search` with `prefix spans` pruning by tenant — both fixes doing their job.
 
-> **Do not overclaim this.** The *unhinted* plan on our current data still scans,
-> because `memory_entries` holds 9 rows and scanning 2 of them is genuinely cheaper
-> than an ANN lookup. The optimizer is right. The honest claim is
-> **ineligible → eligible**, evidenced by the error message and the `vector search`
-> node. Showing the unhinted before/after side by side would imply a speedup that is
-> not there, and a Cockroach Labs judge will spot it instantly.
-> **TODO:** to demonstrate the index *winning*, seed a throwaway table with a few
-> thousand vectors, EXPLAIN both index shapes, drop it. Then the numbers are real.
+**Then a third defect, which only measuring could have found.**
+
+Setting up that benchmark is what exposed it. CockroachDB refuses a vector index for
+**any** query carrying a predicate on a column outside the index prefix. Every recall
+query in the codebase carried at least one — `superseded_by IS NULL`,
+`status = 'ready'`, `text_content IS NOT NULL`, an INNER JOIN constraining the indexed
+table. So after `026`–`029` the indexes were correctly shaped and *still* unused.
+
+The earlier proof had been run against a simplified query without those filters. It
+demonstrated the index was eligible; it did not demonstrate that the shipping query
+could use it. Those are different claims, and only one of them mattered.
+
+Fixed in `031`/`032` plus a rewrite of all eight recall paths, guided by what the
+cluster actually accepts rather than what the docs imply:
+
+| Shape | Accepted |
+|---|---|
+| `IS NULL` on a prefix column | yes |
+| `IN (list)` on a prefix column | yes |
+| Two prefix columns, both pinned | yes |
+| LEFT JOIN | yes |
+| Two prefix columns, only one pinned | **no** |
+| Any predicate on a non-prefix column | **no** |
+| INNER JOIN constraining the indexed table | **no** |
+
+So always-present filters moved *into* the prefix (`superseded_by`, `status`), optional
+ones (`source_surface`, `kind`, `workspace_id`) moved to the caller over the
+over-fetched candidate set, and the chunk search moved into a CTE so its join no longer
+constrains the indexed table. All eight verified accepted against the live cluster.
+
+`memory.test.ts` now asserts the WHERE clause contains *exactly* the prefix columns and
+nothing else — the guard that would have caught this on day one.
+
+> **What is deliberately not claimed: a speedup number.** At 9 rows the optimizer
+> correctly prefers a scan, so any figure would be theatre. Producing an honest one
+> needs a throwaway cluster, not this one — an attempt on production hit ~250× write
+> amplification during C-SPANN index maintenance and had to be aborted. The claim here
+> is narrower and checkable: **the shipping queries can now use their indexes, and
+> could not before.**
 
 The transferable lesson, and the reason this belongs in the write-up: a vector layer
 can be completely inert while every test passes and every answer is correct, because
@@ -491,14 +522,14 @@ Lead with the cross-surface moment; do not tour features.
 
 | # | Gate | Owner action |
 |---|---|---|
-| 1 | **Demo URL** | Deploy Web and seed a demo project so first-load recall has something to find. An empty demo makes the memory story invisible. |
+| ~~1~~ | ~~Demo URL~~ | ✅ `walkcroach.conquerorfoundation.com`. **Still seed a demo project** — first-load recall with nothing to find makes the memory story invisible, which is the one thing this submission cannot afford. |
 | 2 | **Video** | Record per §6. |
-| 3 | **Repo public** | Confirm public + MIT visible in the About panel. |
-| 4 | **Scale evidence** | §5.5 TODO — throwaway table, real ANN-vs-scan numbers. |
-| 5 | **Memory dashboard/alarms** | `WalkCroach/Memory` is emitted but nothing consumes it. `RecallEmpty` and `EmbedFailure` are the two worth alarming. |
-| 6 | Video worker ARN empty; `creative_lambda_image_uri` unset | Either wire them or keep creative/video claims out of the submission. |
-| 7 | Connectors + remote site profiles inert without OAuth secrets | Keep behind the claim-gating table; do not demo. |
-| 8 | Chrome Web Store listing not confirmed live | Ops gate, not a judging gate. Do not claim "published" unless it is. |
+| ~~3~~ | ~~Repo public~~ | ✅ Public, MIT detectable in About. |
+| ~~4~~ | ~~Scale evidence~~ | ✅ **Closed 2026-08-01 by fixing what it found.** Measuring exposed that no recall query could use its index at all; `031`/`032` plus rewritten queries fixed it, verified against the live cluster. A throughput benchmark is deliberately *not* claimed — see §5.5. |
+| ~~5~~ | ~~Memory dashboard/alarms~~ | ✅ `modules/observability-memory` — dashboard plus three alarms (EmbedFailure, sustained RecallEmpty, p95 RecallLatency). Deploys via the normal pipeline. |
+| 6 | Creatives/video need one image push | ✅ **Wiring done.** `creative_lambda_image_tag` is now the single value that creates the creative Lambda *and*, via its ARN, the video Step Functions worker — the creative handler already routes `compose_video`, so it is the worker. Remaining: run `infra-backend/scripts/push-creative-image.sh` and apply. Until then both stay on the local/stub fallback and must not be claimed. |
+| 7 | Connector credentials | Google (Calendar/Gmail/Sheets), Slack and Stripe are all one OAuth app each — demoable. Gmail/Calendar run test-user-only until Google verifies restricted scopes, which will not complete before the deadline. **HubSpot is marked coming-soon in code** (their Projects framework replaced legacy public apps). Remote site profiles still need an Ed25519 signing key. |
+| ~~8~~ | ~~Chrome Web Store~~ | ✅ **0.6.0 approved and live.** Release is tag-driven (`publish-chrome.yml`, `chrome-v*`) like the CLI and IDE. |
 | ~~9~~ | ~~CLI/IDE not published~~ | ✅ **Closed 2026-08-01.** `@walkcroach/cli@0.3.0` on npm via OIDC trusted publishing, carrying a SLSA provenance attestation; `walkcroach.walkcroach-ide@0.2.0` on Open VSX. PKCE closed the same day — see §5.9. |
 | ~~10~~ | ~~`agent-harness/loop.ts` has no dedicated unit suite~~ | ✅ **Closed 2026-08-01.** `loop.test.ts` — 45 tests over memory recall, the session state machine, mode escalation, and loop termination. Mutation-verified (see §5.7). |
 

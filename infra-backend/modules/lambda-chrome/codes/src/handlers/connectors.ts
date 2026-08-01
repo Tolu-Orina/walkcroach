@@ -1,7 +1,7 @@
 import { createDbClient } from '@walkcroach/db';
 import { embedAndStoreWorkflowRun } from '@walkcroach/agent-harness';
 import {
-  configuredProviders,
+  listableProviders,
   describeAction,
   destroyTokens,
   executeRun,
@@ -67,9 +67,11 @@ export async function handleListConnectors(
     const rows = await listConnectors(db, auth.ownerId);
     const byProvider = new Map(rows.map((r) => [r.provider, r]));
 
-    // Only providers with OAuth credentials actually configured are offered —
-    // showing one that dead-ends at a consent screen is worse than hiding it.
-    const providers = configuredProviders().map((p) => {
+    // Providers with OAuth credentials configured, plus any deliberately
+    // announced as coming soon. A provider that would dead-end at a consent
+    // screen is still hidden — `connectable: false` is for the ones we have
+    // chosen to show as not-yet-available.
+    const providers = listableProviders().map((p) => {
       const row = byProvider.get(p.id);
       return {
         id: p.id,
@@ -77,6 +79,8 @@ export async function handleListConnectors(
         tier: p.tier,
         disclosure: p.disclosure,
         scopes: p.scopes,
+        connectable: p.connectable,
+        comingSoon: p.comingSoon ?? null,
         connection: row ? toConnectorView(row) : null,
       };
     });

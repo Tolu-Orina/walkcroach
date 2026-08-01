@@ -86,21 +86,35 @@ export async function recallProjectDocuments(params: {
       chunk_index: number;
       distance: number;
     }>(
-      `SELECT
-         c.id AS chunk_id,
-         c.document_id,
-         d.name,
-         c.content,
-         c.chunk_index,
-         c.embedding <=> $2::vector AS distance
-       FROM project_document_chunks c
-       INNER JOIN project_documents d
-         ON d.id = c.document_id
-        AND d.project_id = c.project_id
-       WHERE c.project_id = $1::uuid
-         AND c.embedding IS NOT NULL
-       ORDER BY c.embedding <=> $2::vector
-       LIMIT $3`,
+      /**
+       * The vector search is isolated in a CTE so it carries exactly one
+       * predicate — the index prefix — and nothing else.
+       *
+       * It previously joined `project_documents` inline with
+       * `AND d.project_id = c.project_id`, which put a second predicate on the
+       * indexed table and made CockroachDB refuse the index outright (an INNER
+       * JOIN constraining the indexed table is rejected; a LEFT JOIN or a join
+       * outside the search is not). See migrations 031/032.
+       *
+       * The tenant guard that condition provided is preserved on the outer
+       * join, where it constrains `d` rather than `c` and costs nothing.
+       */
+      `WITH hits AS (
+         SELECT id, document_id, content, chunk_index,
+                embedding <=> $2::vector AS distance
+           FROM project_document_chunks
+          WHERE project_id = $1::uuid
+          ORDER BY embedding <=> $2::vector
+          LIMIT $3
+       )
+       SELECT h.id AS chunk_id, h.document_id, d.name, h.content,
+              h.chunk_index, h.distance
+         FROM hits h
+         INNER JOIN project_documents d
+           ON d.id = h.document_id
+          AND d.project_id = $1::uuid
+        WHERE h.distance IS NOT NULL
+        ORDER BY h.distance`,
       [params.projectId, vec, limit],
     );
 
@@ -122,19 +136,28 @@ export async function recallProjectDocuments(params: {
       text_content: string | null;
       distance: number;
     }>(
+      /**
+       * Prefix column only. `text_content IS NOT NULL` moved to the caller —
+       * as a non-prefix predicate it disqualified the index, and it is a
+       * legacy-data guard rather than a semantic filter. Over-fetched 4× so
+       * dropping the text-less rows does not shorten the result.
+       */
       `SELECT id, name, text_content,
               embedding <=> $2::vector AS distance
        FROM project_documents
        WHERE project_id = $1::uuid
-         AND embedding IS NOT NULL
-         AND text_content IS NOT NULL
        ORDER BY embedding <=> $2::vector
        LIMIT $3`,
-      [params.projectId, vec, limit],
+      [params.projectId, vec, Math.min(100, limit * 4)],
     );
 
-    if (legacy.rows.length > 0) {
-      return legacy.rows.map((d) => ({
+    // Filters the SQL used to carry, now applied here so the index stays usable.
+    const usableLegacy = legacy.rows
+      .filter((d) => d.distance !== null && d.text_content !== null)
+      .slice(0, limit);
+
+    if (usableLegacy.length > 0) {
+      return usableLegacy.map((d) => ({
         id: d.id,
         documentId: d.id,
         name: d.name,

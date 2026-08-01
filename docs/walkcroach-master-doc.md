@@ -14,19 +14,19 @@
 | Surface | Maturity | One-line verdict |
 |---|---|---|
 | **Web** | **Substantially complete + Web Modules landed** | Builder/chat/deploy/RAG as before, plus creatives (Canvas/Reel/flyers/Office), connectors package, Stripe Checkout/Portal handlers, Bedrock guardrails, creative observability. Hard quotas and propose→confirm→execute are real. |
-| **Chrome** | **Functional; CWS submit packet current at v0.5.3** | Side-panel copilot, linking, auth upgrade, selection capture, site profiles, connectors code (inert until OAuth secrets). Store checklist supersedes the old 0.1.4 packet — submission still the open ops gate. |
+| **Chrome** | **0.6.0 live on the Chrome Web Store (approved 2026-08-01)** | Side-panel copilot, linking, auth upgrade, selection capture, site profiles, connectors code (inert until OAuth secrets). Store checklist supersedes the old 0.1.4 packet — submission still the open ops gate. |
 | **IDE extension** | **Published — `walkcroach.walkcroach-ide@0.2.0` on Open VSX** | Chat, checkpoints, attachments, semantic search, HTTP MCP, shared skills, private VSIX (`ide/walkcroach-ide.vsix`). Open VSX publish workflow present. Stdio MCP **deferred**. |
 | **CLI** | **Published — `@walkcroach/cli@0.3.0` on npm** | Same engine as IDE. v0.3.0, browser **loopback** auth (RFC 8252; `--token` for CI), `bin` + `publishConfig` + `.github/workflows/publish-cli.yml` (OIDC). PKCE (S256) landed 2026-08-01. |
 | **Shared agent-engine** | **Most mature module** | gather→act→verify, hard verify, adversarial review, checkpoints, hooks, tool-loop-guard. Has dedicated `loop.test.ts`. |
 | **agent-harness** | **Mature, creative-heavy** | Web/Chrome Lambda loop (~2.9k lines `loop.ts`); creatives, connectors, guardrails, EMF metrics. **`loop.test.ts` landed 2026-08-01** — 45 mutation-verified tests. |
 | **Desktop IDE** | **Postponed / scaffold only** | Sibling repo; docs archived under `docs/archive/`. Do not describe as shipped. |
-| **Backend infra** | **Real; expanded Jul 30–31, hardened Aug 1** | **29** CockroachDB migrations; Terraform modules include creative Lambda, video SFN (optional), guardrails, creative budget/dashboard. DB client now verifies TLS and retries 40001. Soft spots remain (empty video worker ARN, pipeline IAM asymmetry, likely-orphaned `agent_locks`). |
+| **Backend infra** | **Real; expanded Jul 30–31, hardened Aug 1** | **32** CockroachDB migrations; Terraform modules include creative Lambda, video SFN (optional), guardrails, creative budget/dashboard. DB client now verifies TLS and retries 40001. Soft spots remain (empty video worker ARN, pipeline IAM asymmetry, likely-orphaned `agent_locks`). |
 
 ### 0.2 What changed since the 2026-07-29 audit
 
 | Area | Then | Now |
 |---|---|---|
-| Migrations | 19 (through `019_shared_skills`) | **29** (`020`–`025`: connectors, entitlements/quotas, creative assets, video jobs, creative memory/a11y, workflow runs + vector idx; `026`–`029`: C-SPANN rebuild — tenant prefix, then cosine opclass) |
+| Migrations | 19 (through `019_shared_skills`) | **32** (`020`–`025`: connectors, entitlements/quotas, creative assets, video jobs, creative memory/a11y, workflow runs + vector idx; `026`–`032`: C-SPANN rebuild — tenant prefix, cosine opclass, then filter-aware prefixes) |
 | Terraform modules | ~8 | **+** `bedrock-guardrails`, `lambda-creative`, `stepfunctions-video`, `observability-creative` |
 | Monitoring | Claimed “zero alarms/budgets” | **Creative** CloudWatch dashboard + Bedrock AWS Budget + SNS (`modules/observability-creative`) — still not full product-wide SLOs |
 | Billing | “Portal deferred” UI copy | **Stripe Checkout + Customer Portal + webhooks** implemented (`handlers/stripeBilling.ts`); needs live secret keys |
@@ -143,7 +143,7 @@ Sibling `walkcroach-desktop/` exists beside this monorepo. Plans/PRDs live in [`
 
 This file + [`docs/README.md`](./README.md) replace the missing historical `plan1.md`. Locked architecture facts: CockroachDB as system of record; client-resume vs server-side tools; E2B-primary sandbox; single Cognito client.
 
-### 5.2 Schema — 29 migrations
+### 5.2 Schema — 32 migrations
 
 Applied via `@walkcroach/db` migrate. Newest:
 
@@ -179,7 +179,7 @@ Root `main.tf` wires creative guardrail IDs and `creative_lambda_*` into `lambda
 ### 5.6 Ops runbooks
 
 - [`runtime-secrets-and-ssm.md`](./runtime-secrets-and-ssm.md)  
-- [`smoke-and-redirects.md`](./smoke-and-redirects.md) — apply migrations **through 029** before prod creative/connector claims. `026`–`029` rebuild the vector indexes in drop/create pairs; each pair leaves the tables briefly unindexed, so never stop mid-pair.  
+- [`smoke-and-redirects.md`](./smoke-and-redirects.md) — apply migrations **through 032** before prod creative/connector claims. `026`–`032` rebuild the vector indexes in drop/create pairs; each pair leaves the tables briefly unindexed, so never stop mid-pair.  
 
 ---
 
@@ -196,17 +196,17 @@ Seventeen `walkcroach-*` skill directories + `NOTICE.md` (Apache vs proprietary)
 | 1 | Desktop not a shipped surface | Don’t market a fifth surface |
 | ~~2~~ | ~~`agent-harness` `loop.ts` lacks dedicated unit tests~~ | ✅ Closed 2026-08-01 — `loop.test.ts`, 45 tests, verified against 4 deliberate mutations |
 | 3 | Lambda BFF handler tests still thin vs client/engine; no Lambda error/latency alarms | Money, merge, deploy, video + ops |
-| 4 | Video SFN worker ARN empty / stub path; creative Lambda needs image URI | Production video/creative orchestration incomplete |
+| 4 | Creative image not yet pushed | Wiring complete — `creative_lambda_image_tag` creates the creative Lambda and chains the video SFN worker off its ARN. One `scripts/push-creative-image.sh` + apply away from live |
 | 5 | Connectors/creatives “code complete” ≠ “user-reachable” without secrets | Claims must lag wiring |
 | 6 | Dual Stripe config footgun (Connect OAuth vs platform Billing keys) | Wrong secret → silent inert Connect or broken Checkout |
-| 7 | Chrome CWS submission / extension ID | Store packet ready; live listing not confirmed in-repo |
+| ~~7~~ | ~~Chrome CWS submission~~ | ✅ 0.6.0 approved and live 2026-08-01. `zip:prod` and the store packet were both blocking and are fixed |
 | ~~8~~ | ~~CLI not published~~ | ✅ Closed 2026-08-01 — `@walkcroach/cli@0.3.0` (npm, OIDC + provenance), `walkcroach-ide@0.2.0` (Open VSX) |
 | 9 | Stdio MCP deferred | Correct security posture; don’t silently enable |
 | 10 | `agent_locks` likely orphaned; `build_events`/`tool_invocations` dual-write | Schema hygiene |
 | 11 | Backend pipeline IAM + CodeBuild `resources=["*"]` | Blast-radius inconsistency |
-| 12 | Product-wide alarms/synthetics still thin | `WalkCroach/Memory` + `WalkCroach/Creative` EMF exist; still no Lambda error/latency alarms or synthetics |
+| 12 | Lambda error/latency alarms and synthetics still absent | Memory now has a dashboard + 3 alarms (`modules/observability-memory`) and Creative has a budget/dashboard, but nothing watches Lambda errors or does synthetic probes |
 | 13 | Claims audit / privacy checkboxes unsigned | Release gate |
-| 14 | No CloudWatch dashboard/alarms consuming `WalkCroach/Memory` yet | Metrics are emitted but nothing watches them — `RecallEmpty` and `EmbedFailure` are the two worth alarming |
+| ~~14~~ | ~~Nothing consumes `WalkCroach/Memory`~~ | ✅ `modules/observability-memory` — dashboard + EmbedFailure / sustained RecallEmpty / p95 RecallLatency alarms |
 | 15 | `MEMORY_SUPERSEDE_THRESHOLD` (0.15) is a judgement call, not eval-backed | Catches restatements only; lexically-distant contradictions still accumulate. Widening it needs eval data, not a bigger constant |
 
 ### 7.1 Closed on 2026-08-01

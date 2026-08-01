@@ -1,0 +1,103 @@
+version: 0.2
+
+# Build and push the creative Lambda container.
+#
+# Runs in the Test stage, before Terraform plans or applies, because the module
+# resolves the image digest at plan time — the image has to exist by then.
+#
+# Conditional on CONTENT, not on a branch or a file-path trigger. The tag is a
+# hash of everything that goes into the image, so:
+#
+#   * an unchanged tree finds its tag already in ECR and skips the build
+#     entirely — a few seconds, not the ~10 minutes LibreOffice takes to install
+#   * a changed tree produces a new tag, which Terraform sees as a new digest
+#     and actually redeploys
+#
+# A branch or path trigger cannot give the second property: pushing a new image
+# to a fixed tag leaves `image_uri` textually identical, Terraform reports no
+# diff, and the function silently keeps running the old code.
+
+env:
+  variables:
+    AWS_REGION_DEFAULT: eu-west-2
+
+phases:
+  pre_build:
+    commands:
+      - REGION="${AWS_DEFAULT_REGION:-$AWS_REGION_DEFAULT}"
+      - NAME_PREFIX="${NAME_PREFIX:-walkcroach}"
+      - ENVIRONMENT="${TF_VAR_environment:?TF_VAR_environment must be set}"
+      - REPO_NAME="${NAME_PREFIX}-${ENVIRONMENT}-creative"
+      - |
+        # The repository is created by Terraform (unconditionally, ahead of the
+        # function). If it is missing this is the first ever run, and there is
+        # nothing to push to yet — succeed quietly rather than fail the pipeline.
+        REPO_URL="$(aws ecr describe-repositories --region "$REGION" \
+          --repository-names "$REPO_NAME" \
+          --query 'repositories[0].repositoryUri' --output text 2>/dev/null || true)"
+        if [ -z "$REPO_URL" ] || [ "$REPO_URL" = "None" ]; then
+          echo "ECR repository $REPO_NAME does not exist yet."
+          echo "Terraform creates it; re-run this pipeline after the first apply."
+          echo "SKIP=1" > /tmp/creative.env
+          exit 0
+        fi
+        echo "REPO_URL=$REPO_URL" > /tmp/creative.env
+      - |
+        # Tag = hash of every input to the image. `sort` keeps it stable across
+        # machines; anything not listed here cannot change the built artefact.
+        set -a; . /tmp/creative.env; set +a
+        [ "${SKIP:-0}" = "1" ] && exit 0
+        TAG="$(
+          { find infra-backend/modules/lambda-creative/Dockerfile \
+                 infra-backend/modules/lambda-creative/codes \
+                 skills/web -type f -print0 2>/dev/null \
+            | sort -z | xargs -0 sha256sum; } | sha256sum | cut -c1-12
+        )"
+        echo "TAG=$TAG" >> /tmp/creative.env
+        echo "computed content tag: $TAG"
+
+  build:
+    commands:
+      - |
+        set -a; . /tmp/creative.env; set +a
+        if [ "${SKIP:-0}" = "1" ]; then
+          echo "skipping build"
+          exit 0
+        fi
+
+        REGION="${AWS_DEFAULT_REGION:-$AWS_REGION_DEFAULT}"
+        REGISTRY="${REPO_URL%%/*}"
+
+        if aws ecr describe-images --region "$REGION" \
+             --repository-name "$REPO_NAME" \
+             --image-ids "imageTag=$TAG" >/dev/null 2>&1; then
+          echo "$REPO_URL:$TAG already exists — creative sources unchanged, skipping build."
+          BUILT=0
+        else
+          echo "building $REPO_URL:$TAG"
+          aws ecr get-login-password --region "$REGION" \
+            | docker login --username AWS --password-stdin "$REGISTRY"
+          # Context is the repo root: the Dockerfile copies both
+          # infra-backend/modules/lambda-creative/ and skills/web/.
+          docker build --platform linux/amd64 \
+            -f infra-backend/modules/lambda-creative/Dockerfile \
+            -t "$REPO_URL:$TAG" .
+          docker push "$REPO_URL:$TAG"
+          BUILT=1
+        fi
+
+        # `latest` always follows the current content tag, so tfvars can pin a
+        # readable name while Terraform still resolves a changing digest.
+        aws ecr get-login-password --region "$REGION" \
+          | docker login --username AWS --password-stdin "$REGISTRY"
+        MANIFEST="$(aws ecr batch-get-image --region "$REGION" \
+          --repository-name "$REPO_NAME" \
+          --image-ids "imageTag=$TAG" \
+          --query 'images[0].imageManifest' --output text)"
+        aws ecr put-image --region "$REGION" \
+          --repository-name "$REPO_NAME" \
+          --image-tag latest \
+          --image-manifest "$MANIFEST" >/dev/null 2>&1 \
+          || echo "latest already points at $TAG"
+
+        echo "creative image ready: $REPO_URL:$TAG (also tagged latest, built=$BUILT)"

@@ -92,6 +92,9 @@ export function ConnectionsPage() {
         )}
         {providers.map((p) => {
           const connected = p.connection?.status === 'connected';
+          // Absent on responses from a Lambda predating the field, which should
+          // keep behaving exactly as it did.
+          const comingSoon = p.connectable === false;
           return (
             <li key={p.id} className="surface flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0">
@@ -103,6 +106,11 @@ export function ConnectionsPage() {
                   {connected && (
                     <span className="rounded-[0.3rem] border border-signal/40 px-1.5 py-0.5 font-mono text-[10px] text-signal">
                       connected
+                    </span>
+                  )}
+                  {comingSoon && (
+                    <span className="rounded-[0.3rem] border border-mist/40 px-1.5 py-0.5 font-mono text-[10px] text-mist">
+                      coming soon
                     </span>
                   )}
                 </div>
@@ -117,9 +125,25 @@ export function ConnectionsPage() {
                     {p.connection.lastError}
                   </p>
                 )}
+                {comingSoon && p.comingSoon && (
+                  <p className="mt-1 text-xs text-mist/80">{p.comingSoon}</p>
+                )}
               </div>
               <div className="flex shrink-0 gap-2">
-                {connected ? (
+                {comingSoon ? (
+                  // Rendered as a disabled button rather than omitted, so the
+                  // card keeps its shape and the reason sits next to the thing
+                  // it explains.
+                  <button
+                    type="button"
+                    disabled
+                    aria-disabled="true"
+                    title={p.comingSoon ?? 'Not available yet'}
+                    className="btn-ghost cursor-not-allowed text-xs opacity-50"
+                  >
+                    Coming soon
+                  </button>
+                ) : connected ? (
                   <button
                     type="button"
                     disabled={busy === p.id}

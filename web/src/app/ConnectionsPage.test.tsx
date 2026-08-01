@@ -28,6 +28,8 @@ type Provider = {
   label: string;
   tier: number;
   disclosure: string;
+  connectable?: boolean;
+  comingSoon?: string | null;
   connection?: {
     status: string;
     accountLabel?: string;
@@ -202,5 +204,62 @@ describe('ConnectionsPage', () => {
     });
     renderPage();
     expect(await screen.findByText('token refresh rejected')).toBeTruthy();
+  });
+});
+
+describe('announced but unshipped providers', () => {
+  function hubspot(): Provider {
+    return {
+      id: 'hubspot',
+      label: 'HubSpot',
+      tier: 2,
+      disclosure: 'Contacts and deals on your behalf.',
+      connectable: false,
+      comingSoon: 'HubSpot requires their new Projects app framework.',
+      connection: null,
+    };
+  }
+
+  it('shows the provider with its reason rather than hiding it', async () => {
+    listConnectors.mockResolvedValue({ providers: [hubspot()] });
+    renderPage();
+
+    expect(await screen.findByText('HubSpot')).toBeTruthy();
+    expect(
+      screen.getByText('HubSpot requires their new Projects app framework.'),
+    ).toBeTruthy();
+    expect(screen.getByText('coming soon')).toBeTruthy();
+  });
+
+  it('offers no way to start a flow that would dead-end', async () => {
+    listConnectors.mockResolvedValue({ providers: [hubspot()] });
+    renderPage();
+
+    const button = await screen.findByRole('button', { name: /coming soon/i });
+    expect(button.hasAttribute('disabled')).toBe(true);
+    await userEvent.click(button);
+    expect(startConnectorOauth).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Connect' })).toBeNull();
+  });
+
+  it('still connects providers that have shipped, in the same list', async () => {
+    listConnectors.mockResolvedValue({
+      providers: [hubspot(), google({ connectable: true })],
+    });
+    startConnectorOauth.mockResolvedValue({ authorizeUrl: 'https://example.test/a' });
+    renderPage();
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Connect' }));
+    expect(startConnectorOauth).toHaveBeenCalledWith('google');
+  });
+
+  it('treats a provider from a Lambda predating the field as connectable', async () => {
+    // Old response shape: no `connectable`, no `comingSoon`. Must behave
+    // exactly as it did before, not silently become unconnectable.
+    listConnectors.mockResolvedValue({ providers: [google()] });
+    renderPage();
+
+    expect(await screen.findByRole('button', { name: 'Connect' })).toBeTruthy();
+    expect(screen.queryByText('coming soon')).toBeNull();
   });
 });

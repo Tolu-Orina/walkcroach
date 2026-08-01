@@ -107,42 +107,43 @@ export async function* streamRecall(
     const vec = formatVector(embedding);
     vecForRuns = vec;
 
-    if (scope === 'workspace') {
-      const { rows } = await db.query<RecallHit>(
-        `SELECT c.id, c.url, c.title,
-                LEFT(c.extracted_text, 2000) AS extracted_text,
-                c.capture_type, c.project_id, c.captured_at,
-                w.name AS workspace_name,
-                c.embedding <=> $3::vector AS distance
-         FROM page_captures c
-         LEFT JOIN workspaces w ON w.id = c.workspace_id
-         WHERE c.workspace_id = $1::uuid
-           AND c.owner_id = $2
-           AND c.embedding IS NOT NULL
-           AND c.superseded_by IS NULL
-         ORDER BY c.embedding <=> $3::vector
-         LIMIT 8`,
-        [b.workspaceId, auth.ownerId, vec],
-      );
-      hits = rows;
-    } else {
-      const { rows } = await db.query<RecallHit>(
-        `SELECT c.id, c.url, c.title,
-                LEFT(c.extracted_text, 2000) AS extracted_text,
-                c.capture_type, c.project_id, c.captured_at,
-                w.name AS workspace_name,
-                c.embedding <=> $2::vector AS distance
-         FROM page_captures c
-         LEFT JOIN workspaces w ON w.id = c.workspace_id
-         WHERE c.owner_id = $1
-           AND c.embedding IS NOT NULL
-           AND c.superseded_by IS NULL
-         ORDER BY c.embedding <=> $2::vector
-         LIMIT 8`,
-        [auth.ownerId, vec],
-      );
-      hits = rows;
-    }
+    /*
+      One query for both scopes, pinning exactly the two prefix columns of
+      `page_captures_recall_idx` (owner_id, superseded_by) and nothing else.
+
+      `workspace_id` cannot join them in the prefix: only the workspace-scoped
+      path sends it, and a prefix column left unconstrained by the other path
+      would cost that path the index entirely. So it is filtered below, over an
+      over-fetched candidate set. `embedding IS NOT NULL` is dropped as
+      redundant, with a null-distance guard. The LEFT JOIN stays — a LEFT JOIN
+      adds no predicate to the indexed table and is accepted.
+
+      See migrations 031/032 for why any extra predicate here would silently
+      turn this back into an exact scan.
+    */
+    const RECALL_LIMIT = 8;
+    const fetch = scope === 'workspace' ? RECALL_LIMIT * 5 : RECALL_LIMIT;
+    const { rows } = await db.query<RecallHit & { workspace_id: string | null }>(
+      `SELECT c.id, c.url, c.title,
+              LEFT(c.extracted_text, 2000) AS extracted_text,
+              c.capture_type, c.project_id, c.captured_at, c.workspace_id,
+              w.name AS workspace_name,
+              c.embedding <=> $2::vector AS distance
+       FROM page_captures c
+       LEFT JOIN workspaces w ON w.id = c.workspace_id
+       WHERE c.owner_id = $1
+         AND c.superseded_by IS NULL
+       ORDER BY c.embedding <=> $2::vector
+       LIMIT $3`,
+      [auth.ownerId, vec, fetch],
+    );
+
+    hits = rows
+      .filter((r) => r.distance !== null)
+      .filter((r) =>
+        scope === 'workspace' ? r.workspace_id === b.workspaceId : true,
+      )
+      .slice(0, RECALL_LIMIT);
     /*
       E8 — actions are memory too.
 
@@ -158,6 +159,10 @@ export async function* streamRecall(
     */
     try {
       const { rows } = await db.query<WorkflowHit>(
+        // Pins both prefix columns of `workflow_runs_recall_idx`
+        // (owner_id, status) and nothing else. `embedding IS NOT NULL` was a
+        // non-prefix predicate and disqualified the index; the null-distance
+        // guard below covers the exact-scan fallback. See migrations 031/032.
         `SELECT r.id, r.action, r.result, r.executed_at,
                 c.provider,
                 r.embedding <=> $2::vector AS distance
@@ -165,12 +170,11 @@ export async function* streamRecall(
          LEFT JOIN connectors c ON c.id = r.connector_id
          WHERE r.owner_id = $1
            AND r.status = 'executed'
-           AND r.embedding IS NOT NULL
          ORDER BY r.embedding <=> $2::vector
          LIMIT 4`,
         [auth.ownerId, vecForRuns],
       );
-      runHits = rows;
+      runHits = rows.filter((r) => r.distance !== null);
     } catch {
       // Pre-migration databases have no workflow_runs; recall still works.
       runHits = [];

@@ -114,42 +114,44 @@ export async function recallCreativeAssets(params: {
   const vec = formatVector(embedding);
   const kinds = params.kinds?.filter(Boolean) ?? [];
 
+  /**
+   * One query shape, pinning exactly the three prefix columns of
+   * `creative_assets_recall_idx` (owner_id, status, superseded_by) and nothing
+   * else — a single extra predicate on a non-prefix column makes CockroachDB
+   * refuse the index. See migrations 031/032.
+   *
+   * `kind` is an optional filter, so it cannot be a prefix column and is
+   * applied below over an over-fetched candidate set. `embedding IS NOT NULL`
+   * is gone as redundant; the null-distance guard covers the scan fallback.
+   */
+  const fetch = kinds.length > 0 ? Math.min(100, limit * 4) : limit;
   const { rows } = await params.db.query<{
     id: string;
     kind: string;
     brief: Record<string, unknown>;
     download_name: string | null;
-    distance: number;
+    distance: number | null;
     created_at: Date;
   }>(
-    kinds.length > 0
-      ? `SELECT id, kind, brief, download_name,
-                embedding <=> $2::vector AS distance,
-                created_at
-         FROM creative_assets
-         WHERE owner_id = $1
-           AND status = 'ready'
-           AND embedding IS NOT NULL
-           AND superseded_by IS NULL
-           AND kind = ANY($4::string[])
-         ORDER BY embedding <=> $2::vector
-         LIMIT $3`
-      : `SELECT id, kind, brief, download_name,
-                embedding <=> $2::vector AS distance,
-                created_at
-         FROM creative_assets
-         WHERE owner_id = $1
-           AND status = 'ready'
-           AND embedding IS NOT NULL
-           AND superseded_by IS NULL
-         ORDER BY embedding <=> $2::vector
-         LIMIT $3`,
-    kinds.length > 0
-      ? [params.ownerId, vec, limit, kinds]
-      : [params.ownerId, vec, limit],
+    `SELECT id, kind, brief, download_name,
+            embedding <=> $2::vector AS distance,
+            created_at
+       FROM creative_assets
+      WHERE owner_id = $1
+        AND status = 'ready'
+        AND superseded_by IS NULL
+      ORDER BY embedding <=> $2::vector
+      LIMIT $3`,
+    [params.ownerId, vec, fetch],
   );
 
-  return rows.map((r) => {
+  const kindSet = kinds.length > 0 ? new Set(kinds) : null;
+
+  return rows
+    .filter((r) => r.distance !== null)
+    .filter((r) => !kindSet || kindSet.has(r.kind))
+    .slice(0, limit)
+    .map((r) => {
     const title =
       (typeof r.brief?.title === 'string' && r.brief.title) ||
       (typeof r.brief?.headline === 'string' && r.brief.headline) ||

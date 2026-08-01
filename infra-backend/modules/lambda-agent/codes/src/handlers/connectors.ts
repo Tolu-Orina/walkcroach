@@ -5,7 +5,8 @@
 import type { DbClient } from '@walkcroach/db';
 import {
   buildAuthorizeUrl,
-  configuredProviders,
+  listableProviders,
+  providerUnavailableReason,
   consumeOauthState,
   createOauthState,
   describeAction,
@@ -74,7 +75,7 @@ export async function handleListConnectorsWeb(
 ): Promise<RestResult> {
   const rows = await listConnectors(db, auth.ownerId);
   const byProvider = new Map(rows.map((r) => [r.provider, r]));
-  const providers = configuredProviders().map((p) => {
+  const providers = listableProviders().map((p) => {
     const row = byProvider.get(p.id);
     return {
       id: p.id,
@@ -82,6 +83,10 @@ export async function handleListConnectorsWeb(
       tier: p.tier,
       disclosure: p.disclosure,
       scopes: p.scopes,
+      // false for an announced-but-not-shippable provider; the surface renders
+      // it disabled rather than letting a user start a flow that cannot finish.
+      connectable: p.connectable,
+      comingSoon: p.comingSoon ?? null,
       connection: row ? toConnectorView(row) : null,
     };
   });
@@ -122,14 +127,19 @@ export async function handleConnectorOauthStart(
   }
   const def = getProvider(provider);
   if (!def) return jsonResponse(400, { error: 'unknown_provider' });
-  const clientId = process.env[def.clientIdEnv]?.trim();
-  const clientSecret = process.env[def.clientSecretEnv]?.trim();
-  if (!clientId || !clientSecret) {
-    return jsonResponse(503, {
-      error: 'provider_not_configured',
+  // One check for every reason a provider may be unavailable — including
+  // coming-soon, which credentials alone must never override. This endpoint is
+  // reachable directly, so the UI disabling its button is not a control.
+  const unavailable = providerUnavailableReason(def);
+  if (unavailable) {
+    return jsonResponse(unavailable.code === 'coming_soon' ? 409 : 503, {
+      error: unavailable.code,
+      message: unavailable.message,
       provider,
     });
   }
+  const clientId = process.env[def.clientIdEnv]!.trim();
+  const clientSecret = process.env[def.clientSecretEnv]!.trim();
 
   const state = generateStateValue();
   const pkce = def.usePkce ? generatePkce() : undefined;

@@ -89,19 +89,30 @@ export async function recallWorkflowRuns(params: {
     created_at: Date;
     executed_at: Date | null;
   }>(
+    /**
+     * Pins both prefix columns of `workflow_runs_recall_idx`
+     * (owner_id, status) and nothing else.
+     *
+     * The three-status IN list stays in SQL because an IN list counts as
+     * constraining a prefix column — verified against the cluster, and the
+     * reason this query needs no caller-side filtering at all. `embedding IS
+     * NOT NULL` is dropped as redundant, with a null-distance guard below for
+     * the exact-scan fallback. See migrations 031/032.
+     */
     `SELECT id, action, status, surface, proposed_action, result,
             embedding <=> $2::vector AS distance,
             created_at, executed_at
      FROM workflow_runs
      WHERE owner_id = $1
-       AND embedding IS NOT NULL
        AND status IN ('executed', 'failed', 'declined')
      ORDER BY embedding <=> $2::vector
      LIMIT $3`,
     [params.ownerId, vec, limit],
   );
 
-  return rows.map((r) => ({
+  return rows
+    .filter((r) => r.distance !== null)
+    .map((r) => ({
     id: r.id,
     action: r.action,
     status: r.status,

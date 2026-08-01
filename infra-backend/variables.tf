@@ -112,7 +112,30 @@ variable "nova_pro_model_id" {
 
 variable "creative_lambda_image_uri" {
   type        = string
-  description = "ECR image URI for lambda-creative (empty until first CI push)"
+  description = "Full image URI override for lambda-creative. Prefer creative_lambda_image_tag unless the image lives outside this account's ECR."
+  default     = ""
+}
+
+variable "creative_lambda_enabled" {
+  type        = bool
+  description = <<-EOT
+    Create the creative Lambda (and, via its ARN, the video state machine).
+
+    Deliberately separate from the image tag: with one value, blanking the tag
+    would destroy both silently. With two, an empty tag while this is true is a
+    plan-time error, and removing the infrastructure requires setting this false.
+  EOT
+  default     = false
+}
+
+variable "creative_lambda_image_tag" {
+  type        = string
+  description = <<-EOT
+    Tag of an image pushed to the ECR repository this stack creates. Setting it
+    creates the creative Lambda, which in turn supplies the video Step Functions
+    worker ARN — so creatives and video both come online from this one value.
+    Empty keeps both paths on the local/stub fallback.
+  EOT
   default     = ""
 }
 
@@ -172,12 +195,29 @@ variable "github_ssm_prefix" {
 
 variable "bedrock_monthly_budget_usd" {
   type        = string
-  description = "Phase H4 — monthly AWS Budget USD limit for Amazon Bedrock"
-  default     = "150"
+  description = "Monthly AWS Budget USD limit for Amazon Bedrock"
+  default     = "50"
+}
+
+variable "bedrock_budget_alert_usd" {
+  type        = list(number)
+  description = "Absolute USD spend levels that each raise a budget notification"
+  default     = [10, 20, 30, 40, 50]
 }
 
 variable "budget_alert_email" {
   type        = string
   description = "Phase H4 — optional email subscribed to creative Bedrock budget SNS"
   default     = ""
+}
+
+variable "memory_recall_latency_alarm_ms" {
+  type        = number
+  description = <<-EOT
+    p95 memory-recall latency (Titan embed + CockroachDB vector search) above
+    which the WalkCroach/Memory alarm fires. Recall degrading is the symptom of
+    the vector index silently not being used: an exact scan stays correct and
+    merely gets slower as rows accumulate, so nothing else in the system notices.
+  EOT
+  default     = 3000
 }

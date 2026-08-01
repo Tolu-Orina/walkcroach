@@ -80,18 +80,34 @@ export async function writeMemoryEntryDetailed(params: {
     // row cannot match itself at distance 0.
     let supersededId: string | null = null;
     if (threshold > 0) {
-      const { rows: near } = await tx.query<{ id: string; distance: string }>(
-        `SELECT id, embedding <=> $3::vector AS distance
+      /**
+       * Same index contract as recall: pin both prefix columns and add nothing
+       * else. `kind` is deliberately NOT in the WHERE clause — it is not a
+       * prefix column of `memory_entries_recall_idx` (recall does not pin it,
+       * so it cannot be one), and including it here would make CockroachDB
+       * refuse the index for this query too.
+       *
+       * Fetching a small neighbourhood and picking the nearest same-kind row
+       * costs one extra round of comparison and keeps the index in play. If all
+       * of the nearest rows are a different kind, nothing is superseded — which
+       * is the conservative outcome the threshold already aims for.
+       */
+      const { rows: near } = await tx.query<{
+        id: string;
+        kind: string;
+        distance: string | null;
+      }>(
+        `SELECT id, kind, embedding <=> $2::vector AS distance
            FROM memory_entries
           WHERE project_id = $1::uuid
-            AND kind = $2
-            AND embedding IS NOT NULL
             AND superseded_by IS NULL
-          ORDER BY embedding <=> $3::vector
-          LIMIT 1`,
-        [params.projectId, params.kind, vec],
+          ORDER BY embedding <=> $2::vector
+          LIMIT 20`,
+        [params.projectId, vec],
       );
-      const candidate = near[0];
+      const candidate = near.find(
+        (r) => r.kind === params.kind && r.distance !== null,
+      );
       if (candidate && Number(candidate.distance) <= threshold) {
         supersededId = candidate.id;
       }
@@ -149,15 +165,17 @@ export async function writeMemoryEntry(params: {
 }
 
 /**
- * How much wider than `limit` to search before applying non-prefix filters.
+ * How much wider than `limit` to search before applying caller-side filters.
  *
- * The C-SPANN index is prefixed on project_id (migration 027), so the tenant
- * filter prunes the search space. `superseded_by IS NULL` and `source_surface`
- * cannot — they are applied to the approximate-nearest-neighbour result set, so
- * a bare `LIMIT k` can come back with fewer than k rows once entries are
- * superseded or a surface filter is in play. Over-fetching and slicing in the
- * caller keeps recall at full strength; 4× is enough for the filter selectivity
- * seen here without turning an ANN lookup into a scan.
+ * The index (migration 032) is prefixed on `(project_id, superseded_by)`, so
+ * both of those are pinned in SQL and cost nothing here. What remains
+ * caller-side is the OPTIONAL `source_surface` filter, which cannot be a prefix
+ * column: a query that omits it would stop constraining that column and lose
+ * the index entirely.
+ *
+ * 4× covers a surface filter that matches roughly a quarter of a project's
+ * memories. Beyond that the tail is truncated rather than wrong — recall
+ * returns fewer than `limit`, never something incorrect.
  */
 export const RECALL_OVERFETCH = 4;
 const MAX_RECALL_FETCH = 200;
@@ -187,51 +205,53 @@ export async function recallProjectMemory(params: {
       const vec = formatVector(embedding);
       const fetch = Math.min(MAX_RECALL_FETCH, limit * RECALL_OVERFETCH);
 
-      const { rows } =
-        surfaces.length > 0
-          ? await params.db.query<{
-              id: string;
-              kind: MemoryKind;
-              text: string;
-              distance: number;
-              source_surface: string;
-            }>(
-              `SELECT id, kind, text, source_surface,
-                      embedding <=> $2::vector AS distance
-                 FROM memory_entries
-                WHERE project_id = $1::uuid
-                  AND embedding IS NOT NULL
-                  AND superseded_by IS NULL
-                  AND source_surface = ANY($4::string[])
-                ORDER BY embedding <=> $2::vector
-                LIMIT $3`,
-              [params.projectId, vec, fetch, surfaces],
-            )
-          : await params.db.query<{
-              id: string;
-              kind: MemoryKind;
-              text: string;
-              distance: number;
-              source_surface: string;
-            }>(
-              `SELECT id, kind, text, source_surface,
-                      embedding <=> $2::vector AS distance
-                 FROM memory_entries
-                WHERE project_id = $1::uuid
-                  AND embedding IS NOT NULL
-                  AND superseded_by IS NULL
-                ORDER BY embedding <=> $2::vector
-                LIMIT $3`,
-              [params.projectId, vec, fetch],
-            );
+      /**
+       * One query shape, always. Both prefix columns of
+       * `memory_entries_recall_idx` are pinned and NOTHING else appears in the
+       * WHERE clause, because a single extra predicate on a non-prefix column
+       * makes CockroachDB refuse the index outright — the whole point of
+       * migrations 031/032.
+       *
+       * Two predicates that used to live here are gone:
+       *   `embedding IS NOT NULL`  redundant — a NULL embedding is not in the
+       *                            vector index, and the null-distance guard
+       *                            below covers the exact-scan fallback.
+       *   `source_surface = ANY()` optional, so it cannot be a prefix column;
+       *                            applied caller-side over the over-fetch.
+       */
+      const { rows } = await params.db.query<{
+        id: string;
+        kind: MemoryKind;
+        text: string;
+        distance: number | null;
+        source_surface: string;
+      }>(
+        `SELECT id, kind, text, source_surface,
+                embedding <=> $2::vector AS distance
+           FROM memory_entries
+          WHERE project_id = $1::uuid
+            AND superseded_by IS NULL
+          ORDER BY embedding <=> $2::vector
+          LIMIT $3`,
+        [params.projectId, vec, fetch],
+      );
 
-      return rows.slice(0, limit).map((r) => ({
-        id: r.id,
-        kind: r.kind,
-        text: r.text,
-        distance: Number(r.distance),
-        sourceSurface: r.source_surface,
-      }));
+      const surfaceSet = surfaces.length > 0 ? new Set(surfaces) : null;
+
+      return rows
+        // A row with no embedding sorts with a NULL distance rather than being
+        // excluded by the index, so it can only appear on the exact-scan path.
+        // Dropping it here keeps both paths returning the same thing.
+        .filter((r) => r.distance !== null)
+        .filter((r) => !surfaceSet || surfaceSet.has(r.source_surface))
+        .slice(0, limit)
+        .map((r) => ({
+          id: r.id,
+          kind: r.kind,
+          text: r.text,
+          distance: Number(r.distance),
+          sourceSurface: r.source_surface,
+        }));
     },
   );
 }

@@ -103,7 +103,9 @@ module "lambda_creative" {
   environment           = var.environment
   artefacts_bucket_arn  = module.artefacts.bucket_arn
   artefacts_bucket_name = module.artefacts.bucket_id
+  enabled               = var.creative_lambda_enabled
   image_uri             = var.creative_lambda_image_uri
+  image_tag             = var.creative_lambda_image_tag
   tags                  = local.tags
 }
 
@@ -111,10 +113,21 @@ module "stepfunctions_video" {
   source = "./modules/stepfunctions-video"
 
   name_prefix = local.name_prefix
-  # Worker Lambda ARN wired when a dedicated non-streaming function is published.
-  # Empty → SFN skipped; agent uses VIDEO_STUDIO_STUB / inline compose path.
-  video_worker_lambda_arn = ""
-  tags                    = local.tags
+  # The creative Lambda IS the video worker: its handler already routes
+  # `action: "compose_video"` (modules/lambda-creative/codes/src/handler.py), and
+  # being a container function invoked directly it is exactly the non-streaming
+  # target the state machine needs. There was never a second function to publish.
+  #
+  # `function_arn` is "" while the creative Lambda does not exist, so the state
+  # machine stays skipped until an image is pushed and then appears with it —
+  # one value (creative_lambda_image_tag) brings both online, and neither can be
+  # half-configured.
+  video_worker_lambda_arn = module.lambda_creative.function_arn
+  # Decided from variables, not from the ARN above: `count` cannot depend on a
+  # value that is unknown until apply, and on the first run that creates the
+  # creative Lambda its ARN is exactly that.
+  enabled = var.creative_lambda_enabled
+  tags    = local.tags
 }
 
 module "lambda_chrome" {
@@ -198,6 +211,20 @@ module "observability_creative" {
   name_prefix                = local.name_prefix
   environment                = var.environment
   bedrock_monthly_budget_usd = var.bedrock_monthly_budget_usd
+  bedrock_budget_alert_usd   = var.bedrock_budget_alert_usd
   budget_alert_email         = var.budget_alert_email
   tags                       = local.tags
+}
+
+# Memory-layer observability. Reuses the creative module's SNS topic rather than
+# creating a second one — a separate topic would mean a second subscription to
+# confirm and a second place to look when something is quiet.
+module "observability_memory" {
+  source = "./modules/observability-memory"
+
+  name_prefix             = local.name_prefix
+  environment             = var.environment
+  alarm_sns_topic_arn     = module.observability_creative.budget_sns_topic_arn
+  recall_latency_alarm_ms = var.memory_recall_latency_alarm_ms
+  tags                    = local.tags
 }

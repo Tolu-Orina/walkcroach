@@ -454,6 +454,36 @@ Resources:
         - Key: ManagedBy
           Value: CloudFormation
 
+  # CodeBuild Project - Creative Lambda container image
+  #
+  # Separate from the Terraform projects because it needs Docker, and separate
+  # from the unit-test project because that one deliberately runs unprivileged.
+  # Skips its own build when the creative sources hash to a tag already in ECR,
+  # so the ~10 minute LibreOffice install is paid only when it changes.
+  CreativeImageBuild:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub '${AWS::StackName}-creative-image'
+      Description: 'Build and push the creative Lambda container when its sources change'
+      ServiceRole: !GetAtt CodeBuildTerraformRole.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_MEDIUM
+        Image: aws/codebuild/standard:7.0
+        ImagePullCredentialsType: CODEBUILD
+        # Required for `docker build`. The Terraform projects already set this;
+        # the unit-test project deliberately does not.
+        PrivilegedMode: true
+      TimeoutInMinutes: 30
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: infra-backend/buildspec-creative-image.yml
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
   # CodeBuild Project - Backend (Lambda) Unit Tests
   BackendUnitTestBuild:
     Type: AWS::CodeBuild::Project
@@ -1073,6 +1103,22 @@ Resources:
                 - Name: BackendUnitTestOutputProd
               Configuration:
                 ProjectName: !Ref BackendUnitTestBuild
+              RunOrder: 1
+
+            # Runs alongside the unit tests, and crucially BEFORE the Deploy
+            # stage: modules/lambda-creative resolves the image tag to a digest
+            # at plan time, so the image must already be in ECR by then.
+            - Name: CreativeImage
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              InputArtifacts:
+                - Name: SourceOutputProd
+              Configuration:
+                ProjectName: !Ref CreativeImageBuild
+                EnvironmentVariables: '[{"name":"TF_VAR_environment","value":"prod","type":"PLAINTEXT"}]'
               RunOrder: 1
 
         # Stage 3: Deploy - All deployment actions stacked vertically

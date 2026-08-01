@@ -16,8 +16,7 @@ WalkCroach Chrome uses **semver** in `package.json` → WXT embeds it in the ext
 4. Production builds must set `WALKCROACH_API_BASE` to the live API stage URL (never localhost).
 5. Use `npm run zip:prod` for store uploads (fail-closed HTTPS bake + localhost scan).
 
-**Current store line: `0.1.5`** — what is actually live in the Chrome Web Store.
-**Next submission: `0.6.0`** (PKCE sign-in, plus everything from 0.2.0–0.5.3 that never reached the store).
+**Current store line: `0.6.0`** — approved and live 2026-08-01. (PKCE sign-in, plus everything from 0.2.0–0.5.3 that never reached the store).
 
 > Keep this line honest. It read `0.4.0` while the store served `0.1.5` and the
 > submission checklist said `0.5.3` — three different claims, none of them the

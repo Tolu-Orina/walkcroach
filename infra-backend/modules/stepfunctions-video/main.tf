@@ -30,8 +30,29 @@ variable "tags" {
   default = {}
 }
 
+variable "enabled" {
+  type        = bool
+  description = <<-EOT
+    Whether to create the state machine. Must be derivable at PLAN time.
+
+    This exists because `count` cannot depend on a value Terraform only learns
+    during apply. When the worker ARN comes from a Lambda created in the same
+    run, `var.video_worker_lambda_arn` is unknown at plan time, and deriving
+    `count` from it fails with "the count value depends on resource attributes
+    that cannot be determined until apply" — on the very first apply that turns
+    video on, which is the worst possible moment to discover it.
+
+    The caller therefore passes a decision made from variables (is an image tag
+    set?), while the ARN itself is used only where an unknown value is fine.
+
+    null falls back to inferring from the ARN, which is correct when the ARN is
+    a literal or comes from a data source.
+  EOT
+  default     = null
+}
+
 locals {
-  enabled = var.video_worker_lambda_arn != ""
+  enabled = var.enabled == null ? var.video_worker_lambda_arn != "" : var.enabled
 }
 
 data "aws_iam_policy_document" "sfn_assume" {

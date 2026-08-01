@@ -20,11 +20,18 @@ name: Publish Chrome extension
 #
 # Setup, once, in the `cws-publish` environment:
 #   EXTENSION_ID    32-char [a-p] id from the CWS dashboard URL
-#   CLIENT_ID       Google Cloud OAuth 2.0 client (Desktop app)
+#   CLIENT_ID       Google Cloud OAuth 2.0 client, type "Web application" with
+#                   https://developers.google.com/oauthplayground as an authorised
+#                   redirect URI. NOT "Desktop app" — that needed the
+#                   out-of-band flow Google deprecated in 2022.
 #   CLIENT_SECRET   ditto
-#   REFRESH_TOKEN   exchanged once for that client, scope
+#   REFRESH_TOKEN   exchanged once via the OAuth Playground, scope
 #                   https://www.googleapis.com/auth/chromewebstore
-# The Chrome Web Store API must be enabled on that Google Cloud project.
+#
+# The Chrome Web Store API must be enabled on that Google Cloud project, and the
+# OAuth consent screen publishing status must be "In production" — while it is
+# "Testing", Google revokes refresh tokens after 7 days and this job starts
+# failing with invalid_grant a week after it last worked.
 
 on:
   push:
@@ -36,6 +43,14 @@ on:
         description: 'Build and verify without uploading'
         type: boolean
         default: true
+      publish_only:
+        description: >-
+          Submit an ALREADY-UPLOADED draft for review, skipping upload. Use when
+          upload succeeded but submission failed — e.g. the dashboard Privacy
+          practices tab was incomplete. CWS refuses to re-upload a version it
+          already holds, so re-running the whole tag would fail at upload.
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -100,7 +115,7 @@ jobs:
           path: ${{ steps.zip.outputs.path }}
 
       - name: Upload to the Chrome Web Store
-        if: startsWith(github.ref, 'refs/tags/') && inputs.dry_run != true
+        if: inputs.publish_only != true && startsWith(github.ref, 'refs/tags/') && inputs.dry_run != true
         working-directory: chrome
         env:
           EXTENSION_ID: ${{ secrets.EXTENSION_ID }}
@@ -115,9 +130,14 @@ jobs:
 
       # Separate step from upload so a failed submission leaves the uploaded
       # draft in place — re-running submit is cheap, re-uploading is not, and
-      # CWS refuses a re-upload of a version it already holds.
+      # CWS refuses a re-upload of a version it already holds. Recover with a
+      # manual run at `publish_only: true` rather than re-tagging.
+      #
+      # Submission can fail for reasons that have nothing to do with the package:
+      # CWS enforces that the dashboard's Store listing and Privacy practices
+      # tabs are complete, and returns 400 "Publish condition not met" if not.
       - name: Submit for review
-        if: startsWith(github.ref, 'refs/tags/') && inputs.dry_run != true
+        if: inputs.publish_only == true || (startsWith(github.ref, 'refs/tags/') && inputs.dry_run != true)
         env:
           EXTENSION_ID: ${{ secrets.EXTENSION_ID }}
           CLIENT_ID: ${{ secrets.CLIENT_ID }}
@@ -126,7 +146,7 @@ jobs:
         run: npx --yes chrome-webstore-upload-cli@3 publish
 
       - name: Explain what happens next
-        if: startsWith(github.ref, 'refs/tags/') && inputs.dry_run != true
+        if: inputs.publish_only == true || (startsWith(github.ref, 'refs/tags/') && inputs.dry_run != true)
         run: |
           echo "Submitted for Chrome Web Store review."
           echo "This is NOT live yet — Google reviews it, typically in days."

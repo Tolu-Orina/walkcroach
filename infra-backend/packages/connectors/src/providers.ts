@@ -41,6 +41,20 @@ export type ProviderDef = {
   clientSecretEnv: string;
   /** One line shown to the user before they connect. */
   disclosure: string;
+  /**
+   * Announced but not yet connectable, with the reason.
+   *
+   * Distinct from "no credentials configured", which hides a provider entirely.
+   * That default is right when the absence is temporary or environmental — a
+   * secret not yet added. It is the wrong shape for something we have decided
+   * not to ship yet, where silence reads as "unsupported" and a user asks for a
+   * feature that already exists in the code.
+   *
+   * A provider marked here is listed, visibly disabled, and cannot start an
+   * OAuth flow — `configuredProviders` still excludes it, so nothing downstream
+   * can accidentally attempt a connection.
+   */
+  comingSoon?: string;
 };
 
 const GOOGLE_AUTH = 'https://accounts.google.com/o/oauth2/v2/auth';
@@ -141,6 +155,17 @@ export const PROVIDERS: Record<ProviderId, ProviderDef> = {
     usePkce: false,
     clientIdEnv: 'HUBSPOT_OAUTH_CLIENT_ID',
     clientSecretEnv: 'HUBSPOT_OAUTH_CLIENT_SECRET',
+    /**
+     * HubSpot sunset legacy public-app creation in mid-2026. OAuth credentials
+     * now require the Projects framework — install the `hs` CLI, scaffold a
+     * project, deploy it, then read the client id and secret back out. Every
+     * other provider here is a two-field form.
+     *
+     * The integration itself is complete and unchanged; only the credential
+     * path is. Remove this line once the project is deployed and the secrets
+     * are in `walkcroach/{env}/runtime`.
+     */
+    comingSoon: 'HubSpot requires their new Projects app framework — coming soon.',
     disclosure: 'Read and create contacts in your CRM.',
   },
 };
@@ -164,6 +189,53 @@ export function configuredProviders(
   env: NodeJS.ProcessEnv = process.env,
 ): ProviderDef[] {
   return Object.values(PROVIDERS).filter(
-    (p) => Boolean(env[p.clientIdEnv]?.trim()) && Boolean(env[p.clientSecretEnv]?.trim()),
+    (p) =>
+      !p.comingSoon &&
+      Boolean(env[p.clientIdEnv]?.trim()) &&
+      Boolean(env[p.clientSecretEnv]?.trim()),
   );
+}
+
+/**
+ * Why a provider cannot be connected right now, or null if it can.
+ *
+ * The single check every entry point must use. Listing a provider correctly is
+ * not enough: `handleConnectorOauthStart` is reachable directly, so a UI that
+ * merely disables a button leaves the flow startable by anyone who calls the
+ * API. Credentials existing must never be sufficient on its own.
+ */
+export function providerUnavailableReason(
+  def: ProviderDef,
+  env: NodeJS.ProcessEnv = process.env,
+): { code: 'coming_soon' | 'provider_not_configured'; message: string } | null {
+  if (def.comingSoon) {
+    return { code: 'coming_soon', message: def.comingSoon };
+  }
+  const id = env[def.clientIdEnv]?.trim();
+  const secret = env[def.clientSecretEnv]?.trim();
+  if (!id || !secret) {
+    return {
+      code: 'provider_not_configured',
+      message: `${def.label} is not configured on this deployment.`,
+    };
+  }
+  return null;
+}
+
+/**
+ * Providers to LIST, including any that cannot yet be connected.
+ *
+ * Returns `connectable: false` for coming-soon entries so a surface can render
+ * them disabled without needing to know why. Credentials are never consulted
+ * for those — a coming-soon provider stays unconnectable even if someone adds
+ * its secrets, which is the point: shipping is a decision, not a side effect of
+ * a secret appearing.
+ */
+export function listableProviders(
+  env: NodeJS.ProcessEnv = process.env,
+): Array<ProviderDef & { connectable: boolean }> {
+  const connectable = new Set(configuredProviders(env).map((p) => p.id));
+  return Object.values(PROVIDERS)
+    .filter((p) => connectable.has(p.id) || Boolean(p.comingSoon))
+    .map((p) => ({ ...p, connectable: connectable.has(p.id) }));
 }

@@ -53,7 +53,7 @@ Providers only appear in Settings → Connections when **both** client id and se
 | `slack_oauth_client_secret` | `SLACK_OAUTH_CLIENT_SECRET` | |
 | `stripe_oauth_client_id` | `STRIPE_OAUTH_CLIENT_ID` | **Connect** OAuth (user’s Stripe account for balance/payments tools) |
 | `stripe_oauth_client_secret` | `STRIPE_OAUTH_CLIENT_SECRET` | Not WalkCroach Billing |
-| `hubspot_oauth_client_id` | `HUBSPOT_OAUTH_CLIENT_ID` | HubSpot CRM |
+| `hubspot_oauth_client_id` | `HUBSPOT_OAUTH_CLIENT_ID` | HubSpot CRM — **not connectable yet.** HubSpot sunset legacy public apps in mid-2026; credentials now require their Projects framework (`hs project create` + deploy). Marked `comingSoon` in `providers.ts`, so setting these keys alone will NOT enable it — remove that flag too. |
 | `hubspot_oauth_client_secret` | `HUBSPOT_OAUTH_CLIENT_SECRET` | |
 
 **OAuth redirect URI** (register in each provider console):
