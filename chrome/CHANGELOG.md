@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.6.0 — 2026-08-01
+
+### Security
+
+- **Sign-in now uses PKCE (RFC 7636, S256).** The side panel receives its
+  one-time authorization code on `https://<extension-id>.chromiumapp.org/auth`
+  via `chrome.identity.launchWebAuthFlow`. That code was previously a bearer
+  credential — whoever held it could redeem it. The exchange now additionally
+  requires a verifier held in `chrome.storage.session` (cleared when the browser
+  closes) that never travels to Web; only its S256 challenge does.
+
+  MV3 has no `node:crypto`, so this is a separate WebCrypto implementation from
+  the one the IDE and CLI share. All three are pinned to the RFC 7636 Appendix B
+  vector so they cannot drift apart — a mismatch would break sign-in against a
+  correctly-behaving server.
+
+  **Breaking against older backends.** `/chrome/v1/oauth/*` now requires a
+  challenge and verifier; this build will not sign in against a WalkCroach
+  backend deployed before 2026-08-01. Equally, extension builds before 0.6.0
+  cannot sign in against the current backend — update rather than roll back.
+
+### Changed
+
+- Release is now tag-driven (`chrome-v*` → `.github/workflows/publish-chrome.yml`),
+  matching the CLI and IDE. The workflow re-runs typecheck and tests, builds via
+  `zip:prod`, verifies the tag matches `package.json`, then uploads and submits
+  for review. Submission is not publication: Google still reviews it.
+
 ## 0.5.3 — 2026-07-30
 
 Phase G — hardening. The privacy policy turned out to contain a direct

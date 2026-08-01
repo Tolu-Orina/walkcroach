@@ -141,15 +141,40 @@ if (hosts.some((h) => h === 'https://*/*' || h === 'http://*/*' || h === '<all_u
 if (manifest.content_scripts) {
   fail('manifest must not include content_scripts (path B)');
 }
+/**
+ * `optional_host_permissions` is deliberately broad, and must stay that way.
+ *
+ * This check previously refused the broad http/https wildcard patterns here —
+ * the same rule as the `host_permissions` check above, applied to the wrong
+ * field. That made a store build impossible: it rejected the exact pattern
+ * `wxt.config.ts` sets on purpose and `store/PERMISSION_JUSTIFICATIONS.md`
+ * justifies to reviewers.
+ *
+ * The distinction the install-time check is protecting is real, and the reason
+ * both fields cannot share a rule:
+ *
+ *   host_permissions           granted at INSTALL. Broad here means Chrome shows
+ *                              "read and change all your data on all websites",
+ *                              and the extension holds it whether used or not.
+ *   optional_host_permissions  granted at USE, one origin at a time, via
+ *                              chrome.permissions.request, revocable per site.
+ *                              Broad here means "may ask about any site", not
+ *                              "has access to any site".
+ *
+ * A side panel cannot rely on `activeTab` — Chrome does not grant it for clicks
+ * inside the panel — so per-origin optional permissions are the documented
+ * alternative. Narrowing this field would not make the extension safer; it would
+ * limit it to a fixed site list while leaving the trust model unchanged.
+ *
+ * What genuinely must never appear is `<all_urls>`, which is not equivalent:
+ * it additionally covers ftp:, file: and other schemes the panel has no business
+ * touching, and reviewers read it as a much broader ask.
+ */
 const optionalHosts = Array.isArray(manifest.optional_host_permissions)
   ? manifest.optional_host_permissions
   : [];
-if (
-  optionalHosts.some(
-    (h) => h === 'https://*/*' || h === 'http://*/*',
-  )
-) {
-  fail('manifest must not include broad optional_host_permissions');
+if (optionalHosts.includes('<all_urls>')) {
+  fail('manifest must not include <all_urls> in optional_host_permissions');
 }
 
 const textFiles = files.filter((f) =>

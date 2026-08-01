@@ -1,0 +1,133 @@
+name: Publish Chrome extension
+
+# Third release path, after publish-cli.yml (npm) and publish-ide.yml (Open VSX).
+# Same shape deliberately: a tag is the release, every gate re-runs here rather
+# than trusting an artifact this job did not build, and a manual run can only
+# ever dry-run.
+#
+# Two things make the Chrome Web Store unlike the other two registries:
+#
+#  1. No OIDC. Google has no trusted-publishing equivalent, so four stored
+#     secrets are unavoidable — scoped to an environment rather than repo-wide.
+#  2. Publishing is not shipping. `publish` submits the uploaded package for
+#     REVIEW; Google decides when it reaches users, typically in days. A green
+#     run here means "submitted", never "live".
+#
+# Listing copy (description, screenshots, permission justifications) lives in the
+# CWS dashboard and is NOT touched by this workflow. Uploading a package cannot
+# violate the claim-gating rules in chrome/store/SUBMISSION_CHECKLIST.md, but
+# editing the listing by hand still can — read that table before changing copy.
+#
+# Setup, once, in the `cws-publish` environment:
+#   EXTENSION_ID    32-char [a-p] id from the CWS dashboard URL
+#   CLIENT_ID       Google Cloud OAuth 2.0 client (Desktop app)
+#   CLIENT_SECRET   ditto
+#   REFRESH_TOKEN   exchanged once for that client, scope
+#                   https://www.googleapis.com/auth/chromewebstore
+# The Chrome Web Store API must be enabled on that Google Cloud project.
+
+on:
+  push:
+    tags:
+      - 'chrome-v*'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Build and verify without uploading'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: cws-publish
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Matches the other two release paths; Node 20 is past end-of-life.
+          node-version: 22
+
+      - name: Install, typecheck, test
+        working-directory: chrome
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+
+      # zip:prod, never plain `zip`: it bakes the live API/privacy URLs and
+      # fail-closes on a localhost origin, which is the defect most likely to
+      # reach the store unnoticed.
+      - name: Build the production zip
+        working-directory: chrome
+        run: npm run zip:prod
+
+      - name: Check the tag matches package.json
+        if: startsWith(github.ref, 'refs/tags/')
+        working-directory: chrome
+        run: |
+          set -eu
+          TAG="${GITHUB_REF#refs/tags/chrome-v}"
+          PKG="$(node -p "require('./package.json').version")"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "Tag chrome-v$TAG does not match package.json $PKG" >&2
+            exit 1
+          fi
+
+      - name: Resolve the built artifact
+        id: zip
+        working-directory: chrome
+        run: |
+          set -eu
+          VERSION="$(node -p "require('./package.json').version")"
+          ZIP=".output/walkcroachchrome-${VERSION}-chrome.zip"
+          if [ ! -f "$ZIP" ]; then
+            echo "Expected $ZIP, which zip:prod did not produce" >&2
+            ls -la .output || true
+            exit 1
+          fi
+          echo "path=chrome/$ZIP" >> "$GITHUB_OUTPUT"
+
+      # Kept even on a dry run: the reviewable artifact is the point of the run.
+      - name: Upload the zip as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: walkcroach-chrome-zip
+          path: ${{ steps.zip.outputs.path }}
+
+      - name: Upload to the Chrome Web Store
+        if: startsWith(github.ref, 'refs/tags/') && inputs.dry_run != true
+        working-directory: chrome
+        env:
+          EXTENSION_ID: ${{ secrets.EXTENSION_ID }}
+          CLIENT_ID: ${{ secrets.CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
+          REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
+        run: |
+          set -eu
+          VERSION="$(node -p "require('./package.json').version")"
+          npx --yes chrome-webstore-upload-cli@3 upload \
+            --source ".output/walkcroachchrome-${VERSION}-chrome.zip"
+
+      # Separate step from upload so a failed submission leaves the uploaded
+      # draft in place — re-running submit is cheap, re-uploading is not, and
+      # CWS refuses a re-upload of a version it already holds.
+      - name: Submit for review
+        if: startsWith(github.ref, 'refs/tags/') && inputs.dry_run != true
+        env:
+          EXTENSION_ID: ${{ secrets.EXTENSION_ID }}
+          CLIENT_ID: ${{ secrets.CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
+          REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
+        run: npx --yes chrome-webstore-upload-cli@3 publish
+
+      - name: Explain what happens next
+        if: startsWith(github.ref, 'refs/tags/') && inputs.dry_run != true
+        run: |
+          echo "Submitted for Chrome Web Store review."
+          echo "This is NOT live yet — Google reviews it, typically in days."
+          echo "Track status at https://chrome.google.com/webstore/devconsole"

@@ -1,4 +1,4 @@
-# Chrome Web Store listing copy — v0.5.3
+# Chrome Web Store listing copy — v0.6.0
 
 Rewritten from the v0.1.4 copy, which described the `activeTab`-only model
 ("open WalkCroach from the toolbar; it only reads the page you act on"). That is

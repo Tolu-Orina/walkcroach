@@ -15,7 +15,7 @@
 | Required | Status |
 |---|---|
 | Public repo URL | ✅ `https://github.com/Tolu-Orina/walkcroach` — **TODO: confirm public** |
-| Installable artifacts | ⏳ `npx @walkcroach/cli` (scope created, `0.3.0` pending trusted-publisher setup); IDE on Open VSX pending publisher enrolment |
+| Installable artifacts | ✅ [`@walkcroach/cli@0.3.0`](https://www.npmjs.com/package/@walkcroach/cli) on npm **with SLSA provenance**; [`walkcroach.walkcroach-ide@0.2.0`](https://open-vsx.org/extension/walkcroach/walkcroach-ide) on Open VSX |
 | Open-source licence detectable in About | ✅ MIT, [`LICENSE`](../LICENSE) at repo root |
 | README with setup + run instructions | ✅ [`README.md`](../README.md) — verified by following it from scratch |
 | Dependencies / example config | ✅ per-module `package.json`; [`.env.example`](../.env.example) |
@@ -499,7 +499,7 @@ Lead with the cross-surface moment; do not tour features.
 | 6 | Video worker ARN empty; `creative_lambda_image_uri` unset | Either wire them or keep creative/video claims out of the submission. |
 | 7 | Connectors + remote site profiles inert without OAuth secrets | Keep behind the claim-gating table; do not demo. |
 | 8 | Chrome Web Store listing not confirmed live | Ops gate, not a judging gate. Do not claim "published" unless it is. |
-| 9 | CLI/IDE not yet published | `@walkcroach` npm scope created and `@walkcroach/cli` exists (`0.0.0` placeholder, deprecated) so OIDC trusted publishing can be configured — npm cannot OIDC-publish a package's first version. Remaining: trusted-publisher config + `npm-publish` environment, Open VSX enrolment + `OVSX_PAT`, then tag `cli-v0.3.0` / `ide-v0.2.0`. **PKCE closed 2026-08-01** — see §5.9. |
+| ~~9~~ | ~~CLI/IDE not published~~ | ✅ **Closed 2026-08-01.** `@walkcroach/cli@0.3.0` on npm via OIDC trusted publishing, carrying a SLSA provenance attestation; `walkcroach.walkcroach-ide@0.2.0` on Open VSX. PKCE closed the same day — see §5.9. |
 | ~~10~~ | ~~`agent-harness/loop.ts` has no dedicated unit suite~~ | ✅ **Closed 2026-08-01.** `loop.test.ts` — 45 tests over memory recall, the session state machine, mode escalation, and loop termination. Mutation-verified (see §5.7). |
 
 ---

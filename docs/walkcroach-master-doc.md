@@ -15,8 +15,8 @@
 |---|---|---|
 | **Web** | **Substantially complete + Web Modules landed** | Builder/chat/deploy/RAG as before, plus creatives (Canvas/Reel/flyers/Office), connectors package, Stripe Checkout/Portal handlers, Bedrock guardrails, creative observability. Hard quotas and propose→confirm→execute are real. |
 | **Chrome** | **Functional; CWS submit packet current at v0.5.3** | Side-panel copilot, linking, auth upgrade, selection capture, site profiles, connectors code (inert until OAuth secrets). Store checklist supersedes the old 0.1.4 packet — submission still the open ops gate. |
-| **IDE extension** | **Complete, real product** | Chat, checkpoints, attachments, semantic search, HTTP MCP, shared skills, private VSIX (`ide/walkcroach-ide.vsix`). Open VSX publish workflow present. Stdio MCP **deferred**. |
-| **CLI** | **Functional; packaging ready, not on npm yet** | Same engine as IDE. v0.2.0, browser **loopback** auth (RFC 8252; `--token` for CI), `bin` + `publishConfig` + `.github/workflows/publish-cli.yml` (OIDC). PKCE (S256) landed 2026-08-01. |
+| **IDE extension** | **Published — `walkcroach.walkcroach-ide@0.2.0` on Open VSX** | Chat, checkpoints, attachments, semantic search, HTTP MCP, shared skills, private VSIX (`ide/walkcroach-ide.vsix`). Open VSX publish workflow present. Stdio MCP **deferred**. |
+| **CLI** | **Published — `@walkcroach/cli@0.3.0` on npm** | Same engine as IDE. v0.3.0, browser **loopback** auth (RFC 8252; `--token` for CI), `bin` + `publishConfig` + `.github/workflows/publish-cli.yml` (OIDC). PKCE (S256) landed 2026-08-01. |
 | **Shared agent-engine** | **Most mature module** | gather→act→verify, hard verify, adversarial review, checkpoints, hooks, tool-loop-guard. Has dedicated `loop.test.ts`. |
 | **agent-harness** | **Mature, creative-heavy** | Web/Chrome Lambda loop (~2.9k lines `loop.ts`); creatives, connectors, guardrails, EMF metrics. **`loop.test.ts` landed 2026-08-01** — 45 mutation-verified tests. |
 | **Desktop IDE** | **Postponed / scaffold only** | Sibling repo; docs archived under `docs/archive/`. Do not describe as shipped. |
@@ -200,7 +200,7 @@ Seventeen `walkcroach-*` skill directories + `NOTICE.md` (Apache vs proprietary)
 | 5 | Connectors/creatives “code complete” ≠ “user-reachable” without secrets | Claims must lag wiring |
 | 6 | Dual Stripe config footgun (Connect OAuth vs platform Billing keys) | Wrong secret → silent inert Connect or broken Checkout |
 | 7 | Chrome CWS submission / extension ID | Store packet ready; live listing not confirmed in-repo |
-| 8 | CLI not confirmed published | Workflow exists. PKCE closed 2026-08-01 across IDE/CLI/Chrome; publishing is now the only half of this gate left |
+| ~~8~~ | ~~CLI not published~~ | ✅ Closed 2026-08-01 — `@walkcroach/cli@0.3.0` (npm, OIDC + provenance), `walkcroach-ide@0.2.0` (Open VSX) |
 | 9 | Stdio MCP deferred | Correct security posture; don’t silently enable |
 | 10 | `agent_locks` likely orphaned; `build_events`/`tool_invocations` dual-write | Schema hygiene |
 | 11 | Backend pipeline IAM + CodeBuild `resources=["*"]` | Blast-radius inconsistency |
