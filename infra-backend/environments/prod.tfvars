@@ -31,5 +31,5 @@ enable_apigw_cognito_authorizer = true
 #
 # Needed here because the repository was renamed to carry the environment
 # (walkcroach-prod-creative). Any future rename re-enters the same two passes.
-creative_lambda_enabled   = false
+creative_lambda_enabled   = true
 creative_lambda_image_tag = "latest"
