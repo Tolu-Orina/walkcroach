@@ -11,6 +11,13 @@ phases:
     commands:
       - |
         set -eu
+        # Shared by web + CLI — dist/ is gitignored
+        cd packages/templates
+        npm ci
+        npm run build
+        npm test
+      - |
+        set -eu
         cd web
         npm ci
         npm run typecheck

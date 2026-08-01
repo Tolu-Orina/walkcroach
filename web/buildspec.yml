@@ -89,6 +89,11 @@ phases:
     commands:
       - |
         set -eu
+        # file: dependency — dist/ is gitignored; must build before web typecheck
+        cd "${CODEBUILD_SRC_DIR}/packages/templates"
+        npm ci
+        npm run build
+
         cd "${CODEBUILD_SRC_DIR}/web"
         # NODE_ENV=production would skip devDependencies (typescript, vite); force them in
         npm ci --include=dev
