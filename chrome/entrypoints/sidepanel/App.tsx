@@ -303,6 +303,24 @@ export function App() {
     setGrantedOrigins(await listGrantedOrigins());
   }, []);
 
+  /**
+   * The retry button's action. Distinct from `refreshAccess` because it probes
+   * the page, which is only permissible behind an explicit click — see
+   * RECHECK_PAGE_ACCESS in lib/messaging.ts.
+   *
+   * `refreshAccess` alone could never clear the "Tab not visible yet" state:
+   * it re-runs a classifier whose answer does not change until a grant exists.
+   */
+  const recheckAccess = useCallback(async (): Promise<PageAccess | null> => {
+    const res = (await chrome.runtime.sendMessage({
+      type: 'RECHECK_PAGE_ACCESS',
+    })) as { ok?: boolean; access?: PageAccess };
+    if (!res?.access) return null;
+    applyAccess(res.access);
+    await refreshGrantedOrigins();
+    return res.access;
+  }, [applyAccess, refreshGrantedOrigins]);
+
   useEffect(() => {
     void chrome.runtime
       .sendMessage({ type: 'WARM_PAGE_CONTEXT' })
@@ -1164,7 +1182,7 @@ export function App() {
               <AccessNotice
                 access={access}
                 onGrant={() => void onGrantSite()}
-                onRecheck={() => void refreshAccess()}
+                onRecheck={() => void recheckAccess()}
               />
 
               <PrimaryActions

@@ -1,9 +1,9 @@
 {
   "name": "@walkcroach/chrome",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "private": true,
   "type": "module",
-  "description": "WalkCroach Chrome — Manifest V3 SME copilot extension",
+  "description": "WalkCroach Chrome \u2014 Manifest V3 SME copilot extension",
   "scripts": {
     "dev": "wxt",
     "build": "wxt build",
@@ -24,7 +24,9 @@
     "@fontsource/source-sans-3": "^5.3.0",
     "@mozilla/readability": "^0.6.0",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^7.0.0",

@@ -457,9 +457,125 @@ body {
   padding-top: var(--space-3);
   font-size: 0.86rem;
   line-height: 1.55;
-  white-space: pre-wrap;
+  /* NO `white-space: pre-wrap` here. It was correct while this element held raw
+     text, and is actively wrong now that react-markdown emits real blocks:
+     the parser consumes the newlines into <p>/<li>, and pre-wrap would render
+     what remains literally, doubling the gap between every list item. */
   overflow-wrap: anywhere;
   color: var(--paper);
+}
+
+/* Markdown blocks. None of these elements existed in this container before —
+   nothing emitted them — so without explicit rules they fall back to the UA
+   stylesheet, whose margins and font sizes are built for a document, not a
+   360px side panel. */
+.wc-stream > :first-child {
+  margin-top: 0;
+}
+
+.wc-stream > :last-child {
+  margin-bottom: 0;
+}
+
+.wc-stream p {
+  margin: 0 0 var(--space-3);
+}
+
+.wc-stream h1,
+.wc-stream h2,
+.wc-stream h3,
+.wc-stream h4 {
+  margin: var(--space-4) 0 var(--space-2);
+  line-height: 1.3;
+  font-weight: 650;
+}
+
+/* Headings step down gently: the model reaches for `###` freely, and UA sizing
+   would make a mid-answer subheading dwarf the panel's own chrome. */
+.wc-stream h1 {
+  font-size: 1.05rem;
+}
+
+.wc-stream h2 {
+  font-size: 0.98rem;
+}
+
+.wc-stream h3,
+.wc-stream h4 {
+  font-size: 0.92rem;
+}
+
+.wc-stream ul,
+.wc-stream ol {
+  margin: 0 0 var(--space-3);
+  padding-left: 1.25rem;
+}
+
+.wc-stream li {
+  margin-bottom: var(--space-1);
+}
+
+.wc-stream li > p {
+  margin: 0;
+}
+
+.wc-stream code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.85em;
+  padding: 0.1em 0.3em;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--line) 55%, transparent);
+}
+
+.wc-stream pre {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-2);
+  border-radius: var(--radius-2, 6px);
+  background: color-mix(in srgb, var(--line) 45%, transparent);
+  /* The one place pre-wrap still belongs. `overflow-wrap: anywhere` above would
+     otherwise break identifiers mid-token and make code unreadable. */
+  white-space: pre;
+  overflow-x: auto;
+  overflow-wrap: normal;
+}
+
+.wc-stream pre code {
+  padding: 0;
+  background: none;
+}
+
+.wc-stream blockquote {
+  margin: 0 0 var(--space-3);
+  padding-left: var(--space-3);
+  border-left: 2px solid var(--line);
+  color: var(--muted, inherit);
+}
+
+.wc-stream table {
+  width: 100%;
+  margin: 0 0 var(--space-3);
+  border-collapse: collapse;
+  font-size: 0.95em;
+  display: block;
+  overflow-x: auto;
+}
+
+.wc-stream th,
+.wc-stream td {
+  border: 1px solid var(--line);
+  padding: 0.25rem 0.4rem;
+  text-align: left;
+}
+
+.wc-stream a {
+  color: var(--signal);
+  text-decoration: underline;
+}
+
+/* Keeps the blinking caret on the last line of the final block rather than
+   dropping to a line of its own once the text becomes block-level. */
+.wc-stream > *:last-child::after {
+  content: '';
 }
 
 .wc-stream__caret {

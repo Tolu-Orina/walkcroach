@@ -79,7 +79,30 @@ jobs:
       # reach the store unnoticed.
       - name: Build the production zip
         working-directory: chrome
-        run: npm run zip:prod
+        env:
+          # Baked into the bundle at build time by wxt.config.ts, and the only
+          # thing that lets a released extension accept a remote site-profile
+          # bundle — remote.ts returns early when it is empty.
+          #
+          # Absent, the build still succeeds and the extension still works on
+          # its packaged profiles, so a missing secret is invisible until you
+          # wonder why remote updates never apply. Hence the check below.
+          WALKCROACH_PROFILES_PUBLIC_KEY: ${{ secrets.WALKCROACH_PROFILES_PUBLIC_KEY }}
+        run: |
+          set -eu
+          # Checked here rather than in a step-level `if:` — the `secrets`
+          # context is not available there.
+          #
+          # A warning, not a failure: shipping without the key is legitimate
+          # (the extension falls back to its packaged profiles), it just must
+          # not be accidental. Such a release is indistinguishable from one that
+          # never had the capability.
+          if [ -z "${WALKCROACH_PROFILES_PUBLIC_KEY:-}" ]; then
+            echo "::warning title=No site-profile signing key::WALKCROACH_PROFILES_PUBLIC_KEY is unset, so this build cannot apply remote site-profile bundles. It will use its packaged profiles only."
+          else
+            echo "site-profile public key present (${#WALKCROACH_PROFILES_PUBLIC_KEY} chars)"
+          fi
+          npm run zip:prod
 
       - name: Check the tag matches package.json
         if: startsWith(github.ref, 'refs/tags/')

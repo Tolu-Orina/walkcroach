@@ -1,4 +1,6 @@
 import { useEffect, useRef } from 'react';
+import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 /**
  * Streamed model output.
@@ -14,6 +16,18 @@ import { useEffect, useRef } from 'react';
  *
  * Cancellation is not here: Stop belongs to the docked composer, where it cannot
  * scroll out of reach mid-generation.
+ *
+ * Markdown: the model emits headings, bold and lists, which used to reach the
+ * user as literal `###` and `**`. Rendered with react-markdown, which does NOT
+ * pass raw HTML through by default — deliberately left that way. This text is
+ * model output derived from an arbitrary web page, so a prompt-injected
+ * `<img onerror=…>` would otherwise execute inside the extension's own origin,
+ * where it can reach `chrome.*` APIs and the user's session. Never add
+ * rehype-raw here.
+ *
+ * Streaming means half-parsed markdown on most frames — an unclosed `**` or a
+ * partial list. remark handles that fine, treating incomplete syntax as
+ * literal text until the closing token arrives.
  */
 export function Stream({
   text,
@@ -55,7 +69,18 @@ export function Stream({
       </span>
 
       <div className="wc-stream">
-        {text}
+        <Markdown
+          remarkPlugins={[remarkGfm]}
+          components={{
+            // Links open in a new tab and cannot reach back into the opener.
+            // The href comes from model output, so it is untrusted.
+            a: ({ node: _node, ...props }) => (
+              <a {...props} target="_blank" rel="noopener noreferrer nofollow" />
+            ),
+          }}
+        >
+          {text}
+        </Markdown>
         {streaming && <span className="wc-stream__caret" aria-hidden="true" />}
       </div>
 

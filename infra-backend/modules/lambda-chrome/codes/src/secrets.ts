@@ -43,6 +43,8 @@ export async function ensureRuntimeSecrets(): Promise<void> {
     walkcroach_api_key?: string;
     aws_bearer_token_bedrock?: string;
     searxng_url?: string;
+    chrome_site_profiles_bundle?: string;
+    chrome_site_profiles_signature?: string;
   };
 
   applySecret(secret.crdb_connection_string, 'CRDB_CONNECTION_STRING');
@@ -56,6 +58,27 @@ export async function ensureRuntimeSecrets(): Promise<void> {
   }
 
   applySecret(secret.searxng_url, 'SEARXNG_URL');
+
+  /*
+    Signed site-profile bundle (Phase D6).
+
+    Neither value is actually secret — both are served verbatim to any client
+    that asks. They live here purely because of size: the bundle alone is ~3.6
+    KB against Lambda's 4 KB limit for ALL environment variables combined, so it
+    cannot be a Terraform env var without crowding out the rest and breaking
+    again the first time a profile is added. Secrets Manager allows 64 KB.
+
+    The private half of the keypair never appears here, or anywhere in AWS —
+    bundles are signed offline by chrome/scripts/sign-profiles.mjs.
+
+    Absent, handleSiteProfiles returns 404 and every extension keeps its
+    packaged profiles, which is the correct unconfigured state.
+  */
+  applySecret(secret.chrome_site_profiles_bundle, 'CHROME_SITE_PROFILES_BUNDLE');
+  applySecret(
+    secret.chrome_site_profiles_signature,
+    'CHROME_SITE_PROFILES_SIGNATURE',
+  );
 
   if (
     secret.aws_bearer_token_bedrock &&

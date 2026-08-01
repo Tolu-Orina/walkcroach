@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.6.1 — 2026-08-01
+
+### Fixed
+
+- **Model responses render as markdown.** The panel showed literal `###` and
+  `**` because `Stream` rendered raw text — react-markdown had never been
+  wired in, on any version. Raw HTML stays disabled: this text is model output
+  derived from an arbitrary page, so a prompt-injected `<img onerror=…>` would
+  otherwise run in the extension's own origin, with reach into `chrome.*` and
+  the user's session. A test asserts that and fails if `rehype-raw` is ever
+  added.
+
+- **"I clicked it — check again" now does something.** It re-ran the tab
+  classifier, whose answer cannot change while `tab.url` is hidden — so the
+  button was inert while *Summarize* worked one control below, because that
+  path probes the page instead of asking about it. The button now probes too,
+  and a successful probe recovers the page's url and title, which is what lets
+  the panel finally offer "Allow on <site>" rather than repeating the
+  instruction.
+
+  The probe reads the page, so it is a distinct message from the passive
+  `GET_PAGE_CONTEXT` that runs on panel open — reading there would break the
+  panel's own promise that it reads a page only when you click an action.
+
+### Added
+
+- **Signed remote site profiles are now active.** Builds carry an Ed25519
+  public key, so a bundle served by the WalkCroach backend is applied only if
+  it verifies. Any failure — offline, bad signature, malformed, no key — keeps
+  the profiles packaged in this build.
+
 ## 0.6.0 — 2026-08-01
 
 ### Security

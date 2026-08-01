@@ -306,3 +306,66 @@ describe('TAKE_PENDING_SELECTION', () => {
     expect(res).toEqual({ ok: true, selection: null });
   });
 });
+
+describe('RECHECK_PAGE_ACCESS', () => {
+  it('promotes an unknown tab to ready once the probe recovers its identity', async () => {
+    // The bug: the button re-ran the classifier, whose answer cannot change
+    // while tab.url stays hidden. Probing recovers the url and title, which is
+    // exactly what was missing.
+    access = unknown;
+    const res = await routeMessage({ type: 'RECHECK_PAGE_ACCESS' }, deps);
+
+    expect((res.access as PageAccess).status).toBe('ready');
+    expect(res.probed).toBe(true);
+  });
+
+  it('offers the permanent grant when the recovered origin is not yet allowed', async () => {
+    access = unknown;
+    deps.listGrants = vi.fn(async () => []);
+
+    const res = await routeMessage({ type: 'RECHECK_PAGE_ACCESS' }, deps);
+
+    // needs-grant, not ready: the panel can now name the site and offer the
+    // "Allow on …" button the copy promises.
+    expect((res.access as PageAccess).status).toBe('needs-grant');
+  });
+
+  it('leaves the state untouched when the probe fails', async () => {
+    access = unknown;
+    deps.extract = vi.fn(async () => null);
+
+    const res = await routeMessage({ type: 'RECHECK_PAGE_ACCESS' }, deps);
+
+    expect((res.access as PageAccess).status).toBe('unknown');
+    expect(deps.writeCache).not.toHaveBeenCalled();
+  });
+
+  it('does not probe a tab that is already classified', async () => {
+    // Only `unknown` is stuck. Probing a readable tab would read the page for
+    // no reason, on a control the user may click at any time.
+    access = ready;
+    const res = await routeMessage({ type: 'RECHECK_PAGE_ACCESS' }, deps);
+
+    expect(deps.extract).not.toHaveBeenCalled();
+    expect((res.access as PageAccess).status).toBe('ready');
+  });
+
+  it('never probes a restricted or tabless state', async () => {
+    for (const dead of [restricted, noTab]) {
+      access = dead;
+      await routeMessage({ type: 'RECHECK_PAGE_ACCESS' }, deps);
+    }
+    expect(deps.extract).not.toHaveBeenCalled();
+  });
+
+  it('keeps GET_PAGE_CONTEXT free of page reads', async () => {
+    // Load-bearing separation. GET_PAGE_CONTEXT runs on panel open and on every
+    // tab change; probing there would break the panel's own promise that it
+    // "reads a page only when you click an action".
+    access = unknown;
+    const res = await routeMessage({ type: 'GET_PAGE_CONTEXT' }, deps);
+
+    expect(deps.extract).not.toHaveBeenCalled();
+    expect((res.access as PageAccess).status).toBe('unknown');
+  });
+});

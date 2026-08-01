@@ -80,3 +80,58 @@ describe('Stream — accessibility', () => {
     expect(container.querySelector('.wc-stream__caret')).toBeNull();
   });
 });
+
+describe('markdown rendering', () => {
+  it('renders headings and emphasis as elements, not literal syntax', () => {
+    // The bug this fixes: `### Summary` and `**bold**` reached the panel as
+    // characters, because the container rendered raw text.
+    render(<Stream text={'### Summary\n\n**Program Overview**'} streaming={false} />);
+
+    expect(screen.getByRole('heading', { level: 3 }).textContent).toBe('Summary');
+    expect(screen.getByText('Program Overview').tagName).toBe('STRONG');
+    expect(screen.queryByText(/###/)).toBeNull();
+    expect(screen.queryByText(/\*\*/)).toBeNull();
+  });
+
+  it('renders bullets as a real list', () => {
+    render(<Stream text={'- one\n- two\n- three'} streaming={false} />);
+
+    expect(screen.getAllByRole('listitem')).toHaveLength(3);
+  });
+
+  it('does not execute raw HTML in model output', () => {
+    // Load-bearing. This text derives from an arbitrary web page, so a
+    // prompt-injected tag would otherwise run in the extension's own origin,
+    // with reach into chrome.* and the user's session. react-markdown escapes
+    // HTML unless rehype-raw is added; this fails the moment someone adds it.
+    const { container } = render(
+      <Stream
+        text={'<img src=x onerror="globalThis.__pwned=1">\n\n<script>globalThis.__pwned=1</script>'}
+        streaming={false}
+      />,
+    );
+
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.querySelector('script')).toBeNull();
+    expect((globalThis as Record<string, unknown>).__pwned).toBeUndefined();
+  });
+
+  it('opens model-supplied links without handing over the opener', () => {
+    render(<Stream text="[coursera](https://www.coursera.org)" streaming={false} />);
+
+    const link = screen.getByRole('link', { name: 'coursera' });
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.getAttribute('rel')).toContain('noopener');
+  });
+
+  it('tolerates half-streamed markdown without dropping the text', () => {
+    // Most frames mid-stream end on an unclosed token. Incomplete syntax must
+    // degrade to literal characters, never to a blank panel.
+    render(<Stream text={'### Summ'} streaming />);
+    expect(screen.getByText(/Summ/)).toBeInTheDocument();
+
+    cleanup();
+    render(<Stream text={'a **bold stretch that has not clo'} streaming />);
+    expect(screen.getByText(/bold stretch/)).toBeInTheDocument();
+  });
+});

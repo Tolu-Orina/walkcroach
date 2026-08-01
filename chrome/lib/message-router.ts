@@ -1,5 +1,5 @@
 import type { ExtensionMessage } from './messaging';
-import type { PageAccess } from './page-access';
+import { resolvePageAccess, type PageAccess } from './page-access';
 import type { PageExtract } from './extract';
 import type { PendingSelection } from './selection';
 import type { CapturedScreenshot } from './screenshot';
@@ -68,6 +68,37 @@ export async function routeMessage(
     case 'GET_PAGE_CONTEXT': {
       const access = await deps.getAccess();
       return { ok: true, access };
+    }
+
+    /**
+     * "I clicked it — check again".
+     *
+     * The button used to send GET_PAGE_CONTEXT, which only re-ran the
+     * classifier — and the classifier returns `unknown` precisely because
+     * `tab.url` is hidden without a host grant. A toolbar click does not
+     * populate `tab.url`, so the answer could never change and the button
+     * genuinely did nothing, while Summarize worked one control below because
+     * it goes through the extract path where `activeTab` is live.
+     *
+     * So probe instead of re-asking. A successful extract proves readability
+     * AND recovers the url and title that `tab.url` withheld, which is enough
+     * to run the real classifier and offer the permanent grant the copy
+     * promises. Failure leaves the original state untouched.
+     */
+    case 'RECHECK_PAGE_ACCESS': {
+      const access = await deps.getAccess();
+      if (access.status !== 'unknown') return { ok: true, access };
+
+      const extract = await deps.extract(access.tabId);
+      if (!extract) return { ok: true, access, probed: true };
+
+      await deps.writeCache(access.tabId, extract);
+      const grants = await deps.listGrants();
+      const resolved = await resolvePageAccess(
+        { id: access.tabId, url: extract.url, title: extract.title },
+        async (pattern) => grants.includes(pattern),
+      );
+      return { ok: true, access: resolved, probed: true };
     }
 
     /**
