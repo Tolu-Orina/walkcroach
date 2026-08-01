@@ -376,6 +376,11 @@ Resources:
                 Action:
                   - ecr:CreateRepository
                   - ecr:DescribeRepositories
+                  # `docker login` for the image push. This action does not
+                  # support resource-level permissions at all — AWS requires
+                  # Resource '*' — which is why it cannot live in the
+                  # repository-scoped statement below.
+                  - ecr:GetAuthorizationToken
                 Resource: '*'
               - Sid: EcrCreativeManage
                 Effect: Allow
@@ -513,7 +518,10 @@ Resources:
         # Required for `docker build`. The Terraform projects already set this;
         # the unit-test project deliberately does not.
         PrivilegedMode: true
-      TimeoutInMinutes: 30
+      # Headroom for the Debian base: LibreOffice and ffmpeg make this a ~1.5 GB
+      # image to build and push. Only paid on a real build — an unchanged tree
+      # matches its content tag in ECR and exits in seconds.
+      TimeoutInMinutes: 45
       Source:
         Type: CODEPIPELINE
         BuildSpec: infra-backend/buildspec-creative-image.yml

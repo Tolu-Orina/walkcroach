@@ -1,0 +1,28 @@
+# Build context for infra-backend/modules/lambda-creative/Dockerfile, whose
+# context is the repo root (it copies from both infra-backend/ and skills/).
+#
+# Without this the entire monorepo is uploaded to the daemon on every build —
+# including every node_modules tree and .terraform provider cache, which is
+# several gigabytes and dwarfs the ~12 MB actually copied.
+#
+# It also keeps the content hash in buildspec-creative-image.yml honest: stale
+# bytecode changing under __pycache__ must not read as a source change.
+
+node_modules/
+**/node_modules/
+.terraform/
+**/.terraform/
+**/.terraform.lock.hcl
+.git/
+**/__pycache__/
+**/*.pyc
+**/.venv/
+**/venv/
+**/dist/
+**/.next/
+**/coverage/
+**/.wxt/
+**/.vite/
+**/*.log
+**/.DS_Store
+results/

@@ -20,6 +20,30 @@ npm run test:creative-scripts
 
 Without LibreOffice, validate still must pass; thumbnail warns and is skipped.
 
+## Base image
+
+Debian (`python:3.12-slim-bookworm`) plus the AWS Lambda Runtime Interface
+Client, **not** `public.ecr.aws/lambda/python`. Amazon Linux 2023 ships neither
+`libreoffice-impress` nor `ffmpeg`, and this image needs both — `soffice` for
+`thumbnail_pptx.py`, `ffmpeg` for `compose_video.py`.
+
+Both call sites degrade gracefully (`shutil.which` / `_which`, then a skipped
+thumbnail or a placeholder MP4), so on an AL2023 base the image builds and
+deploys while quietly producing degraded output. That is the failure mode this
+base avoids.
+
+The Lambda contract therefore comes from the image rather than the base:
+
+```dockerfile
+ENTRYPOINT ["/usr/local/bin/python", "-m", "awslambdaric"]
+CMD ["handler.handler"]
+```
+
+Terraform sets no `image_config`, so these are what Lambda uses. Removing the
+ENTRYPOINT leaves no runtime loop and every invocation times out.
+
+Compilers are confined to a builder stage; the shipped image has none.
+
 ## Container build (from walkcroach/ repo root)
 
 ```bash

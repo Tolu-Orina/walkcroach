@@ -70,6 +70,24 @@ variable "memory_mb" {
   default = 3008
 }
 
+variable "ephemeral_storage_mb" {
+  type        = number
+  description = <<-EOT
+    Size of /tmp. The default of 512 MB is not enough here.
+
+    /tmp is the only writable path in a Lambda, and this function puts four
+    things in it at once: the LibreOffice user profile (HOME=/tmp), the
+    PPTX -> PDF intermediate, the rasterised page images, and ffmpeg's video
+    segments. Video is the one that blows the budget — intermediates are
+    routinely hundreds of MB.
+
+    Failure mode is a runtime "No space left on device" from soffice or ffmpeg,
+    which both call sites swallow into a skipped thumbnail or a placeholder MP4,
+    so it degrades silently rather than erroring.
+  EOT
+  default     = 4096
+}
+
 variable "tags" {
   type    = map(string)
   default = {}
@@ -215,6 +233,10 @@ resource "aws_lambda_function" "creative" {
   image_uri     = local.creative_image_uri
   timeout       = var.timeout
   memory_size   = var.memory_mb
+
+  ephemeral_storage {
+    size = var.ephemeral_storage_mb
+  }
 
   environment {
     variables = {

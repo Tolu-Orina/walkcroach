@@ -71,8 +71,9 @@ phases:
       - |
         # Tag = hash of every input to the image. `sort` keeps it stable across
         # machines; anything not listed here cannot change the built artefact.
+        set -euo pipefail
         set -a; . /tmp/creative.env; set +a
-        [ "${SKIP:-0}" = "1" ] && exit 0
+        if [ "${SKIP:-0}" = "1" ]; then exit 0; fi
         TAG="$(
           { find infra-backend/modules/lambda-creative/Dockerfile \
                  infra-backend/modules/lambda-creative/codes \
@@ -85,6 +86,12 @@ phases:
   build:
     commands:
       - |
+        # WITHOUT THIS, THE PHASE LIES. CodeBuild judges a multi-line command
+        # block by its LAST statement only, so `docker build` could fail, the
+        # push could fail, and a trailing `echo` still reported SUCCEEDED — with
+        # a message claiming the image was ready. Every failure below must
+        # propagate.
+        set -euo pipefail
         set -a; . /tmp/creative.env; set +a
         if [ "${SKIP:-0}" = "1" ]; then
           echo "skipping build"
