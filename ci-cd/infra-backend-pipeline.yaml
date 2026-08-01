@@ -290,6 +290,11 @@ Resources:
                   - iam:DeleteRolePolicy
                   - iam:ListRolePolicies
                   - iam:ListAttachedRolePolicies
+                  # Read-only, and required on DELETE: the provider checks a role
+                  # for attached instance profiles before removing it, even when
+                  # none exist. Absent here, roles could be created but never
+                  # destroyed — which only shows up the first time one is renamed.
+                  - iam:ListInstanceProfilesForRole
                   - iam:PassRole
                 Resource: '*'
               # aws_cloudwatch_log_group.* + CodeBuild build logs
