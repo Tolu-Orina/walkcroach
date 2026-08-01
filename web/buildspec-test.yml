@@ -13,40 +13,40 @@ phases:
         set -eu
         # Shared by web + CLI — dist/ is gitignored
         cd packages/templates
-        npm ci
+        npm ci --include=dev
         npm run build
         npm test
       - |
         set -eu
         cd web
-        npm ci
+        npm ci --include=dev
         npm run typecheck
         npm run test:coverage
         npm run scan:secrets
       - |
         set -eu
         cd chrome
-        npm ci
+        npm ci --include=dev
         npm run typecheck
         npm run test:coverage
         npm run build
       - |
         set -eu
         cd packages/agent-engine
-        npm ci
+        npm ci --include=dev
         npm run typecheck
         npm run test:coverage
         npm run build
       - |
         set -eu
         cd cli
-        npm ci
+        npm ci --include=dev
         npm run typecheck
         npm run test:coverage
       - |
         set -eu
         cd ide
-        npm ci
+        npm ci --include=dev
         npm run typecheck
         npm run test:coverage
         npm run build

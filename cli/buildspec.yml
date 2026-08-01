@@ -22,20 +22,21 @@ phases:
     commands:
       - |
         set -eu
-        # Both private packages are file: devDependencies bundled into the CLI,
+        # Both private packages are file: deps bundled into the CLI,
         # and must be built before it can typecheck or bundle against them.
         # A stale dist here ships stale code with no error anywhere.
+        # --include=dev: CodeBuild NODE_ENV=production would skip typescript.
         cd packages/agent-engine
-        npm ci
+        npm ci --include=dev
         npm run build
 
         cd ../templates
-        npm ci
+        npm ci --include=dev
         npm run build
         npm test
 
         cd ../../cli
-        npm ci
+        npm ci --include=dev
         npm run typecheck
         npm test
         npm run build

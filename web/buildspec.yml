@@ -89,9 +89,10 @@ phases:
     commands:
       - |
         set -eu
-        # file: dependency — dist/ is gitignored; must build before web typecheck
+        # file: dependency — dist/ is gitignored; must build before web typecheck.
+        # CodeBuild often sets NODE_ENV=production, which omits typescript (devDep).
         cd "${CODEBUILD_SRC_DIR}/packages/templates"
-        npm ci
+        npm ci --include=dev
         npm run build
 
         cd "${CODEBUILD_SRC_DIR}/web"
