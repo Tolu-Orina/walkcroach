@@ -3,8 +3,60 @@
 All notable changes to `@walkcroach/cli`.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
-follow semver — see `VERSIONING.md`. Nothing has been published to npm yet;
-`0.2.0` is the first publishable line.
+follow semver — see `VERSIONING.md`. `0.3.0` is the first real release;
+`0.0.0` is a deprecated placeholder published only to create the package so
+npm trusted publishing (OIDC) could be configured — it cannot perform a
+package's first publish.
+
+## [0.3.0] — 2026-08-01 — First npm release: PKCE sign-in and local MCP servers
+
+### Security
+
+- **Sign-in now uses PKCE (RFC 7636, S256).** The CLI receives its one-time
+  authorization code on a loopback port, which is a channel another process on
+  the machine can plausibly race for. Previously that code was a bearer
+  credential: whoever held it could redeem it. The exchange now additionally
+  requires a verifier that is generated per sign-in, held only in memory, and
+  never appears in the authorize URL, the callback URL, or on disk — so an
+  intercepted code is worthless.
+
+  Binding the loopback port before opening the browser remains the first line of
+  defence; this is defence in depth, not a replacement for it.
+
+  **Breaking against older backends.** The `/ide/v1/oauth/*` endpoints now
+  require a challenge and verifier. This CLI will not sign in against a
+  WalkCroach backend deployed before 2026-08-01.
+
+### Added
+
+- **stdio MCP servers**, off by default, behind `mcpAllowStdio` in
+  `~/.walkcroach/config.json`. `.walkcroach/mcp.json` may now name a program to
+  run, not only an HTTP endpoint.
+
+  The gate is read from your **user** config only — deliberately inverting this
+  CLI's normal `project > user` precedence, because the file being authorised
+  ships inside the repository you just cloned. A repo cannot switch on its own
+  code execution.
+
+  Every server additionally requires explicit per-command approval, is spawned
+  with an environment stripped of AWS/GitHub/CockroachDB credentials and
+  anything credential-shaped, must resolve to an absolute path outside the
+  workspace, and is killed with its process tree on exit. Full rationale and
+  threat model: `docs/walkcroach-stdio-mcp-security-review.md`.
+
+- **`walkcroach mcp list`** — configured servers, whether each may run, and
+  whether it is approved. Shows the *resolved* command, not what `mcp.json`
+  wrote, since that is the difference that matters when deciding.
+- **`walkcroach mcp revoke [server] | --all`** — withdraw an approval. Approvals
+  are recorded per exact command, so editing `mcp.json` already forces a fresh
+  prompt; this is for withdrawing one you granted earlier.
+
+### Notes
+
+- There is deliberately no `mcp status`. The CLI is one-shot, so a separate
+  invocation would own an empty supervisor and could only ever report "nothing
+  running". Live process state belongs to the IDE extension, where a window
+  outlives a turn.
 
 ## [0.2.0] — unreleased — Phase C5: documentation and release hygiene
 

@@ -34,7 +34,27 @@ See [docs/README.md](./docs/README.md) for documentation index and [docs/walkcro
 - CockroachDB Cloud cluster + connection string
 - AWS account with Bedrock access (Nova 2 Lite + Titan Embeddings V2)
 
+## Install
+
+Try the agent without building anything:
+
+```bash
+# CLI
+npx @walkcroach/cli@latest auth login
+npx @walkcroach/cli@latest run "explain this repo"
+```
+
+**IDE extension** — install `walkcroach.walkcroach-ide` from
+[Open VSX](https://open-vsx.org/extension/walkcroach/walkcroach-ide) (VS Code,
+Cursor, VSCodium, Windsurf), or from the `.vsix` in
+[Releases](https://github.com/Tolu-Orina/walkcroach/releases).
+
+Both sign in against the same account as the web app, and share one CockroachDB
+memory layer — a decision recorded in one surface is recalled in the others.
+
 ## Quick start
+
+Building from source:
 
 ```bash
 cp .env.example .env

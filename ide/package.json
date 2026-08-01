@@ -1,8 +1,8 @@
 {
   "name": "walkcroach-ide",
   "displayName": "WalkCroach IDE",
-  "description": "WalkCroach agentic coding assistant \u2014 local agent, CockroachDB tools, and optional cross-surface memory via WalkCroach Web.",
-  "version": "0.1.0",
+  "description": "WalkCroach agentic coding assistant — local agent, CockroachDB tools, and optional cross-surface memory via WalkCroach Web.",
+  "version": "0.2.0",
   "publisher": "walkcroach",
   "private": false,
   "license": "MIT",
@@ -166,9 +166,9 @@
           "enumDescriptions": [
             "Use the default (medium)",
             "Disable extended thinking",
-            "Low effort \u2014 fastest, least reasoning",
-            "Medium effort \u2014 same tier as WalkCroach Web App Builder",
-            "High effort \u2014 slowest, most thorough (disables the output-token cap)"
+            "Low effort — fastest, least reasoning",
+            "Medium effort — same tier as WalkCroach Web App Builder",
+            "High effort — slowest, most thorough (disables the output-token cap)"
           ],
           "default": "",
           "description": "Nova 2 Lite extended-thinking tier for the agent loop. Empty uses the default (medium)."
@@ -177,7 +177,7 @@
           "type": "boolean",
           "default": false,
           "scope": "machine",
-          "markdownDescription": "Allow `.walkcroach/mcp.json` to start MCP servers by **running a program on this machine** (stdio transport).\n\nOff by default. Turning this on means a repository you clone can propose a command to run; WalkCroach still asks for explicit per-server approval, refuses commands inside the workspace, and never passes AWS/GitHub/CockroachDB credentials to them. This setting cannot be changed by a workspace \u2014 only in your user settings."
+          "markdownDescription": "Allow `.walkcroach/mcp.json` to start MCP servers by **running a program on this machine** (stdio transport).\n\nOff by default. Turning this on means a repository you clone can propose a command to run; WalkCroach still asks for explicit per-server approval, refuses commands inside the workspace, and never passes AWS/GitHub/CockroachDB credentials to them. This setting cannot be changed by a workspace — only in your user settings."
         }
       }
     }

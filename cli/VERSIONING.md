@@ -48,13 +48,29 @@ npm run test:packaged        # packs, installs the tarball outside the repo, run
 
 Then:
 
-1. Bump `version` in `package.json`.
-2. Move the `[Unreleased]` section of `CHANGELOG.md` under the new version with
-   today's date. Anything breaking-for-scripts goes at the top of it.
-3. Commit, then tag **`cli-v<version>`** — the publish workflow refuses to run
-   if the tag and `package.json` disagree.
-4. Push the tag. `.github/workflows/publish-cli.yml` re-runs every gate and
-   publishes.
+1. Move the `[Unreleased]` section of `CHANGELOG.md` under the new version with
+   today's date. Anything breaking-for-scripts goes at the top of it. Commit it.
+2. Release:
+
+   ```bash
+   npm version minor        # or patch / major — bumps, commits and tags
+   git push --follow-tags
+   ```
+
+`.npmrc` sets `tag-version-prefix=cli-v`, so `npm version` produces the
+`cli-v<version>` tag the workflow triggers on, and the tag can never disagree
+with `package.json` because one command wrote both. `npm version` also refuses
+to run on a dirty tree, which is why step 1 commits first.
+
+`.github/workflows/publish-cli.yml` then re-runs every gate and publishes.
+
+**Pre-1.0 reminder:** a breaking change is a *minor* bump, so `npm version minor`
+is the usual one — see the mapping above.
+
+To verify without releasing, run the workflow manually from the Actions tab with
+`dry_run: true`. Note that a manual run can only ever dry-run: the publish step
+is gated on the ref being a tag, deliberately, so the published version always
+traces to a tagged commit and its provenance attestation reconciles.
 
 ## How publishing is authenticated
 

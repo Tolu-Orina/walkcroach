@@ -70,7 +70,12 @@ describe('package manifest', () => {
   it('advertises no entry point beyond the binary', () => {
     // A `main` pointing at a file esbuild does not emit would be a broken
     // manifest that only fails for whoever imports it.
-    expect(pkg.bin.walkcroach).toBe('./dist/bin.js');
+    //
+    // No leading `./`: npm rewrites `./dist/bin.js` to `dist/bin.js` during
+    // publish and warns that it "cleaned" the name. Pinning the pre-normalised
+    // form meant the published manifest differed from this one and the warning
+    // recurred on every release, so the normalised form is the one to hold.
+    expect(pkg.bin.walkcroach).toBe('dist/bin.js');
     expect(pkg.main).toBeUndefined();
     expect(pkg.exports).toBeUndefined();
   });

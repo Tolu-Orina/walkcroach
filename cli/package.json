@@ -1,7 +1,7 @@
 {
   "name": "@walkcroach/cli",
-  "version": "0.2.0",
-  "description": "WalkCroach CLI \u2014 a memory-first coding agent in your terminal, sharing one CockroachDB memory layer with the WalkCroach web app, Chrome extension and IDE extension",
+  "version": "0.3.0",
+  "description": "WalkCroach CLI — a memory-first coding agent in your terminal, sharing one CockroachDB memory layer with the WalkCroach web app, Chrome extension and IDE extension",
   "type": "module",
   "license": "MIT",
   "author": "Conqueror Foundation",
@@ -25,7 +25,7 @@
     "tui"
   ],
   "bin": {
-    "walkcroach": "./dist/bin.js"
+    "walkcroach": "dist/bin.js"
   },
   "files": [
     "dist",

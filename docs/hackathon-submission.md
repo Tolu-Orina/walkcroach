@@ -15,6 +15,7 @@
 | Required | Status |
 |---|---|
 | Public repo URL | ✅ `https://github.com/Tolu-Orina/walkcroach` — **TODO: confirm public** |
+| Installable artifacts | ⏳ `npx @walkcroach/cli` (scope created, `0.3.0` pending trusted-publisher setup); IDE on Open VSX pending publisher enrolment |
 | Open-source licence detectable in About | ✅ MIT, [`LICENSE`](../LICENSE) at repo root |
 | README with setup + run instructions | ✅ [`README.md`](../README.md) — verified by following it from scratch |
 | Dependencies / example config | ✅ per-module `package.json`; [`.env.example`](../.env.example) |
@@ -52,7 +53,7 @@ postponed scaffolding and is **not** a fifth surface — do not present it as on
 
 ## 2. CockroachDB tools used
 
-All four listed tools are used, each with a real job. Details and file references:
+All four listed tools are used, each with a real job. Details and file references
 
 ### 2.1 Cloud Managed MCP Server
 
@@ -76,11 +77,27 @@ All four listed tools are used, each with a real job. Details and file reference
   ([`approvals.ts:77,131`](../packages/agent-engine/src/approvals.ts)), and MCP
   writes are refused outright in read-only sub-agent mode. Errors are mapped to
   plain remediation text instead of raw stack traces (`plainMcpError`).
-- **Deliberately not done:** stdio-spawned MCP servers. Spawning arbitrary processes
-  named in a committed JSON file is a real security surface; it is deferred with a
-  written rationale in
-  [`walkcroach-stdio-mcp-security-review.md`](./walkcroach-stdio-mcp-security-review.md).
-  HTTP/Streamable only.
+- **stdio-spawned MCP servers, off by default (2026-08-01).** Supporting these means
+  reading a file out of a cloned repository and executing the program it names — the
+  same class of vulnerability as VS Code task auto-run. It was deferred, threat-modelled
+  in [`walkcroach-stdio-mcp-security-review.md`](./walkcroach-stdio-mcp-security-review.md),
+  then implemented against every mitigation that review demanded: per-command consent
+  recorded against a fingerprint and revocable, an environment stripped of every
+  credential *even when explicitly allow-listed*, commands resolved to an absolute path
+  and refused if they resolve inside the workspace, `server__tool` namespacing, and one
+  supervisor owning process-tree kill at window close.
+
+  Two details worth the judges' attention. First, **the enabling setting's location is
+  the actual gate** — it is contributed with VS Code's `"scope": "machine"` and read
+  from user-level CLI config only, deliberately inverting that module's normal
+  `project > user` precedence, because a workspace-readable flag would let a repository
+  authorise its own execution. Second, **registration happens during agent-loop setup,
+  not at workspace open**, so a user prompt always precedes it and consent has a turn to
+  attach to. Opening a folder still spawns nothing.
+
+  The review's own §7 test bar is `packages/agent-engine/src/mcp-stdio.test.ts` (44
+  tests, `describe` blocks labelled T1–T7 against its bullets), verified against
+  deliberate mutations of each gate.
 
 ### 2.2 Distributed Vector Indexing
 
@@ -482,7 +499,7 @@ Lead with the cross-surface moment; do not tour features.
 | 6 | Video worker ARN empty; `creative_lambda_image_uri` unset | Either wire them or keep creative/video claims out of the submission. |
 | 7 | Connectors + remote site profiles inert without OAuth secrets | Keep behind the claim-gating table; do not demo. |
 | 8 | Chrome Web Store listing not confirmed live | Ops gate, not a judging gate. Do not claim "published" unless it is. |
-| 9 | CLI not confirmed on npm | Publishing is the remaining half. **PKCE closed 2026-08-01** — see §5.9. |
+| 9 | CLI/IDE not yet published | `@walkcroach` npm scope created and `@walkcroach/cli` exists (`0.0.0` placeholder, deprecated) so OIDC trusted publishing can be configured — npm cannot OIDC-publish a package's first version. Remaining: trusted-publisher config + `npm-publish` environment, Open VSX enrolment + `OVSX_PAT`, then tag `cli-v0.3.0` / `ide-v0.2.0`. **PKCE closed 2026-08-01** — see §5.9. |
 | ~~10~~ | ~~`agent-harness/loop.ts` has no dedicated unit suite~~ | ✅ **Closed 2026-08-01.** `loop.test.ts` — 45 tests over memory recall, the session state machine, mode escalation, and loop termination. Mutation-verified (see §5.7). |
 
 ---

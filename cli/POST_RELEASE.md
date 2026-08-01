@@ -52,7 +52,7 @@ cd demo-app && npm i && npm run build
 A version cannot be reused, and unpublishing is an incident rather than a
 workflow. So:
 
-1. **Fix forward.** Bump patch, `npm run test:packaged`, tag `cli-v<version>`.
+1. **Fix forward.** `npm run test:packaged`, then `npm version patch && git push --follow-tags`.
 2. **Deprecate the bad version** so installs warn rather than silently break:
    ```bash
    npm deprecate @walkcroach/cli@<bad-version> "Broken install; use <good-version>"
