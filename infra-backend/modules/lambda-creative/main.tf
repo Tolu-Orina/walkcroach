@@ -62,7 +62,7 @@ variable "image_uri" {
 
 variable "timeout" {
   type    = number
-  default = 300
+  default = 600
 }
 
 variable "memory_mb" {

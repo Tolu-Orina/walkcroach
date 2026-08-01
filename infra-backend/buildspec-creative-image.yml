@@ -18,6 +18,12 @@ version: 0.2
 # diff, and the function silently keeps running the old code.
 
 env:
+  # CodeBuild defaults to /bin/sh (dash) on Linux, which has no `pipefail` and
+  # fails outright on `set -o pipefail`. Bash is required, not preferred:
+  # without pipefail, `aws ecr get-login-password | docker login` reports only
+  # docker's exit status, so a failed credential fetch is invisible — which is
+  # exactly one of the failures this buildspec previously swallowed.
+  shell: bash
   variables:
     AWS_REGION_DEFAULT: eu-west-2
 
