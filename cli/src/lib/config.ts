@@ -7,6 +7,18 @@ import { keychainDelete, keychainGet, keychainSet } from './credential-store.js'
 
 export type WalkcroachConfig = {
   apiBaseUrl: string;
+  /**
+   * Allow `.walkcroach/mcp.json` to start MCP servers by running a local program
+   * (stdio transport). Off unless explicitly set.
+   *
+   * **User-level only.** `resolveAllowStdioMcp` reads it from
+   * `~/.walkcroach/config.json` and deliberately ignores the project layer,
+   * inverting this module's normal project > user precedence. The file this flag
+   * authorises lives in the workspace, so honouring a workspace value would let
+   * a cloned repository switch on its own code execution — see
+   * docs/walkcroach-stdio-mcp-security-review.md §6.
+   */
+  mcpAllowStdio?: boolean;
   cognitoHostedUiUrl?: string;
   cognitoClientId?: string;
   cognitoRegion?: string;
@@ -41,6 +53,7 @@ const DEFAULTS: WalkcroachConfig = {
   apiBaseUrl: DEFAULT_API_BASE_URL,
   cognitoRegion: 'eu-west-2',
   defaultAutonomy: 'strict',
+  mcpAllowStdio: false,
 };
 
 /** Where a resolved setting came from, highest precedence first (C0.3). */
@@ -311,4 +324,22 @@ export async function loadUserConfigRaw(): Promise<Partial<WalkcroachConfig> | n
   } catch {
     return null;
   }
+}
+
+/**
+ * Whether stdio MCP servers may be spawned (§6.4 of the stdio security review).
+ *
+ * Reads the **user** config only. Every other setting in this module follows
+ * `flag > env > project > user > default`, and this one deliberately does not:
+ * the project layer is `.walkcroach/config.json`, which ships inside the
+ * repository being opened. A repo that could set this would be authorising the
+ * execution of its own `.walkcroach/mcp.json` — the exact attack the gate exists
+ * to prevent. There is no flag or env override for the same reason.
+ *
+ * Set it with `walkcroach config set mcpAllowStdio true`, which writes to
+ * `~/.walkcroach/config.json`.
+ */
+export async function resolveAllowStdioMcp(): Promise<boolean> {
+  const raw = await loadUserConfigRaw();
+  return raw?.mcpAllowStdio === true;
 }

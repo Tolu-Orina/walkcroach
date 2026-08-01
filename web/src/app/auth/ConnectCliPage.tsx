@@ -25,13 +25,21 @@ export function ConnectCliPage() {
 
   const state = params.get('state')?.trim() ?? '';
   const redirectUri = params.get('redirect_uri')?.trim() ?? '';
+  // PKCE: Web is a conduit only. It forwards the challenge and never sees
+  // the verifier — that is the whole point of the mechanism.
+  const codeChallenge = params.get('code_challenge')?.trim() ?? '';
+  const codeChallengeMethod = params.get('code_challenge_method')?.trim() ?? '';
 
   const nextPath = useMemo(() => {
     const q = new URLSearchParams();
     if (state) q.set('state', state);
     if (redirectUri) q.set('redirect_uri', redirectUri);
+    // Must survive the sign-in round trip, or the retry after authentication
+    // arrives without a challenge and the BFF rejects it.
+    if (codeChallenge) q.set('code_challenge', codeChallenge);
+    if (codeChallengeMethod) q.set('code_challenge_method', codeChallengeMethod);
     return `/connect/cli?${q.toString()}`;
-  }, [state, redirectUri]);
+  }, [state, redirectUri, codeChallenge, codeChallengeMethod]);
 
   useEffect(() => {
     if (status !== 'authenticated') return;
@@ -50,6 +58,14 @@ export function ConnectCliPage() {
       // to a listener that never asked for it.
       if (!isCliRedirectUri(redirectUri)) {
         setError('Invalid redirect URI.');
+        return;
+      }
+      // Fail closed. A client old enough not to send a challenge cannot be
+      // silently downgraded to a non-PKCE exchange.
+      if (!codeChallenge || codeChallengeMethod !== 'S256') {
+        setError(
+          'This CLI build is out of date — it did not send a PKCE challenge. Upgrade with `npm i -g @walkcroach/cli` and run `walkcroach auth login` again.',
+        );
         return;
       }
 
@@ -86,6 +102,8 @@ export function ConnectCliPage() {
             refreshToken: stored.cognito.refreshToken,
             idToken: stored.cognito.idToken,
             expiresAt: stored.cognito.expiresAt,
+            codeChallenge,
+            codeChallengeMethod,
           }),
         });
         const data = (await res.json()) as { code?: string; error?: string };
@@ -108,7 +126,7 @@ export function ConnectCliPage() {
     return () => {
       cancelled = true;
     };
-  }, [status, state, redirectUri]);
+  }, [status, state, redirectUri, codeChallenge, codeChallengeMethod]);
 
   if (status !== 'authenticated') {
     return (

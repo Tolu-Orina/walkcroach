@@ -4,6 +4,7 @@ import {
   upgradeAuth,
   WEB_APP_URL,
 } from './api';
+import { generatePkce, PKCE_METHOD } from './pkce';
 
 const DEVICE_KEY = 'wc_device_key';
 const ACCESS_TOKEN = 'wc_access_token';
@@ -29,6 +30,12 @@ export type OauthPending = {
   state: string;
   redirectUri: string;
   createdAt: number;
+  /**
+   * PKCE verifier. Lives in `chrome.storage.session` (cleared when the browser
+   * closes), never `storage.local`, and never travels to Web — only its S256
+   * challenge does.
+   */
+  codeVerifier: string;
 };
 
 /** Outcome of starting sign-in — see `startWebSignIn`. */
@@ -234,10 +241,13 @@ export function buildConnectUrl(
   webAppUrl: string,
   state: string,
   redirectUri: string,
+  codeChallenge: string,
 ): string {
   const authUrl = new URL('/connect/chrome', webAppUrl.replace(/\/$/, ''));
   authUrl.searchParams.set('state', state);
   authUrl.searchParams.set('redirect_uri', redirectUri);
+  authUrl.searchParams.set('code_challenge', codeChallenge);
+  authUrl.searchParams.set('code_challenge_method', PKCE_METHOD);
   return authUrl.toString();
 }
 
@@ -276,6 +286,9 @@ export async function startWebSignIn(
     throw new Error('WalkCroach Web URL is not configured.');
   }
   const state = generateOAuthState();
+  // Generated once for both branches. WebCrypto's digest is async, which is the
+  // only reason this differs in shape from the IDE and CLI implementations.
+  const { verifier, challenge } = await generatePkce();
 
   if (supportsLaunchWebAuthFlow()) {
     const redirectUri = identityRedirectUri();
@@ -283,13 +296,14 @@ export async function startWebSignIn(
       state,
       redirectUri,
       createdAt: Date.now(),
+      codeVerifier: verifier,
     };
     await chrome.storage.session.set({ [OAUTH_PENDING]: pending });
 
     let callbackUrl: string | undefined;
     try {
       callbackUrl = await chrome.identity.launchWebAuthFlow({
-        url: buildConnectUrl(webAppUrl, state, redirectUri),
+        url: buildConnectUrl(webAppUrl, state, redirectUri, challenge),
         interactive: true,
       });
     } catch (err) {
@@ -316,9 +330,10 @@ export async function startWebSignIn(
     state,
     redirectUri,
     createdAt: Date.now(),
+    codeVerifier: verifier,
   };
   await chrome.storage.session.set({ [OAUTH_PENDING]: pending });
-  const url = buildConnectUrl(webAppUrl, state, redirectUri);
+  const url = buildConnectUrl(webAppUrl, state, redirectUri, challenge);
   await chrome.tabs.create({ url });
   return { kind: 'delegated', url };
 }
@@ -348,6 +363,7 @@ export async function completeWebSignIn(
     code,
     state,
     redirectUri: pending.redirectUri,
+    codeVerifier: pending.codeVerifier,
   });
 
   const existing = await loadSession();

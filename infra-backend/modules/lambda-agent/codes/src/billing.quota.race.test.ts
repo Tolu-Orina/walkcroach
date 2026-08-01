@@ -86,8 +86,7 @@ function serializingDebitDb(monthly = 500) {
     period_start: new Date(),
   });
 
-  const db = {
-    query: vi.fn(async (sql: string, params?: unknown[]) =>
+  const query = vi.fn(async (sql: string, params?: unknown[]) =>
       runExclusive(async () => {
         await new Promise((r) => setTimeout(r, 1));
         if (/INSERT INTO credit_balances/.test(sql)) {
@@ -122,6 +121,15 @@ function serializingDebitDb(monthly = 500) {
         }
         return { rows: [] };
       }),
+    );
+
+  const db = {
+    query,
+    // Statements inside a transaction still go through the same serializing
+    // `query`, so the conditional UPDATE remains the atomic gate this test
+    // exercises — withTransaction only groups it with the usage_ledger INSERT.
+    withTransaction: vi.fn(
+      async (fn: (tx: { query: typeof query }) => unknown) => fn({ query }),
     ),
     close: vi.fn(async () => {}),
   } as unknown as DbClient;

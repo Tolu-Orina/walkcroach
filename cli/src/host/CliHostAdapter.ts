@@ -18,6 +18,7 @@ import {
   persistTodos,
   streamShellCommand,
   applyDiffString,
+  StdioMcpSupervisor,
   type AgentEvent,
   type AgentTodo,
   type ApprovalDecision,
@@ -30,7 +31,12 @@ import {
   type AutonomyLevel,
   type BedrockMessage,
 } from '@walkcroach/agent-engine';
-import { deleteSecret, getSecret, setSecret } from '../lib/config.js';
+import {
+  deleteSecret,
+  getSecret,
+  setSecret,
+  resolveAllowStdioMcp,
+} from '../lib/config.js';
 
 export type CliHostOptions = {
   cwd: string;
@@ -173,6 +179,21 @@ export class CliHostAdapter implements HostAdapter {
   isTrustedWorkspace(): boolean {
     return true;
   }
+
+  /**
+   * May `.walkcroach/mcp.json` spawn local processes?
+   *
+   * Note this does NOT reuse `isTrustedWorkspace` above, which returns true
+   * unconditionally because the operator chose the cwd. Choosing to `cd` into a
+   * repository is not the same as agreeing to run a program it names, so the
+   * gate is a separate, explicit, user-level opt-in.
+   */
+  async isStdioMcpAllowed(): Promise<boolean> {
+    return resolveAllowStdioMcp();
+  }
+
+  /** One supervisor per CLI process; disposed on shutdown (§6.6). */
+  readonly stdioMcp = new StdioMcpSupervisor();
 
   secrets: HostSecrets = {
     get: async (key) => getSecret(key),

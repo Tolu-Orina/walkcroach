@@ -135,6 +135,7 @@ export {
   type WebviewToHostType,
   type SubmitAttachment,
   type PersistedChatTurn,
+  type McpServerView,
   parsePersistedChatTurns,
 } from './protocol.js';
 export {
@@ -297,6 +298,36 @@ export {
   plainCcloudError,
   type CcloudRunResult,
 } from './ccloud.js';
+export {
+  StdioMcpClient,
+  StdioMcpSupervisor,
+  registerConfiguredMcpServers,
+  describeConfiguredMcpServers,
+  resolveStdioCommand,
+  buildStdioEnv,
+  isDeniedEnvName,
+  stdioServerFingerprint,
+  STDIO_CONSENT_KEY,
+  readStdioConsents,
+  recordStdioConsent,
+  revokeStdioConsent,
+  type StdioConsentRecord,
+  describeStdioServer,
+  qualifyToolName,
+  isValidMcpServerName,
+  StdioCommandError,
+  TOOL_NAMESPACE_SEP,
+  type McpStdioServerConfig,
+  type StdioSpawnParams,
+} from './mcp-stdio.js';
+export {
+  generatePkce,
+  generateCodeVerifier,
+  codeChallengeS256,
+  verifyChallenge,
+  PKCE_METHOD,
+  type PkcePair,
+} from './pkce.js';
 export {
   SkillsRegistry,
   defaultSkillRoots,

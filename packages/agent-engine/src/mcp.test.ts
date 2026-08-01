@@ -152,9 +152,21 @@ describe('McpServerRegistry', () => {
       .mockResolvedValueOnce({ tools: [{ name: 'list_teams' }] });
 
     await registry.connectAll();
+    // `qualifiedName` is what any surface exposing these to the model must
+    // use — it is what stops a configured server shadowing a first-party tool.
     expect(registry.listAllTools()).toEqual([
-      { server: 'github', name: 'search_issues', description: undefined },
-      { server: 'linear', name: 'list_teams', description: undefined },
+      {
+        server: 'github',
+        name: 'search_issues',
+        qualifiedName: 'github__search_issues',
+        description: undefined,
+      },
+      {
+        server: 'linear',
+        name: 'list_teams',
+        qualifiedName: 'linear__list_teams',
+        description: undefined,
+      },
     ]);
   });
 

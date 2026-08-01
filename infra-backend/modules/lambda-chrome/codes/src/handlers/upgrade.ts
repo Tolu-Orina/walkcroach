@@ -98,32 +98,33 @@ export async function handleUpgradeAuth(
       });
     }
 
-    await db.query('BEGIN');
-    await db.query(
-      `UPDATE workspaces SET owner_id = $1 WHERE owner_id = $2`,
-      [auth.ownerId, anonOwnerId],
-    );
-    await db.query(
-      `UPDATE page_captures SET owner_id = $1 WHERE owner_id = $2`,
-      [auth.ownerId, anonOwnerId],
-    );
-    await db.query(
-      `UPDATE chrome_device_sessions
-       SET owner_id = $1,
-           upgraded_to_cognito_sub = $1,
-           last_seen_at = now()
-       WHERE device_key_hash = $2`,
-      [auth.ownerId, keyHash],
-    );
-    await db.query('COMMIT');
+    // Anonymous → Cognito account merge. This must be one transaction: a partial
+    // apply would migrate the user's workspaces but strand their page_captures
+    // under the dead anon owner_id, permanently orphaning that memory. Previously
+    // these ran as db.query('BEGIN') + separate pool.query calls, which took an
+    // arbitrary connection per statement and so provided no atomicity at all.
+    await db.withTransaction(async (tx) => {
+      await tx.query(
+        `UPDATE workspaces SET owner_id = $1 WHERE owner_id = $2`,
+        [auth.ownerId, anonOwnerId],
+      );
+      await tx.query(
+        `UPDATE page_captures SET owner_id = $1 WHERE owner_id = $2`,
+        [auth.ownerId, anonOwnerId],
+      );
+      await tx.query(
+        `UPDATE chrome_device_sessions
+         SET owner_id = $1,
+             upgraded_to_cognito_sub = $1,
+             last_seen_at = now()
+         WHERE device_key_hash = $2`,
+        [auth.ownerId, keyHash],
+      );
+    });
     metricLog('chrome.auth.cognito_upgrade', { ok: true });
     return jsonResponse(200, { ok: true, merged: true, ownerId: auth.ownerId });
   } catch (err) {
-    try {
-      await db.query('ROLLBACK');
-    } catch {
-      /* ignore */
-    }
+    // withTransaction rolls back on its own connection; no cleanup needed here.
     const message = err instanceof Error ? err.message : 'upgrade failed';
     console.error('upgrade failed', message);
     return jsonResponse(500, { error: 'upgrade failed' });

@@ -413,16 +413,38 @@ describe('redirect URIs (Phase A5 / B1)', () => {
 });
 
 describe('buildConnectUrl', () => {
-  it('targets /connect/chrome with state and redirect_uri', async () => {
+  it('targets /connect/chrome with state, redirect_uri and the PKCE challenge', async () => {
     const { buildConnectUrl } = await import('./auth');
     const url = new URL(
-      buildConnectUrl('https://web.test/', 'st8', 'https://x.chromiumapp.org/auth'),
+      buildConnectUrl(
+        'https://web.test/',
+        'st8',
+        'https://x.chromiumapp.org/auth',
+        'the-challenge',
+      ),
     );
     expect(url.origin + url.pathname).toBe('https://web.test/connect/chrome');
     expect(url.searchParams.get('state')).toBe('st8');
     expect(url.searchParams.get('redirect_uri')).toBe(
       'https://x.chromiumapp.org/auth',
     );
+    expect(url.searchParams.get('code_challenge')).toBe('the-challenge');
+    expect(url.searchParams.get('code_challenge_method')).toBe('S256');
+  });
+
+  it('never puts the verifier in the URL', async () => {
+    const { buildConnectUrl } = await import('./auth');
+    const { generatePkce } = await import('./pkce');
+    const { verifier, challenge } = await generatePkce();
+    const url = buildConnectUrl(
+      'https://web.test/',
+      'st8',
+      'https://x.chromiumapp.org/auth',
+      challenge,
+    );
+    // The entire point: Web sees the challenge, never what redeems it.
+    expect(url).not.toContain(verifier);
+    expect(url).toContain(encodeURIComponent(challenge).replace(/%2D/g, '-'));
   });
 });
 

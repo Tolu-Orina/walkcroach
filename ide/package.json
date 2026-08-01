@@ -172,6 +172,12 @@
           ],
           "default": "",
           "description": "Nova 2 Lite extended-thinking tier for the agent loop. Empty uses the default (medium)."
+        },
+        "walkcroach.ide.mcp.allowStdio": {
+          "type": "boolean",
+          "default": false,
+          "scope": "machine",
+          "markdownDescription": "Allow `.walkcroach/mcp.json` to start MCP servers by **running a program on this machine** (stdio transport).\n\nOff by default. Turning this on means a repository you clone can propose a command to run; WalkCroach still asks for explicit per-server approval, refuses commands inside the workspace, and never passes AWS/GitHub/CockroachDB credentials to them. This setting cannot be changed by a workspace \u2014 only in your user settings."
         }
       }
     }

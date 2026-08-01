@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { createDbClient } from '@walkcroach/db';
+import { verifyPkce, PKCE_METHOD } from '@walkcroach/agent-harness';
 import type { AuthContext } from '../auth.js';
 import { jsonResponse } from '../http.js';
 import { metricLog, parseJsonBody } from '../util.js';
@@ -45,6 +46,8 @@ export async function handleCreateSessionCode(
     refreshToken?: string;
     idToken?: string;
     expiresAt?: number;
+    codeChallenge?: string;
+    codeChallengeMethod?: string;
   }>(rawBody);
   if ('error' in parsed && parsed.error === 'invalid JSON body') {
     return jsonResponse(400, { error: parsed.error });
@@ -55,14 +58,31 @@ export async function handleCreateSessionCode(
     refreshToken?: string;
     idToken?: string;
     expiresAt?: number;
+    codeChallenge?: string;
+    codeChallengeMethod?: string;
   };
   const state = body.state?.trim();
   const redirectUri = body.redirectUri?.trim();
+  const codeChallenge = body.codeChallenge?.trim();
+  const codeChallengeMethod = body.codeChallengeMethod?.trim();
   if (!state || state.length < 8) {
     return jsonResponse(400, { error: 'state is required' });
   }
   if (!redirectUri || !CHROME_REDIRECT_PATTERN.test(redirectUri)) {
     return jsonResponse(400, { error: 'redirectUri is not allowed' });
+  }
+  // PKCE is mandatory, not negotiated. No client has ever shipped without it, so
+  // there is no legacy caller to tolerate — and a code issued without a challenge
+  // could later be exchanged by anyone who intercepted it.
+  if (!codeChallenge) {
+    return jsonResponse(400, { error: 'codeChallenge is required' });
+  }
+  if (codeChallengeMethod !== PKCE_METHOD) {
+    // 'plain' is refused deliberately: under it the challenge IS the verifier, so
+    // it proves nothing to anyone who saw the authorize URL.
+    return jsonResponse(400, {
+      error: `codeChallengeMethod must be ${PKCE_METHOD}`,
+    });
   }
   if (sessionBearer.startsWith('dev:')) {
     return jsonResponse(400, {
@@ -89,8 +109,9 @@ export async function handleCreateSessionCode(
       `INSERT INTO chrome_auth_codes (
          code, state, redirect_uri, owner_id,
          access_token, refresh_token, id_token,
-         token_expires_at, code_expires_at
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+         token_expires_at, code_expires_at,
+         code_challenge, code_challenge_method
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
       [
         code,
         stateFingerprint(state),
@@ -101,6 +122,8 @@ export async function handleCreateSessionCode(
         body.idToken?.trim() || sessionBearer,
         tokenExpiresAt.toISOString(),
         codeExpiresAt.toISOString(),
+        codeChallenge,
+        codeChallengeMethod,
       ],
     );
     metricLog('chrome.oauth.session_code', { ok: true });
@@ -124,6 +147,7 @@ export async function handleExchangeToken(
     code?: string;
     state?: string;
     redirectUri?: string;
+    codeVerifier?: string;
   }>(rawBody);
   if ('error' in parsed && parsed.error === 'invalid JSON body') {
     return jsonResponse(400, { error: parsed.error });
@@ -132,10 +156,12 @@ export async function handleExchangeToken(
     code?: string;
     state?: string;
     redirectUri?: string;
+    codeVerifier?: string;
   };
   const code = body.code?.trim();
   const state = body.state?.trim();
   const redirectUri = body.redirectUri?.trim();
+  const codeVerifier = body.codeVerifier?.trim();
   if (!code || !state || !redirectUri) {
     return jsonResponse(400, {
       error: 'code, state, and redirectUri are required',
@@ -156,6 +182,8 @@ export async function handleExchangeToken(
       refresh_token: string | null;
       id_token: string | null;
       token_expires_at: string;
+      code_challenge: string | null;
+      code_challenge_method: string | null;
     }>(
       `UPDATE chrome_auth_codes
        SET consumed_at = now()
@@ -164,11 +192,23 @@ export async function handleExchangeToken(
          AND code_expires_at > now()
          AND state = $2
          AND redirect_uri = $3
-       RETURNING code, access_token, refresh_token, id_token, token_expires_at`,
+       RETURNING code, access_token, refresh_token, id_token, token_expires_at,
+                 code_challenge, code_challenge_method`,
       [code, stateFp, redirectUri],
     );
     const row = rows[0];
     if (!row) {
+      return jsonResponse(400, { error: 'invalid_grant' });
+    }
+
+    // PKCE is checked AFTER the atomic consume, deliberately. The code is now
+    // spent either way, so a wrong verifier cannot be retried against it — which
+    // is what stops an intercepted code from being brute-forced. RFC 6749 §4.1.2
+    // asks for exactly this: a failed exchange invalidates the code.
+    if (!verifyPkce(codeVerifier, row.code_challenge, row.code_challenge_method)) {
+      metricLog('chrome.oauth.token', { ok: false, reason: 'pkce' });
+      // Same undifferentiated error as every other failure — telling the caller
+      // which check failed would be a free oracle.
       return jsonResponse(400, { error: 'invalid_grant' });
     }
 

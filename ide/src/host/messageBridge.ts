@@ -2,6 +2,7 @@ import type {
   AgentEvent,
   AgentTodo,
   HostToWebviewMessage,
+  McpServerView,
   PersistedChatTurn,
 } from '@walkcroach/agent-engine';
 import {
@@ -136,6 +137,8 @@ export class MessageBridge {
       { type: 'APPROVAL_REQUEST' }
     > | null;
     mcpConfigured?: boolean;
+    mcpServers?: McpServerView[];
+    mcpStdioAllowed?: boolean;
     bedrockConfigured?: boolean;
     bedrockModelId?: string;
     bedrockRegion?: string;
@@ -158,6 +161,8 @@ export class MessageBridge {
       autonomy: params.autonomy,
       pendingApproval: params.pendingApproval,
       mcpConfigured: params.mcpConfigured,
+      mcpServers: params.mcpServers,
+      mcpStdioAllowed: params.mcpStdioAllowed,
       bedrockConfigured: params.bedrockConfigured,
       bedrockModelId: params.bedrockModelId,
       bedrockRegion: params.bedrockRegion,

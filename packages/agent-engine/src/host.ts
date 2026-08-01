@@ -247,6 +247,26 @@ export interface HostAdapter {
   getWorkspaceRoot(): string | undefined;
   /** NFR-D07 — agentic tools must refuse untrusted workspaces. */
   isTrustedWorkspace(): boolean;
+  /**
+   * May `.walkcroach/mcp.json` spawn local processes (stdio MCP)? Default false.
+   *
+   * Deliberately asked of the *host* rather than read from the workspace: the
+   * file being gated lives in the workspace, so a workspace-readable setting
+   * could enable its own execution path. The IDE answers from VS Code user
+   * settings (`scope: machine`, which VS Code refuses to let a workspace
+   * override) and the CLI from `~/.walkcroach/config.json` only — never the
+   * project-level `.walkcroach/config.json`, which normally wins on precedence.
+   *
+   * A host that does not implement this cannot spawn anything, which is the
+   * correct default for any future host.
+   */
+  isStdioMcpAllowed?(): boolean | Promise<boolean>;
+  /**
+   * Owner of every spawned stdio MCP process (§6.6). Created once per window /
+   * CLI process by the host and disposed with it, NOT per agent run — otherwise
+   * every turn would respawn every server, and nothing would own the kill.
+   */
+  stdioMcp?: import('./mcp-stdio.js').StdioMcpSupervisor;
   secrets: HostSecrets;
   emit(event: AgentEvent): void;
 }

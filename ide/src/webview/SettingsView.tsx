@@ -1,6 +1,16 @@
 import { useState, useCallback, useEffect } from 'react';
 import { getVsCodeApi } from './vscodeApi';
 
+export type McpServerRow = {
+  name: string;
+  transport: 'http' | 'stdio';
+  detail: string;
+  pid?: number | null;
+  running: boolean;
+  approved?: boolean;
+  blockedReason?: string;
+};
+
 type Props = {
   bedrockConfigured: boolean;
   bedrockModelId: string;
@@ -8,6 +18,8 @@ type Props = {
   reasoningEffort: string;
   mcpConfigured: boolean;
   ccloudConfigured: boolean;
+  mcpServers: McpServerRow[];
+  mcpStdioAllowed: boolean;
   onBack: () => void;
 };
 
@@ -42,6 +54,8 @@ export function SettingsView({
   reasoningEffort,
   mcpConfigured,
   ccloudConfigured,
+  mcpServers,
+  mcpStdioAllowed,
   onBack,
 }: Props) {
   const [bedrockKey, setBedrockKey] = useState('');
@@ -409,6 +423,83 @@ export function SettingsView({
             </button>
           ) : null}
         </div>
+      </section>
+
+      <section className="card">
+        <h2 className="card-title">MCP servers</h2>
+        <p className="hint">
+          From <code>.walkcroach/mcp.json</code> in this workspace. Servers that
+          run a local program are off unless{' '}
+          <code>walkcroach.ide.mcp.allowStdio</code> is enabled in your{' '}
+          <strong>user</strong> settings — a workspace cannot turn it on for you.
+        </p>
+        {mcpServers.length === 0 ? (
+          <p className="hint">No MCP servers are configured in this workspace.</p>
+        ) : (
+          <ul className="mcp-list">
+            {mcpServers.map((s) => (
+              <li key={s.name} className="mcp-row">
+                <div className="mcp-row-head">
+                  <span className="mcp-name">{s.name}</span>
+                  <span className="pill">{s.transport}</span>
+                  {s.running ? <span className="pill on">running</span> : null}
+                  {s.transport === 'stdio' && s.approved ? (
+                    <span className="pill on">approved</span>
+                  ) : null}
+                </div>
+                {/* The resolved absolute command, not what mcp.json wrote — the
+                    difference is the whole point of showing it. */}
+                <code className="mcp-detail">{s.detail}</code>
+                {s.pid ? <span className="hint">pid {s.pid}</span> : null}
+                {s.blockedReason ? (
+                  <p className="hint">{s.blockedReason}</p>
+                ) : null}
+                {s.transport === 'stdio' ? (
+                  <div className="row">
+                    {s.running ? (
+                      <button
+                        type="button"
+                        className="btn ghost"
+                        onClick={() =>
+                          getVsCodeApi().postMessage({
+                            type: 'STOP_MCP_SERVER',
+                            name: s.name,
+                          })
+                        }
+                      >
+                        Stop
+                      </button>
+                    ) : null}
+                    {s.approved ? (
+                      <button
+                        type="button"
+                        className="btn ghost"
+                        title="You will be asked again on the next run"
+                        onClick={() =>
+                          getVsCodeApi().postMessage({
+                            type: 'REVOKE_MCP_CONSENT',
+                            name: s.name,
+                          })
+                        }
+                      >
+                        Revoke approval
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        )}
+        {mcpStdioAllowed && mcpServers.some((s) => s.approved) ? (
+          <button
+            type="button"
+            className="btn ghost"
+            onClick={() => getVsCodeApi().postMessage({ type: 'REVOKE_MCP_CONSENT' })}
+          >
+            Revoke all approvals
+          </button>
+        ) : null}
       </section>
 
       <button type="button" className="btn primary wide" onClick={onBack}>

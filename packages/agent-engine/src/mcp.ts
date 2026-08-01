@@ -4,6 +4,11 @@
  */
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import {
+  isValidMcpServerName,
+  qualifyToolName,
+  TOOL_NAMESPACE_SEP,
+} from './mcp-stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
 export const DEFAULT_MCP_URL = 'https://cockroachlabs.cloud/mcp';
@@ -310,16 +315,47 @@ export const RESERVED_COCKROACHDB_SERVER_NAME = 'cockroachdb';
 
 /**
  * Registry of additionally configured MCP servers (`.walkcroach/mcp.json`), separate
- * from the always-on `cockroach_mcp` tool / CockroachMcpClient. HTTP/Streamable-only
- * for v1 — stdio-spawned local servers are deferred (spawning arbitrary configured
- * processes from a committed JSON file is a real security surface deserving its own
- * review, not a rider on this change).
+ * from the always-on `cockroach_mcp` tool / CockroachMcpClient.
+ *
+ * Holds both transports: HTTP/Streamable servers (`GenericMcpClient`) and
+ * locally-spawned stdio servers (`StdioMcpClient`), which are gated by
+ * `HostAdapter.isStdioMcpAllowed` and per-server consent — see `mcp-stdio.ts`
+ * and `docs/walkcroach-stdio-mcp-security-review.md`.
+ *
+ * Every tool is addressed by (server, tool), and `listAllTools` reports the
+ * qualified `server__tool` name, so no configured server can shadow a
+ * first-party tool. That generalises the older `RESERVED_COCKROACHDB_SERVER_NAME`
+ * protection past its single hard-coded case (T4).
  */
 export class McpServerRegistry {
-  private clients = new Map<string, GenericMcpClient>();
+  private clients = new Map<string, McpClientLike>();
 
+  /**
+   * @throws if the name is unusable — reserved, or containing the `__`
+   * namespace separator, which would make a qualified tool name ambiguous.
+   */
   register(name: string, config: McpServerConfig): void {
+    this.assertRegistrableName(name);
     this.clients.set(name, new GenericMcpClient(config, name));
+  }
+
+  /** Adopt an already-constructed client (used for supervised stdio servers). */
+  adopt(name: string, client: McpClientLike): void {
+    this.assertRegistrableName(name);
+    this.clients.set(name, client);
+  }
+
+  private assertRegistrableName(name: string): void {
+    if (name === RESERVED_COCKROACHDB_SERVER_NAME) {
+      throw new Error(
+        `"${name}" is reserved for the built-in CockroachDB MCP client.`,
+      );
+    }
+    if (!isValidMcpServerName(name)) {
+      throw new Error(
+        `Invalid MCP server name "${name}": use letters, digits, dot, dash or underscore, and no "${TOOL_NAMESPACE_SEP}".`,
+      );
+    }
   }
 
   serverNames(): string[] {
@@ -343,11 +379,34 @@ export class McpServerRegistry {
     return errors;
   }
 
-  listAllTools(): Array<{ server: string; name: string; description?: string }> {
-    const out: Array<{ server: string; name: string; description?: string }> = [];
+  /**
+   * Every tool from every configured server.
+   *
+   * `qualifiedName` (`server__tool`) is what any caller surfacing these to the
+   * model must use. `name` is the raw name the server reported and is only for
+   * addressing `callTool`; using it in a prompt would reintroduce the shadowing
+   * this scheme exists to prevent.
+   */
+  listAllTools(): Array<{
+    server: string;
+    name: string;
+    qualifiedName: string;
+    description?: string;
+  }> {
+    const out: Array<{
+      server: string;
+      name: string;
+      qualifiedName: string;
+      description?: string;
+    }> = [];
     for (const [server, client] of this.clients) {
       for (const t of client.listTools()) {
-        out.push({ server, name: t.name, description: t.description });
+        out.push({
+          server,
+          name: t.name,
+          qualifiedName: qualifyToolName(server, t.name),
+          description: t.description,
+        });
       }
     }
     return out;

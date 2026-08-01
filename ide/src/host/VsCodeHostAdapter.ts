@@ -28,6 +28,7 @@ import {
   streamShellCommand,
   applyDiffString,
 } from '@walkcroach/agent-engine';
+import { StdioMcpSupervisor } from '@walkcroach/agent-engine';
 import type { BedrockMessage } from '@walkcroach/agent-engine';
 import { WalkCroachShellView } from './shell-view.js';
 
@@ -159,6 +160,29 @@ export class VsCodeHostAdapter implements HostAdapter {
   isTrustedWorkspace(): boolean {
     return vscode.workspace.isTrusted;
   }
+
+  /**
+   * May `.walkcroach/mcp.json` spawn local processes?
+   *
+   * Two independent gates, both required:
+   *  1. `walkcroach.ide.mcp.allowStdio` is contributed with `"scope": "machine"`,
+   *     which VS Code refuses to let `.vscode/settings.json` override. A
+   *     workspace-settable flag here would be worthless — the file it authorises
+   *     lives in the same repository.
+   *  2. Workspace Trust. An untrusted folder cannot spawn anything regardless,
+   *     matching how the rest of the agent loop already behaves (NFR-D07).
+   */
+  isStdioMcpAllowed(): boolean {
+    if (!vscode.workspace.isTrusted) return false;
+    return (
+      vscode.workspace
+        .getConfiguration('walkcroach.ide')
+        .get<boolean>('mcp.allowStdio') === true
+    );
+  }
+
+  /** One supervisor per window; disposed in `deactivate` (§6.6). */
+  readonly stdioMcp = new StdioMcpSupervisor();
 
   secrets: HostSecrets = {
     get: async (key) => this.secretStore?.get(key),

@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { SECRET_KEYS } from '@walkcroach/agent-engine';
-import { generateOAuthState, refreshWithSpaClient } from './pkce.js';
+import { generateOAuthState, refreshWithSpaClient, generatePkce, PKCE_METHOD } from './pkce.js';
 import { getIdeApiBaseUrl } from './session-config.js';
 
 export type AuthSession = {
@@ -11,6 +11,8 @@ export type AuthSession = {
 type PendingConnect = {
   state: string;
   redirectUri: string;
+  /** PKCE verifier. Redeems the code; never leaves the extension host. */
+  codeVerifier: string;
   resolve: (ok: boolean) => void;
   reject: (err: Error) => void;
 };
@@ -150,17 +152,24 @@ export class AuthService {
 
     const state = generateOAuthState();
     const redirectUri = ideRedirectUri();
+    // The verifier goes to SecretStorage rather than only memory: the callback
+    // arrives on a `vscode://` deep link, which can reactivate the extension
+    // host after it was disposed, and a verifier lost to a restart would strand
+    // the user mid-sign-in with a code they can no longer redeem.
+    const { verifier: codeVerifier, challenge } = generatePkce();
     await this.secrets.store(
       SECRET_KEYS.pendingPkce,
-      JSON.stringify({ state, redirectUri }),
+      JSON.stringify({ state, redirectUri, codeVerifier }),
     );
 
     const authUrl = new URL('/connect/ide', cfg.webAppUrl.replace(/\/$/, ''));
     authUrl.searchParams.set('state', state);
     authUrl.searchParams.set('redirect_uri', redirectUri);
+    authUrl.searchParams.set('code_challenge', challenge);
+    authUrl.searchParams.set('code_challenge_method', PKCE_METHOD);
 
     const result = await new Promise<boolean>((resolve, reject) => {
-      this.pending = { state, redirectUri, resolve, reject };
+      this.pending = { state, redirectUri, codeVerifier, resolve, reject };
       void vscode.env.openExternal(vscode.Uri.parse(authUrl.toString()));
       setTimeout(() => {
         if (this.pending?.state === state) {
@@ -190,10 +199,12 @@ export class AuthService {
           const stored = JSON.parse(raw) as {
             state: string;
             redirectUri?: string;
+            codeVerifier?: string;
           };
           pending = {
             state: stored.state,
             redirectUri: stored.redirectUri || ideRedirectUri(),
+            codeVerifier: stored.codeVerifier ?? '',
             resolve: () => undefined,
             reject: () => undefined,
           };
@@ -236,6 +247,7 @@ export class AuthService {
         code,
         state,
         redirectUri: pending.redirectUri || ideRedirectUri(),
+        codeVerifier: pending.codeVerifier,
       });
       await this.storeAccessToken(tokens.id_token ?? tokens.access_token, {
         refreshToken: tokens.refresh_token,
@@ -290,6 +302,8 @@ async function exchangeAuthCode(params: {
   code: string;
   state: string;
   redirectUri: string;
+  /** PKCE verifier. Without it the BFF answers invalid_grant. */
+  codeVerifier: string;
 }): Promise<{
   access_token: string;
   refresh_token?: string;

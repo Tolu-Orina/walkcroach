@@ -17,12 +17,19 @@ const queue: QueryResult[] = [];
 const queries: Array<{ sql: string; params: unknown[] }> = [];
 const closed = { count: 0 };
 
+const fakeQuery = async (sql: string, params: unknown[] = []) => {
+  queries.push({ sql, params });
+  return queue.shift() ?? { rows: [] };
+};
+
 vi.mock('@walkcroach/db', () => ({
   createDbClient: () => ({
-    query: async (sql: string, params: unknown[] = []) => {
-      queries.push({ sql, params });
-      return queue.shift() ?? { rows: [] };
-    },
+    query: fakeQuery,
+    // Mirrors the real client: statements run on one dedicated connection and
+    // land in the same `queries` log, so assertions are unaffected by whether a
+    // handler uses db.query or db.withTransaction.
+    withTransaction: async (fn: (tx: { query: typeof fakeQuery }) => unknown) =>
+      fn({ query: fakeQuery }),
     close: async () => {
       closed.count++;
     },

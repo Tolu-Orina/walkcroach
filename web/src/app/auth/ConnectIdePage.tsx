@@ -27,13 +27,22 @@ export function ConnectIdePage() {
 
   const state = params.get('state')?.trim() ?? '';
   const redirectUri = params.get('redirect_uri')?.trim() ?? DEFAULT_REDIRECT;
+  // PKCE: Web is a conduit only. It forwards the challenge and never sees the
+  // verifier — that is the whole point, since this page runs in a browser the
+  // user could have any number of other things installed in.
+  const codeChallenge = params.get('code_challenge')?.trim() ?? '';
+  const codeChallengeMethod = params.get('code_challenge_method')?.trim() ?? '';
 
   const nextPath = useMemo(() => {
     const q = new URLSearchParams();
     if (state) q.set('state', state);
     q.set('redirect_uri', redirectUri);
+    // Must survive the sign-in round trip, or the retry after authentication
+    // arrives without a challenge and the BFF rejects it.
+    if (codeChallenge) q.set('code_challenge', codeChallenge);
+    if (codeChallengeMethod) q.set('code_challenge_method', codeChallengeMethod);
     return `/connect/ide?${q.toString()}`;
-  }, [state, redirectUri]);
+  }, [state, redirectUri, codeChallenge, codeChallengeMethod]);
 
   useEffect(() => {
     if (status !== 'authenticated') return;
@@ -49,6 +58,15 @@ export function ConnectIdePage() {
       }
       if (!REDIRECT_PATTERN.test(redirectUri)) {
         setError('Invalid redirect URI.');
+        return;
+      }
+      // Fail closed. An IDE build old enough not to send a challenge cannot be
+      // silently downgraded to a non-PKCE exchange — the BFF would reject it
+      // anyway, and this produces the actionable message instead of a 400.
+      if (!codeChallenge || codeChallengeMethod !== 'S256') {
+        setError(
+          'This IDE build is out of date — it did not send a PKCE challenge. Update the WalkCroach extension and sign in again.',
+        );
         return;
       }
 
@@ -85,6 +103,8 @@ export function ConnectIdePage() {
             refreshToken: stored.cognito.refreshToken,
             idToken: stored.cognito.idToken,
             expiresAt: stored.cognito.expiresAt,
+            codeChallenge,
+            codeChallengeMethod,
           }),
         });
         const data = (await res.json()) as {
@@ -110,7 +130,7 @@ export function ConnectIdePage() {
     return () => {
       cancelled = true;
     };
-  }, [status, state, redirectUri]);
+  }, [status, state, redirectUri, codeChallenge, codeChallengeMethod]);
 
   if (status !== 'authenticated') {
     return (

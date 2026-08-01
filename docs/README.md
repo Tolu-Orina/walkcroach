@@ -7,6 +7,7 @@
 | Doc | Use when |
 |-----|----------|
 | [walkcroach-master-doc.md](./walkcroach-master-doc.md) | Ecosystem status, architecture facts, gaps |
+| [hackathon-submission.md](./hackathon-submission.md) | **Draft submission write-up** — tools/AWS mapping, memory-design narrative, video plan, open gates |
 | [runtime-secrets-and-ssm.md](./runtime-secrets-and-ssm.md) | Secrets Manager / SSM catalogue |
 | [smoke-and-redirects.md](./smoke-and-redirects.md) | Weekend / prod smoke checklist |
 | [web-claims-audit.md](./web-claims-audit.md) | Marketing/UI claims vs shipped behaviour |

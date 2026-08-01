@@ -695,6 +695,8 @@ export async function exchangeOauthToken(body: {
   code: string;
   state: string;
   redirectUri: string;
+  /** PKCE verifier. Without it the BFF answers invalid_grant. */
+  codeVerifier: string;
 }): Promise<OauthTokenResponse> {
   const res = await fetch(chromePath('/oauth/token'), {
     method: 'POST',

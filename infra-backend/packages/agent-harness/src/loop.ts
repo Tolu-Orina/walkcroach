@@ -2231,8 +2231,14 @@ async function* runAgentLoop(params: {
 /**
  * Resolve effective loop mode.
  * Chat/project_chat sessions cannot escalate to builder tools via client body.
+ *
+ * Exported for direct testing: this is a pure function guarding a privilege
+ * boundary (a chat session must never reach write_file/run_terminal because the
+ * client asked for `mode: 'build'`), and its stored×requested matrix is far
+ * clearer asserted head-on than inferred from which tools a mocked turn was
+ * handed. See loop.test.ts "resolveEffectiveMode".
  */
-function resolveEffectiveMode(
+export function resolveEffectiveMode(
   sessionMode: string | null | undefined,
   modelConfigMode: unknown,
   requested: LoopMode | undefined,

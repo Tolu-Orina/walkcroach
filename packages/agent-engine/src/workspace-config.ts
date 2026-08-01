@@ -446,10 +446,27 @@ export async function loadRuleBody(
 }
 
 /** One entry from `.walkcroach/mcp.json`'s `mcpServers` map. */
-export type McpServerFileConfig = {
+export type McpHttpServerFileConfig = {
+  transport: 'http';
   url: string;
   headers?: Record<string, string>;
 };
+
+/**
+ * A server that must be spawned locally. Recognised here but only ever started
+ * when the *host* allows it — see `HostAdapter.isStdioMcpAllowed`.
+ */
+export type McpStdioServerFileConfig = {
+  transport: 'stdio';
+  command: string;
+  args: string[];
+  /** Names of environment variables the user allow-listed for this server. */
+  env: string[];
+};
+
+export type McpServerFileConfig =
+  | McpHttpServerFileConfig
+  | McpStdioServerFileConfig;
 
 /** Interpolates `${env:VAR_NAME}` in header values so secrets stay out of the committed file. */
 function interpolateEnvVars(value: string): string {
@@ -475,19 +492,42 @@ export function parseMcpServersJson(
   for (const [name, value] of Object.entries(servers as Record<string, unknown>)) {
     if (!value || typeof value !== 'object') continue;
     const v = value as Record<string, unknown>;
-    if (typeof v.url !== 'string' || !v.url.trim()) continue;
 
-    const headers: Record<string, string> = {};
-    if (v.headers && typeof v.headers === 'object') {
-      for (const [hk, hv] of Object.entries(v.headers as Record<string, unknown>)) {
-        if (typeof hv === 'string') headers[hk] = interpolateEnvVars(hv);
+    if (typeof v.url === 'string' && v.url.trim()) {
+      const headers: Record<string, string> = {};
+      if (v.headers && typeof v.headers === 'object') {
+        for (const [hk, hv] of Object.entries(v.headers as Record<string, unknown>)) {
+          if (typeof hv === 'string') headers[hk] = interpolateEnvVars(hv);
+        }
       }
+      out[name] = {
+        transport: 'http',
+        url: v.url.trim(),
+        ...(Object.keys(headers).length ? { headers } : {}),
+      };
+      continue;
     }
 
-    out[name] = {
-      url: v.url.trim(),
-      ...(Object.keys(headers).length ? { headers } : {}),
-    };
+    // A stdio entry is *recognised* here rather than silently dropped, so the
+    // caller can warn about an ignored server instead of leaving the user to
+    // wonder why nothing happened. Recognising it is not permission to run it:
+    // only the host's allowStdio answer decides that.
+    //
+    // Env values are NOT interpolated the way HTTP headers are — this is a list
+    // of variable *names* to pass through, and expanding `${env:...}` here would
+    // turn a name into a secret's value inside a committed file.
+    if (typeof v.command === 'string' && v.command.trim()) {
+      out[name] = {
+        transport: 'stdio',
+        command: v.command.trim(),
+        args: Array.isArray(v.args)
+          ? v.args.filter((a): a is string => typeof a === 'string')
+          : [],
+        env: Array.isArray(v.env)
+          ? v.env.filter((e): e is string => typeof e === 'string')
+          : [],
+      };
+    }
   }
 
   return out;

@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 
 /** CSRF / handoff state for Web → IDE auth (no Hosted UI). */
 export function generateOAuthState(): string {
@@ -66,12 +66,19 @@ export async function refreshWithSpaClient(params: {
   };
 }
 
-/** @deprecated Hosted UI PKCE removed — kept only for test migration clarity. */
-export function generateCodeVerifier(): string {
-  return base64Url(randomBytes(32));
-}
-
-/** @deprecated */
-export function codeChallengeS256(verifier: string): string {
-  return base64Url(createHash('sha256').update(verifier, 'utf8').digest());
-}
+/**
+ * Real PKCE now lives in the engine (`@walkcroach/agent-engine`), shared with the
+ * CLI so both surfaces derive challenges identically.
+ *
+ * These names previously existed here as `@deprecated` leftovers of a removed
+ * Hosted-UI flow — wired to nothing, tested only by their own test, and enough to
+ * make this file look like it implemented PKCE when it did not. Re-exported rather
+ * than reimplemented so that reading `auth/pkce.ts` and finding PKCE is true again.
+ */
+export {
+  generateCodeVerifier,
+  codeChallengeS256,
+  generatePkce,
+  PKCE_METHOD,
+  type PkcePair,
+} from '@walkcroach/agent-engine';

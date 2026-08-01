@@ -40,6 +40,11 @@ describe('protocol allowlist', () => {
       // Wired end to end: App.tsx posts it, webviewProvider.ts handles it,
       // protocol.ts parses it. The allowlist had it; this list had not caught up.
       'SYNC_UI_TURNS',
+      // Setup-view controls for locally-spawned MCP servers (stdio review §6.6
+      // stop, §6.1 revoke). Both are user-initiated only — the agent has no way
+      // to send them.
+      'STOP_MCP_SERVER',
+      'REVOKE_MCP_CONSENT',
     ]);
   });
 
@@ -487,5 +492,42 @@ describe('engine purity', () => {
       }
     }
     expect(offenders).toEqual([]);
+  });
+});
+
+describe('MCP control messages (stdio review §6.1 / §6.6)', () => {
+  it('parses a stop request', () => {
+    expect(
+      parseWebviewToHostMessage({ type: 'STOP_MCP_SERVER', name: 'files' }),
+    ).toEqual({ type: 'STOP_MCP_SERVER', name: 'files' });
+  });
+
+  it('rejects a stop request with no server name', () => {
+    expect(parseWebviewToHostMessage({ type: 'STOP_MCP_SERVER' })).toBeNull();
+    expect(
+      parseWebviewToHostMessage({ type: 'STOP_MCP_SERVER', name: '' }),
+    ).toBeNull();
+    expect(
+      parseWebviewToHostMessage({ type: 'STOP_MCP_SERVER', name: 42 }),
+    ).toBeNull();
+  });
+
+  it('parses a revoke for one server', () => {
+    expect(
+      parseWebviewToHostMessage({ type: 'REVOKE_MCP_CONSENT', name: 'files' }),
+    ).toEqual({ type: 'REVOKE_MCP_CONSENT', name: 'files' });
+  });
+
+  it('treats a revoke with no name as "revoke all", which is intended', () => {
+    expect(parseWebviewToHostMessage({ type: 'REVOKE_MCP_CONSENT' })).toEqual({
+      type: 'REVOKE_MCP_CONSENT',
+      name: undefined,
+    });
+  });
+
+  it('rejects a revoke with a non-string name rather than coercing it', () => {
+    expect(
+      parseWebviewToHostMessage({ type: 'REVOKE_MCP_CONSENT', name: 7 }),
+    ).toBeNull();
   });
 });

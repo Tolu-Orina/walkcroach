@@ -5,7 +5,10 @@ import * as vscode from 'vscode';
 import {
   runAgentLoop,
   loadMcpConfigFromSecrets,
+  loadMcpServersConfig,
   loadWorkspaceAgentConfig,
+  describeConfiguredMcpServers,
+  revokeStdioConsent,
   newSessionId,
   SECRET_KEYS,
   parseMcpConfigSnippet,
@@ -18,6 +21,7 @@ import {
   withInferenceCredentials,
   type AgentTodo,
   type BedrockMessage,
+  type McpServerView,
   type PersistedChatTurn,
   type SubmitAttachment,
 } from '@walkcroach/agent-engine';
@@ -75,6 +79,9 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
   private pendingApproval: PendingApproval | null = null;
   private telemetry: Record<string, number> = {};
   private mcpConfigured = false;
+  /** Configured MCP servers + live state, refreshed rather than computed inline
+   *  because describing them touches the filesystem and SecretStorage. */
+  private mcpServers: McpServerView[] = [];
   private bedrockConfigured = false;
   private ccloudConfigured = false;
   private signedIn = false;
@@ -891,6 +898,28 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  /**
+   * Recompute the MCP server list shown in Setup.
+   *
+   * Reads config + consent + live supervisor state through the same engine
+   * helper the CLI's `mcp list` uses, so the two surfaces cannot disagree about
+   * what is approved.
+   */
+  private async refreshMcpServers(): Promise<void> {
+    try {
+      this.mcpServers = await describeConfiguredMcpServers({
+        fileServers: await loadMcpServersConfig(this.host.getWorkspaceRoot()),
+        secrets: this.host.secrets,
+        allowStdio: this.host.isStdioMcpAllowed(),
+        workspaceRoot: this.host.getWorkspaceRoot(),
+        supervisor: this.host.stdioMcp,
+      });
+    } catch {
+      // Setup must still render if the config is unreadable.
+      this.mcpServers = [];
+    }
+  }
+
   private snapshot(): void {
     this.bridge?.postSnapshot({
       trusted: this.host.isTrustedWorkspace(),
@@ -899,6 +928,8 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
       autonomy: this.host.getAutonomy(),
       pendingApproval: this.pendingApproval,
       mcpConfigured: this.mcpConfigured,
+      mcpServers: this.mcpServers,
+      mcpStdioAllowed: this.host.isStdioMcpAllowed(),
       bedrockConfigured: this.bedrockConfigured,
       bedrockModelId: this.getBedrockModelIdOverride(),
       bedrockRegion: this.getBedrockRegionOverride() || 'eu-west-2',
@@ -929,6 +960,7 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
         this.latency.stop('panelLoad');
         await this.refreshCredentialStatus();
         await this.refreshAuthAndLink();
+        await this.refreshMcpServers();
         if (this.host.loadTodos) {
           const loaded = await this.host.loadTodos();
           if (loaded?.length) {
@@ -1114,6 +1146,30 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
       case 'SIGN_IN':
         await this.signInWithWeb();
         return;
+      case 'STOP_MCP_SERVER': {
+        const stopped = await this.host.stdioMcp.stop(msg.name);
+        this.bridge?.postWarning(
+          stopped
+            ? `Stopped MCP server "${msg.name}".`
+            : `MCP server "${msg.name}" was not running.`,
+        );
+        await this.refreshMcpServers();
+        this.snapshot();
+        return;
+      }
+      case 'REVOKE_MCP_CONSENT': {
+        const revoked = await revokeStdioConsent(this.host.secrets, msg.name);
+        // Revoking does not kill anything already running — that is `stop`.
+        // Saying so avoids the impression the process was also terminated.
+        this.bridge?.postWarning(
+          revoked === 0
+            ? 'No matching approvals were recorded.'
+            : `Revoked ${revoked} approval${revoked === 1 ? '' : 's'}. You will be asked again on the next run. Already-running servers keep running until stopped.`,
+        );
+        await this.refreshMcpServers();
+        this.snapshot();
+        return;
+      }
       case 'SAVE_SETTINGS':
         await this.applySaveSettings(msg);
         return;
@@ -1338,6 +1394,10 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
     this.abort?.abort();
     // After a clean done, abort is already cleared — still reap leftover shells.
     this.host.killAllTerminals?.();
+    // §6.6 — stdio MCP servers are tied to window lifetime, not to a run. A
+    // server left alive after the window closes is indistinguishable from a
+    // legitimate long-running process, which is threat T6.
+    void this.host.stdioMcp.disposeAll();
     this.webviewMessageSub?.dispose();
     this.webviewMessageSub = undefined;
     this.bridge?.dispose();

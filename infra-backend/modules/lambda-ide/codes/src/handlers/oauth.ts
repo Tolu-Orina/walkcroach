@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { createDbClient } from '@walkcroach/db';
+import { verifyPkce, PKCE_METHOD } from '@walkcroach/agent-harness';
 import type { AuthContext } from '../auth.js';
 import { jsonResponse } from '../http.js';
 import { metricLog, parseJsonBody } from '../util.js';
@@ -74,6 +75,8 @@ export async function handleCreateSessionCode(
     refreshToken?: string;
     idToken?: string;
     expiresAt?: number;
+    codeChallenge?: string;
+    codeChallengeMethod?: string;
   }>(rawBody);
   if (!parsed.ok) {
     return jsonResponse(400, { error: parsed.error });
@@ -81,11 +84,28 @@ export async function handleCreateSessionCode(
   const body = parsed.data;
   const state = body.state?.trim();
   const redirectUri = body.redirectUri?.trim();
+  const codeChallenge = body.codeChallenge?.trim();
+  const codeChallengeMethod = body.codeChallengeMethod?.trim();
   if (!state || state.length < 8) {
     return jsonResponse(400, { error: 'state is required' });
   }
   if (!redirectUri || !isAllowedRedirectUri(redirectUri)) {
     return jsonResponse(400, { error: 'redirectUri is not allowed' });
+  }
+  // PKCE is mandatory, not negotiated. No client has ever shipped without it, so
+  // there is no legacy caller to tolerate — and a code issued without a challenge
+  // could later be exchanged by anyone who intercepted it. This matters most on
+  // this endpoint: the IDE receives its code on a custom scheme and the CLI on a
+  // loopback port, both local channels another process can plausibly observe.
+  if (!codeChallenge) {
+    return jsonResponse(400, { error: 'codeChallenge is required' });
+  }
+  if (codeChallengeMethod !== PKCE_METHOD) {
+    // 'plain' is refused deliberately: under it the challenge IS the verifier, so
+    // it proves nothing to anyone who saw the authorize URL.
+    return jsonResponse(400, {
+      error: `codeChallengeMethod must be ${PKCE_METHOD}`,
+    });
   }
   if (sessionBearer.startsWith('dev:')) {
     return jsonResponse(400, {
@@ -113,8 +133,9 @@ export async function handleCreateSessionCode(
       `INSERT INTO ide_auth_codes (
          code, state, redirect_uri, owner_id,
          access_token, refresh_token, id_token,
-         token_expires_at, code_expires_at
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+         token_expires_at, code_expires_at,
+         code_challenge, code_challenge_method
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
       [
         code,
         stateFingerprint(state),
@@ -125,6 +146,8 @@ export async function handleCreateSessionCode(
         body.idToken?.trim() || sessionBearer,
         tokenExpiresAt.toISOString(),
         codeExpiresAt.toISOString(),
+        codeChallenge,
+        codeChallengeMethod,
       ],
     );
     metricLog('ide.oauth.session_code', { ok: true });
@@ -150,6 +173,7 @@ export async function handleExchangeToken(
     code?: string;
     state?: string;
     redirectUri?: string;
+    codeVerifier?: string;
   }>(rawBody);
   if (!parsed.ok) {
     return jsonResponse(400, { error: parsed.error });
@@ -158,6 +182,7 @@ export async function handleExchangeToken(
   const code = body.code?.trim();
   const state = body.state?.trim();
   const redirectUri = body.redirectUri?.trim();
+  const codeVerifier = body.codeVerifier?.trim();
   if (!code || !state || !redirectUri) {
     return jsonResponse(400, {
       error: 'code, state, and redirectUri are required',
@@ -178,6 +203,8 @@ export async function handleExchangeToken(
       id_token: string | null;
       token_expires_at: string;
       code_expires_at: string;
+      code_challenge: string | null;
+      code_challenge_method: string | null;
     }>(
       `UPDATE ide_auth_codes
        SET consumed_at = now()
@@ -185,7 +212,8 @@ export async function handleExchangeToken(
          AND consumed_at IS NULL
          AND code_expires_at > now()
        RETURNING code, state, redirect_uri, access_token, refresh_token, id_token,
-                 token_expires_at, code_expires_at`,
+                 token_expires_at, code_expires_at,
+                 code_challenge, code_challenge_method`,
       [code],
     );
     const row = rows[0];
@@ -196,6 +224,15 @@ export async function handleExchangeToken(
       return jsonResponse(400, { error: 'invalid_grant' });
     }
     if (row.redirect_uri !== redirectUri) {
+      return jsonResponse(400, { error: 'invalid_grant' });
+    }
+    // Checked after the atomic consume, deliberately: the code is spent either
+    // way, so a wrong verifier cannot be retried against it. RFC 6749 §4.1.2 asks
+    // for exactly this — a failed exchange invalidates the code.
+    if (!verifyPkce(codeVerifier, row.code_challenge, row.code_challenge_method)) {
+      metricLog('ide.oauth.token', { ok: false, reason: 'pkce' });
+      // Same undifferentiated error as every other failure above; naming the
+      // failed check would be a free oracle.
       return jsonResponse(400, { error: 'invalid_grant' });
     }
 

@@ -137,53 +137,54 @@ export async function debitCredits(
   const cost = CREDIT_COSTS[actionType] ?? 0;
   await ensureBalanceRow(db, ownerId);
 
-  if (cost > 0) {
-    const { rows } = await db.query<{
-      monthly_credits: number;
-      used_this_month: number;
-    }>(
-      `UPDATE credit_balances
-       SET
-         used_this_month = CASE
-           WHEN period_start < date_trunc('month', now()) THEN $2
-           ELSE used_this_month + $2
-         END,
-         period_start = CASE
-           WHEN period_start < date_trunc('month', now()) THEN date_trunc('month', now())
-           ELSE period_start
-         END,
-         updated_at = now()
-       WHERE owner_id = $1
-         AND (
-           CASE
-             WHEN period_start < date_trunc('month', now()) THEN monthly_credits
-             ELSE monthly_credits - used_this_month
-           END
-         ) >= $2
-       RETURNING monthly_credits, used_this_month`,
-      [ownerId, cost],
-    );
+  // The conditional UPDATE is atomic on its own (that is what makes this safe
+  // against concurrent debits), but the balance change and its audit row must
+  // also commit together: previously a crash between the two left credits spent
+  // with no usage_ledger entry explaining where they went, so the ledger silently
+  // stopped reconciling against the balance.
+  const debited = await db.withTransaction(async (tx) => {
+    if (cost > 0) {
+      const { rows } = await tx.query<{
+        monthly_credits: number;
+        used_this_month: number;
+      }>(
+        `UPDATE credit_balances
+         SET
+           used_this_month = CASE
+             WHEN period_start < date_trunc('month', now()) THEN $2
+             ELSE used_this_month + $2
+           END,
+           period_start = CASE
+             WHEN period_start < date_trunc('month', now()) THEN date_trunc('month', now())
+             ELSE period_start
+           END,
+           updated_at = now()
+         WHERE owner_id = $1
+           AND (
+             CASE
+               WHEN period_start < date_trunc('month', now()) THEN monthly_credits
+               ELSE monthly_credits - used_this_month
+             END
+           ) >= $2
+         RETURNING monthly_credits, used_this_month`,
+        [ownerId, cost],
+      );
 
-    if (!rows[0]) {
-      const summary = await getUsageSummary(db, ownerId);
-      return { ok: false, remaining: summary.remaining };
+      if (!rows[0]) return false;
     }
-  }
 
-  await db.query(
-    `INSERT INTO usage_ledger (owner_id, project_id, action_type, credits, metadata)
-     VALUES ($1, $2::uuid, $3, $4, $5::jsonb)`,
-    [
-      ownerId,
-      projectId ?? null,
-      actionType,
-      cost,
-      JSON.stringify(metadata),
-    ],
-  );
+    await tx.query(
+      `INSERT INTO usage_ledger (owner_id, project_id, action_type, credits, metadata)
+       VALUES ($1, $2::uuid, $3, $4, $5::jsonb)`,
+      [ownerId, projectId ?? null, actionType, cost, JSON.stringify(metadata)],
+    );
+    return true;
+  });
 
   const summary = await getUsageSummary(db, ownerId);
-  return { ok: true, remaining: summary.remaining };
+  return debited
+    ? { ok: true, remaining: summary.remaining }
+    : { ok: false, remaining: summary.remaining };
 }
 
 /**

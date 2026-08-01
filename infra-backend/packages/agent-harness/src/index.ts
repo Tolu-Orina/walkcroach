@@ -24,8 +24,11 @@ export {
 } from './loop.js';
 export {
   creativeMetric,
+  emitEmf,
+  resolveEnvironment,
   CREATIVE_METRIC_NAMESPACE,
   type CreativeMetricName,
+  type MetricUnit,
 } from './metrics.js';
 export {
   generateCreativeBrief,
@@ -90,10 +93,26 @@ export {
 export {
   recallProjectMemory,
   writeMemoryEntry,
+  writeMemoryEntryDetailed,
+  supersedeThreshold,
   formatVector,
   listProjectMemoryEntries,
   updateMemoryEntryText,
+  DEFAULT_SUPERSEDE_DISTANCE,
+  RECALL_OVERFETCH,
 } from './memory.js';
+export {
+  memoryMetric,
+  observeRecall,
+  MEMORY_METRIC_NAMESPACE,
+  type MemoryMetricName,
+} from './memory-metrics.js';
+export {
+  verifyPkce,
+  codeChallengeS256,
+  isValidVerifierFormat,
+  PKCE_METHOD,
+} from './pkce.js';
 export { refreshProjectMemorySummary } from './project-memory.js';
 export {
   writeSharedSkill,

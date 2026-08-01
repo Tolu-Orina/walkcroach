@@ -1,21 +1,23 @@
 /**
  * Browser sign-in for the CLI (C1.1b, C1.1c).
  *
- * The flow mirrors the IDE's, which is a Web handoff rather than Hosted-UI
- * PKCE (`ide/src/auth/pkce.ts` marks the Hosted-UI helpers deprecated):
+ * A Web handoff carrying a one-time code, protected by PKCE (RFC 7636):
  *
  *   1. bind 127.0.0.1:0                     — before anything is published
- *   2. open {webAppUrl}/connect/cli?state&redirect_uri
- *   3. Web reuses the ordinary sign-in, then mints a one-time code
- *   4. Web redirects to the loopback URI with ?code&state — never a token
- *   5. CLI verifies state, exchanges the code at POST /ide/v1/oauth/token
- *   6. tokens land under the same SECRET_KEYS the IDE uses
+ *   2. generate a PKCE verifier; keep it in memory
+ *   3. open {webAppUrl}/connect/cli?state&redirect_uri&code_challenge
+ *   4. Web reuses the ordinary sign-in, then mints a one-time code
+ *   5. Web redirects to the loopback URI with ?code&state — never a token
+ *   6. CLI verifies state, exchanges code + verifier at POST /ide/v1/oauth/token
+ *   7. tokens land under the same SECRET_KEYS the IDE uses
  *
- * Step 4 is the reason this is worth the machinery: a token never appears in a
- * URL, a shell history, or a terminal scrollback.
+ * Step 5 is why the machinery is worth it: a token never appears in a URL, a
+ * shell history, or a terminal scrollback. Step 2 is why an intercepted *code*
+ * is worthless — the verifier that redeems it never leaves this process, so
+ * another local process winning the port race gains nothing it can spend.
  */
 import { spawn } from 'node:child_process';
-import { SECRET_KEYS } from '@walkcroach/agent-engine';
+import { SECRET_KEYS, generatePkce, PKCE_METHOD } from '@walkcroach/agent-engine';
 import { resolveApiBaseUrl, getSecret, setSecret } from '../lib/config.js';
 import { ApiError, NetworkError } from '../lib/exit-codes.js';
 import { startLoopbackListener } from './loopback.js';
@@ -49,10 +51,14 @@ export function buildAuthorizeUrl(params: {
   webAppUrl: string;
   state: string;
   redirectUri: string;
+  /** PKCE challenge (S256). The verifier never appears in this URL. */
+  codeChallenge: string;
 }): string {
   const url = new URL('/connect/cli', params.webAppUrl);
   url.searchParams.set('state', params.state);
   url.searchParams.set('redirect_uri', params.redirectUri);
+  url.searchParams.set('code_challenge', params.codeChallenge);
+  url.searchParams.set('code_challenge_method', PKCE_METHOD);
   return url.toString();
 }
 
@@ -91,6 +97,8 @@ export async function exchangeAuthCode(params: {
   code: string;
   state: string;
   redirectUri: string;
+  /** PKCE verifier. Proves this process is the one that began the flow. */
+  codeVerifier: string;
 }): Promise<CognitoTokens> {
   const base = (await resolveApiBaseUrl()).value;
   let res: Response;
@@ -207,12 +215,17 @@ export async function browserSignIn(opts?: {
   // Bind first: whoever holds the port owns the callback, and we must be that
   // process before the URL exists anywhere outside this function.
   const listener = await startLoopbackListener({ timeoutMs: opts?.timeoutMs });
+  // Held in memory for the lifetime of this call only. It is never written to
+  // disk, never sent to Web, and never appears in the authorize URL — which is
+  // what makes an intercepted code useless to anyone else on the machine.
+  const { verifier, challenge } = generatePkce();
   try {
     const webAppUrl = await resolveWebAppUrl();
     const authorizeUrl = buildAuthorizeUrl({
       webAppUrl,
       state: listener.state,
       redirectUri: listener.redirectUri,
+      codeChallenge: challenge,
     });
     opts?.onUrl?.(authorizeUrl);
     if (opts?.openBrowser !== false) openBrowser(authorizeUrl);
@@ -222,6 +235,7 @@ export async function browserSignIn(opts?: {
       code,
       state: listener.state,
       redirectUri: listener.redirectUri,
+      codeVerifier: verifier,
     });
     await storeTokens(tokens);
     return { redirectUri: listener.redirectUri, authorizeUrl, tokens };

@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import type { ChangeEvent, ClipboardEvent } from 'react';
 import { getVsCodeApi } from './vscodeApi';
-import { SettingsView } from './SettingsView';
+import { SettingsView, type McpServerRow } from './SettingsView';
 import { MarkdownBody } from './MarkdownBody';
 import { formatStopReason } from './formatStopReason';
 
@@ -100,6 +100,8 @@ type HostMessage =
       bedrockRegion?: string;
       reasoningEffort?: string;
       ccloudConfigured?: boolean;
+      mcpServers?: McpServerRow[];
+      mcpStdioAllowed?: boolean;
       telemetry?: Record<string, number>;
       signedIn?: boolean;
       linkedProjectId?: string | null;
@@ -239,6 +241,8 @@ export function App() {
   const [bedrockRegion, setBedrockRegion] = useState('eu-west-2');
   const [reasoningEffort, setReasoningEffort] = useState('');
   const [ccloudConfigured, setCcloudConfigured] = useState(false);
+  const [mcpServers, setMcpServers] = useState<McpServerRow[]>([]);
+  const [mcpStdioAllowed, setMcpStdioAllowed] = useState(false);
   const [signedIn, setSignedIn] = useState(false);
   const [linkedProjectId, setLinkedProjectId] = useState<string | null>(null);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
@@ -337,6 +341,8 @@ export function App() {
             typeof msg.reasoningEffort === 'string' ? msg.reasoningEffort : '',
           );
           setCcloudConfigured(Boolean(msg.ccloudConfigured));
+          setMcpServers(msg.mcpServers ?? []);
+          setMcpStdioAllowed(Boolean(msg.mcpStdioAllowed));
           setSignedIn(Boolean(msg.signedIn));
           setLinkedProjectId(msg.linkedProjectId ?? null);
           if (msg.todos) setTodos(msg.todos);
@@ -725,6 +731,8 @@ export function App() {
         reasoningEffort={reasoningEffort}
         mcpConfigured={mcpConfigured}
         ccloudConfigured={ccloudConfigured}
+        mcpServers={mcpServers}
+        mcpStdioAllowed={mcpStdioAllowed}
         onBack={() => setView('chat')}
       />
     );

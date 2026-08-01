@@ -115,6 +115,25 @@ describe('command surface', () => {
           commands: [],
         },
         {
+          name: 'mcp',
+          args: [],
+          options: [],
+          commands: [
+            {
+              name: 'list',
+              args: [],
+              options: ['--cwd <path>'],
+              commands: [],
+            },
+            {
+              name: 'revoke',
+              args: ['server'],
+              options: ['--all'],
+              commands: [],
+            },
+          ],
+        },
+        {
           name: 'memory',
           args: [],
           options: [],

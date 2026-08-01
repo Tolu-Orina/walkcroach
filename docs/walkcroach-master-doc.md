@@ -16,17 +16,17 @@
 | **Web** | **Substantially complete + Web Modules landed** | Builder/chat/deploy/RAG as before, plus creatives (Canvas/Reel/flyers/Office), connectors package, Stripe Checkout/Portal handlers, Bedrock guardrails, creative observability. Hard quotas and propose→confirm→execute are real. |
 | **Chrome** | **Functional; CWS submit packet current at v0.5.3** | Side-panel copilot, linking, auth upgrade, selection capture, site profiles, connectors code (inert until OAuth secrets). Store checklist supersedes the old 0.1.4 packet — submission still the open ops gate. |
 | **IDE extension** | **Complete, real product** | Chat, checkpoints, attachments, semantic search, HTTP MCP, shared skills, private VSIX (`ide/walkcroach-ide.vsix`). Open VSX publish workflow present. Stdio MCP **deferred**. |
-| **CLI** | **Functional; packaging ready, not on npm yet** | Same engine as IDE. v0.2.0, browser **loopback** auth (RFC 8252; `--token` for CI), `bin` + `publishConfig` + `.github/workflows/publish-cli.yml` (OIDC). PKCE still a recommended follow-up. |
+| **CLI** | **Functional; packaging ready, not on npm yet** | Same engine as IDE. v0.2.0, browser **loopback** auth (RFC 8252; `--token` for CI), `bin` + `publishConfig` + `.github/workflows/publish-cli.yml` (OIDC). PKCE (S256) landed 2026-08-01. |
 | **Shared agent-engine** | **Most mature module** | gather→act→verify, hard verify, adversarial review, checkpoints, hooks, tool-loop-guard. Has dedicated `loop.test.ts`. |
-| **agent-harness** | **Mature, creative-heavy** | Web/Chrome Lambda loop (~2.9k lines `loop.ts`); creatives, connectors, guardrails, EMF metrics. **Still no dedicated `loop.test.ts`**. |
+| **agent-harness** | **Mature, creative-heavy** | Web/Chrome Lambda loop (~2.9k lines `loop.ts`); creatives, connectors, guardrails, EMF metrics. **`loop.test.ts` landed 2026-08-01** — 45 mutation-verified tests. |
 | **Desktop IDE** | **Postponed / scaffold only** | Sibling repo; docs archived under `docs/archive/`. Do not describe as shipped. |
-| **Backend infra** | **Real; expanded Jul 30–31** | **25** CockroachDB migrations; Terraform modules include creative Lambda, video SFN (optional), guardrails, creative budget/dashboard. Soft spots remain (empty video worker ARN, pipeline IAM asymmetry, likely-orphaned `agent_locks`). |
+| **Backend infra** | **Real; expanded Jul 30–31, hardened Aug 1** | **29** CockroachDB migrations; Terraform modules include creative Lambda, video SFN (optional), guardrails, creative budget/dashboard. DB client now verifies TLS and retries 40001. Soft spots remain (empty video worker ARN, pipeline IAM asymmetry, likely-orphaned `agent_locks`). |
 
 ### 0.2 What changed since the 2026-07-29 audit
 
 | Area | Then | Now |
 |---|---|---|
-| Migrations | 19 (through `019_shared_skills`) | **25** (`020`–`025`: connectors, entitlements/quotas, creative assets, video jobs, creative memory/a11y, workflow runs + vector idx) |
+| Migrations | 19 (through `019_shared_skills`) | **29** (`020`–`025`: connectors, entitlements/quotas, creative assets, video jobs, creative memory/a11y, workflow runs + vector idx; `026`–`029`: C-SPANN rebuild — tenant prefix, then cosine opclass) |
 | Terraform modules | ~8 | **+** `bedrock-guardrails`, `lambda-creative`, `stepfunctions-video`, `observability-creative` |
 | Monitoring | Claimed “zero alarms/budgets” | **Creative** CloudWatch dashboard + Bedrock AWS Budget + SNS (`modules/observability-creative`) — still not full product-wide SLOs |
 | Billing | “Portal deferred” UI copy | **Stripe Checkout + Customer Portal + webhooks** implemented (`handlers/stripeBilling.ts`); needs live secret keys |
@@ -40,7 +40,7 @@
 1. **One Cognito pool/client** and **one CockroachDB memory layer** across Web/Chrome/IDE/CLI — `source_surface`-tagged, cross-surface recall is real.
 2. **Client-resume vs server-side tools** is locked: sandbox/local tools resume via `POST .../tool-result`; memory/search/etc. run in Lambda/harness.
 3. **Web sandbox:** **E2B primary**, WebContainer fallback (needs COOP/COEP from `infra-web`).
-4. **Test pattern:** client/engine coverage is stronger than Lambda BFF business-handler coverage; harness `loop.ts` still lacks a dedicated unit suite.
+4. **Test pattern:** client/engine coverage is stronger than Lambda BFF business-handler coverage. Harness `loop.ts` now has a dedicated suite; the remaining thin spots are the large SPA pages and the billing/deploy/video handlers.
 5. **Marketing claims** must lag secrets/wiring — see [`web-claims-audit.md`](./web-claims-audit.md) and Chrome store claim gating.
 
 ---
@@ -71,12 +71,15 @@ Web SPA → API Gateway REST → lambda-agent → agent-harness (Bedrock + tools
 
 ### 1.4 Tests (approx., Jul 31)
 
-| Area | ~`*.test.*` |
-|---|---|
-| `web/` | ~25 |
-| `agent-harness/` | ~14 (creatives/connectors/guardrails/metrics; **no `loop.test.ts`**) |
-| `lambda-agent` | ~11 |
-| `lambda-creative` | ~2 (pytest) |
+| Area | test files | tests |
+|---|---|---|
+| `web/` | 25 | 236 |
+| `agent-harness/` | 16 | 129 (creatives/connectors/guardrails/metrics, memory lifecycle + memory metrics, **`loop.test.ts`**) |
+| `packages/db` | 1 | 26 (TLS policy, 40001 retry, transaction guard) |
+| `lambda-agent` | 11 | 62 |
+| `lambda-chrome` | 12 | 122 |
+| `lambda-ide` | 4 | 22 |
+| `lambda-creative` | ~2 | (pytest) |
 
 Large SPA pages and highest-stakes billing/deploy/video handlers remain thinner than engine coverage.
 
@@ -94,7 +97,7 @@ Large SPA pages and highest-stakes billing/deploy/video handlers remain thinner 
 
 ### 2.1 Shipped
 
-Side panel (not FAB), page/selection capture, summarize/ask/draft/save, recall, price track, workspaces, Cognito PKCE, anonymous device upgrade, Open in Web Chat handoff, site profiles (remote signing optional), store kit under `chrome/store/` (checklist **v0.5.3**), enterprise README.
+Side panel (not FAB), page/selection capture, summarize/ask/draft/save, recall, price track, workspaces, PKCE (S256) on the Web→extension code handoff (not Cognito's own flow — Cognito sign-in is USER_PASSWORD_AUTH on Web), anonymous device upgrade, Open in Web Chat handoff, site profiles (remote signing optional), store kit under `chrome/store/` (checklist **v0.5.3**), enterprise README.
 
 ### 2.2 Claim gating (store checklist)
 
@@ -120,11 +123,11 @@ Host-agnostic loop (`packages/agent-engine`). Phases A/B/C tools, HTTP MCP only,
 
 ### 3.2 IDE (`ide/` v0.1.0)
 
-Thin VS Code shell + webview; PKCE via Web `/connect/ide`; VSIX via `npm run package:vsix` (`ide/INSTALL.md`). Checked-in `ide/walkcroach-ide.vsix` (~1.4 MB). Publish: `.github/workflows/publish-ide.yml` → Open VSX. ~8 unit tests; coverage config still excludes largest UI files.
+Thin VS Code shell + webview; sign-in is a Web `/connect/ide` handoff carrying a one-time code, protected by PKCE (S256) since 2026-08-01 — before that the handoff had no proof-of-possession despite this line claiming otherwise; VSIX via `npm run package:vsix` (`ide/INSTALL.md`). Checked-in `ide/walkcroach-ide.vsix` (~1.4 MB). Publish: `.github/workflows/publish-ide.yml` → Open VSX. ~8 unit tests; coverage config still excludes largest UI files.
 
 ### 3.3 CLI (`cli/` v0.2.0)
 
-Same engine; TUI / pipe / `--json`; approvals; BYOK; doctor. **Auth:** browser loopback listener (`cli/src/auth/loopback.ts`) binds the port before opening the browser; `--token` for CI. **PKCE** is explicitly the recommended follow-up (not implemented). Packaging: `test-packaged.mjs`, `publishConfig.access: public`, `.github/workflows/publish-cli.yml` (OIDC). `VERSIONING.md` / `POST_RELEASE.md` / `CHANGELOG.md`.
+Same engine; TUI / pipe / `--json`; approvals; BYOK; doctor. **Auth:** browser loopback listener (`cli/src/auth/loopback.ts`) binds the port before opening the browser; `--token` for CI. **PKCE (S256) implemented 2026-08-01** — the verifier is held in memory only, so a process winning the port race gets a code it cannot spend. Packaging: `test-packaged.mjs`, `publishConfig.access: public`, `.github/workflows/publish-cli.yml` (OIDC). `VERSIONING.md` / `POST_RELEASE.md` / `CHANGELOG.md`.
 
 ---
 
@@ -140,7 +143,7 @@ Sibling `walkcroach-desktop/` exists beside this monorepo. Plans/PRDs live in [`
 
 This file + [`docs/README.md`](./README.md) replace the missing historical `plan1.md`. Locked architecture facts: CockroachDB as system of record; client-resume vs server-side tools; E2B-primary sandbox; single Cognito client.
 
-### 5.2 Schema — 25 migrations
+### 5.2 Schema — 29 migrations
 
 Applied via `@walkcroach/db` migrate. Newest:
 
@@ -157,7 +160,7 @@ Earlier highlights (still true): RAG chunks (`016`), dual-write `build_events`/`
 
 **Likely orphan:** `agent_locks` from `001` — no application writers found under infra-backend src in prior audit.
 
-**Vector indexes:** present on core memory/document tables; confirm `025` covers remaining gaps (`page_captures` / `shared_skills` historically lagged).
+**Vector indexes (rebuilt in `026`/`027`):** every index through `025` was declared on the embedding column alone, while every recall query is tenant-scoped. CockroachDB only uses a vector index for a filtered query when each prefix column is constrained to a specific value, so the C-SPANN indexes were not accelerating the queries they existed for. `026` drops the unprefixed indexes; `027` recreates each with the prefix its reader actually filters on — `project_id` for `memory_entries` / `project_documents` / `project_document_chunks`, `owner_id` for `creative_assets` / `workflow_runs` / `video_jobs`. `page_captures` gains its first vector index (`owner_id` prefix, serving both Chrome recall paths). `shared_skills` stays deliberately unindexed: nothing issues a `<=>` query against it, so an index would be pure write amplification. Split across two files because `migrate.ts` runs each file as one transaction.
 
 ### 5.3 Terraform modules (`infra-backend/modules/`)
 
@@ -176,7 +179,7 @@ Root `main.tf` wires creative guardrail IDs and `creative_lambda_*` into `lambda
 ### 5.6 Ops runbooks
 
 - [`runtime-secrets-and-ssm.md`](./runtime-secrets-and-ssm.md)  
-- [`smoke-and-redirects.md`](./smoke-and-redirects.md) — apply migrations **through 025** before prod creative/connector claims  
+- [`smoke-and-redirects.md`](./smoke-and-redirects.md) — apply migrations **through 029** before prod creative/connector claims. `026`–`029` rebuild the vector indexes in drop/create pairs; each pair leaves the tables briefly unindexed, so never stop mid-pair.  
 
 ---
 
@@ -191,18 +194,33 @@ Seventeen `walkcroach-*` skill directories + `NOTICE.md` (Apache vs proprietary)
 | # | Gap | Why it matters |
 |---|---|---|
 | 1 | Desktop not a shipped surface | Don’t market a fifth surface |
-| 2 | `agent-harness` `loop.ts` (~2.9k lines) lacks dedicated unit tests | Widest blast radius for Web/Chrome |
+| ~~2~~ | ~~`agent-harness` `loop.ts` lacks dedicated unit tests~~ | ✅ Closed 2026-08-01 — `loop.test.ts`, 45 tests, verified against 4 deliberate mutations |
 | 3 | Lambda BFF handler tests still thin vs client/engine; no Lambda error/latency alarms | Money, merge, deploy, video + ops |
 | 4 | Video SFN worker ARN empty / stub path; creative Lambda needs image URI | Production video/creative orchestration incomplete |
 | 5 | Connectors/creatives “code complete” ≠ “user-reachable” without secrets | Claims must lag wiring |
 | 6 | Dual Stripe config footgun (Connect OAuth vs platform Billing keys) | Wrong secret → silent inert Connect or broken Checkout |
 | 7 | Chrome CWS submission / extension ID | Store packet ready; live listing not confirmed in-repo |
-| 8 | CLI not confirmed published; PKCE still open | Workflow exists; loopback residual port-race risk without PKCE |
+| 8 | CLI not confirmed published | Workflow exists. PKCE closed 2026-08-01 across IDE/CLI/Chrome; publishing is now the only half of this gate left |
 | 9 | Stdio MCP deferred | Correct security posture; don’t silently enable |
 | 10 | `agent_locks` likely orphaned; `build_events`/`tool_invocations` dual-write | Schema hygiene |
 | 11 | Backend pipeline IAM + CodeBuild `resources=["*"]` | Blast-radius inconsistency |
-| 12 | Product-wide alarms/synthetics still thin | Creative budget ≠ full ops |
+| 12 | Product-wide alarms/synthetics still thin | `WalkCroach/Memory` + `WalkCroach/Creative` EMF exist; still no Lambda error/latency alarms or synthetics |
 | 13 | Claims audit / privacy checkboxes unsigned | Release gate |
+| 14 | No CloudWatch dashboard/alarms consuming `WalkCroach/Memory` yet | Metrics are emitted but nothing watches them — `RecallEmpty` and `EmbedFailure` are the two worth alarming |
+| 15 | `MEMORY_SUPERSEDE_THRESHOLD` (0.15) is a judgement call, not eval-backed | Catches restatements only; lexically-distant contradictions still accumulate. Widening it needs eval data, not a bigger constant |
+
+### 7.1 Closed on 2026-08-01
+
+| Was | Fix |
+|---|---|
+| **No vector index had ever been usable.** Two independent defects stacked: (1) every index was declared on `embedding` alone while every recall constrains a tenant column, and (2) every index took the default `vector_l2_ops` opclass — which accelerates only `<->` — while every recall query in the codebase measures cosine with `<=>`. An opclass mismatch makes the index ineligible outright, so recall had always been an exact brute-force scan. It returned correct results, which is exactly why it stayed invisible. | `026`/`027` add the tenant prefix; `028`/`029` rebuild with `vector_cosine_ops`. Verified on the live cluster: forcing the index now plans `• vector search … prefix spans: [/'<project_id>']`, where before it raised `index … cannot be used for this query`. `page_captures` indexed for the first time. |
+| `db/client.ts` passed `rejectUnauthorized: false`, silently downgrading every connection to unverified TLS and contradicting the documented `sslmode=verify-full` | Verification on by default; `CRDB_CA_CERT` for custom CAs, `CRDB_SSL_INSECURE` as a loud, explicit opt-out |
+| No client-side retry on SQLSTATE 40001 under SERIALIZABLE | `db.query` and `db.withTransaction` retry 40001 with full-jitter backoff. Ambiguous connection errors deliberately not retried (would double-apply debits) |
+| `superseded_by` read by every recall query, written by nothing — memory was append-only, restatements accumulated forever | `writeMemoryEntryDetailed` retires the nearest same-kind entry within `MEMORY_SUPERSEDE_THRESHOLD`, transactionally |
+| Recall could under-return once post-filters (`superseded_by`, `source_surface`) applied to ANN results | `RECALL_OVERFETCH` (4×) then slice to the caller's limit |
+| Zero observability on the memory layer | `WalkCroach/Memory` EMF namespace: recall latency/hits/top-distance/empty, writes, supersedes, embed latency/failures |
+| `debitCredits` updated the balance and inserted its audit row as two separate statements — a crash between them broke ledger reconciliation | Both in one `withTransaction` |
+| `upgrade.ts` ran `db.query('BEGIN')` on a pool, so the anon→Cognito merge had no atomicity at all and could strand `page_captures` under a dead owner | Converted to `withTransaction`; `db.query` now refuses transaction-control statements outright |
 
 **Resolved vs Jul 29 doc:** missing `plan1.md` citations (entrypoints → this file / `docs/README.md`); “zero monitoring” (creative observability exists); “billing portal deferred” (handlers exist); “CLI paste-only auth / no publish pipeline” (loopback + `publish-cli.yml`); Desktop plan archived under `docs/archive/`.
 

@@ -33,13 +33,21 @@ export function ConnectChromePage() {
 
   const state = params.get('state')?.trim() ?? '';
   const redirectUri = params.get('redirect_uri')?.trim() ?? '';
+  // PKCE: Web is a conduit only. It forwards the challenge and never sees
+  // the verifier — that is the whole point of the mechanism.
+  const codeChallenge = params.get('code_challenge')?.trim() ?? '';
+  const codeChallengeMethod = params.get('code_challenge_method')?.trim() ?? '';
 
   const nextPath = useMemo(() => {
     const q = new URLSearchParams();
     if (state) q.set('state', state);
     if (redirectUri) q.set('redirect_uri', redirectUri);
+    // Must survive the sign-in round trip, or the retry after authentication
+    // arrives without a challenge and the BFF rejects it.
+    if (codeChallenge) q.set('code_challenge', codeChallenge);
+    if (codeChallengeMethod) q.set('code_challenge_method', codeChallengeMethod);
     return `/connect/chrome?${q.toString()}`;
-  }, [state, redirectUri]);
+  }, [state, redirectUri, codeChallenge, codeChallengeMethod]);
 
   useEffect(() => {
     if (status !== 'authenticated') return;
@@ -55,6 +63,14 @@ export function ConnectChromePage() {
       }
       if (!redirectUri || !REDIRECT_PATTERN.test(redirectUri)) {
         setError('Invalid redirect URI.');
+        return;
+      }
+      // Fail closed. A client old enough not to send a challenge cannot be
+      // silently downgraded to a non-PKCE exchange.
+      if (!codeChallenge || codeChallengeMethod !== 'S256') {
+        setError(
+          'This extension build is out of date — it did not send a PKCE challenge. Update WalkCroach Chrome and sign in again.',
+        );
         return;
       }
 
@@ -94,6 +110,8 @@ export function ConnectChromePage() {
               : {}),
             idToken: stored.cognito?.idToken ?? stored.token,
             expiresAt: stored.cognito?.expiresAt,
+            codeChallenge,
+            codeChallengeMethod,
           }),
         });
         const data = (await res.json()) as {
@@ -119,7 +137,7 @@ export function ConnectChromePage() {
     return () => {
       cancelled = true;
     };
-  }, [status, state, redirectUri]);
+  }, [status, state, redirectUri, codeChallenge, codeChallengeMethod]);
 
   if (status !== 'authenticated') {
     return (

@@ -17,6 +17,8 @@ export const WEBVIEW_TO_HOST = [
   'CLEAR_SESSION',
   'REVERT_TO_TURN',
   'SYNC_UI_TURNS',
+  'STOP_MCP_SERVER',
+  'REVOKE_MCP_CONSENT',
 ] as const;
 
 export const HOST_TO_WEBVIEW = [
@@ -76,6 +78,21 @@ export type PersistedChatTurn = {
   attachments?: Array<{ id: string; name: string; mime: string }>;
 };
 
+/** A configured MCP server, as shown in the Setup view (§6.7). */
+export type McpServerView = {
+  name: string;
+  transport: 'http' | 'stdio';
+  /** Resolved absolute command for stdio; url for http. */
+  detail: string;
+  /** Live process id — stdio only, and only while running. */
+  pid?: number | null;
+  running: boolean;
+  /** stdio only: whether this exact command has recorded consent. */
+  approved?: boolean;
+  /** Why it is not runnable, when it is not. */
+  blockedReason?: string;
+};
+
 export type WebviewToHostMessage =
   | { type: 'READY' }
   | {
@@ -95,6 +112,10 @@ export type WebviewToHostMessage =
   | { type: 'SET_AUTONOMY'; level: AutonomyLevelMsg }
   | { type: 'CANCEL' }
   | { type: 'SIGN_IN' }
+  /** Kill one running stdio MCP server (§6.6 — the UI's stop button). */
+  | { type: 'STOP_MCP_SERVER'; name: string }
+  /** Withdraw stdio consent. Omitting `name` revokes every approval (§6.1). */
+  | { type: 'REVOKE_MCP_CONSENT'; name?: string }
   | {
       type: 'SAVE_SETTINGS';
       /** Set to store; empty string ignored; null clears. */
@@ -194,6 +215,10 @@ export type HostToWebviewMessage =
         allowFreeText?: boolean;
       } | null;
       mcpConfigured?: boolean;
+      /** Configured MCP servers and their live state, for the Setup view. */
+      mcpServers?: McpServerView[];
+      /** Whether this machine permits stdio MCP at all (user setting + trust). */
+      mcpStdioAllowed?: boolean;
       bedrockConfigured?: boolean;
       bedrockModelId?: string;
       bedrockRegion?: string;
@@ -345,6 +370,13 @@ export function parseWebviewToHostMessage(
         mode: msg.mode,
         attachments: parseSubmitAttachments(msg.attachments),
       };
+    case 'STOP_MCP_SERVER':
+      if (typeof msg.name !== 'string' || !msg.name) return null;
+      return { type: 'STOP_MCP_SERVER', name: msg.name };
+    case 'REVOKE_MCP_CONSENT':
+      // Absent name means "all", which is a deliberate affordance, not a bug.
+      if (msg.name !== undefined && typeof msg.name !== 'string') return null;
+      return { type: 'REVOKE_MCP_CONSENT', name: msg.name as string | undefined };
     case 'APPROVE_STEP':
     case 'REJECT_STEP':
       if (typeof msg.stepId !== 'string') return null;

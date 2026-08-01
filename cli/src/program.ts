@@ -25,6 +25,7 @@ import { createCommand, type EditorId } from './commands/create.js';
 import { revertCommand } from './commands/revert.js';
 import { memoryList } from './commands/memory.js';
 import { skillsList } from './commands/skills.js';
+import { mcpList, mcpRevoke } from './commands/mcp.js';
 import { secretsList, secretsRemove, secretsSet } from './commands/secrets.js';
 import {
   authState,
@@ -329,6 +330,44 @@ Examples:
         cwd: opts.cwd,
         query: opts.query,
         limit: Number(opts.limit) || 10,
+        json: globalOpts().json,
+      });
+    });
+
+  const mcp = program
+    .command('mcp')
+    .description('Configured MCP servers and their local-process approvals');
+
+  mcp
+    .command('list')
+    .description('Show configured servers and whether each may run')
+    .option('--cwd <path>', 'Workspace root', process.cwd())
+    .action(async (opts) => {
+      process.exitCode = await mcpList({
+        cwd: opts.cwd,
+        json: globalOpts().json,
+      });
+    });
+
+  mcp
+    .command('revoke [server]')
+    .description('Withdraw approval for a local-process (stdio) MCP server')
+    .option('--all', 'Revoke every recorded approval')
+    .addHelpText(
+      'after',
+      `
+Approvals are recorded per exact command, so editing .walkcroach/mcp.json
+already forces a fresh prompt. Use this to withdraw one you granted earlier.
+
+Examples:
+  $ walkcroach mcp revoke filesystem
+  $ walkcroach mcp revoke --all
+`,
+    )
+    .action(async (server, opts) => {
+      process.exitCode = await mcpRevoke({
+        server,
+        all: opts.all,
         json: globalOpts().json,
       });
     });

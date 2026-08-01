@@ -20,14 +20,18 @@
  * wait. The socket closes as soon as a verdict is reached — a listener left
  * open after sign-in is an open door for no benefit.
  *
- * ## Residual risk, stated plainly
+ * ## Residual risk, and what closed it
  *
  * A local process that wins the port race before us could receive a code and
  * the state that goes with it, since both travel in the callback URL. Binding
- * first is what prevents that, not the state check. Proof-of-possession (PKCE)
- * would remove the risk entirely by keeping a secret out of the browser
- * altogether; it needs a column on `ide_auth_codes` and is the recommended
- * follow-up, not something this listener can fix alone.
+ * first is what prevents that, not the state check.
+ *
+ * That was the whole of the risk while the code alone was redeemable. It no
+ * longer is: the exchange requires a PKCE verifier (RFC 7636) that is generated
+ * in `session.ts`, held only in memory, and never placed in the authorize URL,
+ * the callback URL, or on disk. A racing process can now obtain a code it cannot
+ * spend. Binding first remains the first line of defence — this is defence in
+ * depth, not a replacement for it.
  */
 import { createServer, type Server, type ServerResponse } from 'node:http';
 import { randomBytes, timingSafeEqual } from 'node:crypto';

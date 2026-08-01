@@ -294,7 +294,7 @@ describe('parseMcpServersJson', () => {
     else delete process.env.GH_TOKEN;
   });
 
-  it('parses the mcpServers map, skipping entries without a url', () => {
+  it('parses the mcpServers map, skipping entries with neither url nor command', () => {
     const out = parseMcpServersJson({
       mcpServers: {
         github: { url: 'https://mcp.example.com/github', headers: { 'X-Key': 'abc' } },
@@ -302,8 +302,46 @@ describe('parseMcpServersJson', () => {
       },
     });
     expect(out).toEqual({
-      github: { url: 'https://mcp.example.com/github', headers: { 'X-Key': 'abc' } },
+      github: {
+        transport: 'http',
+        url: 'https://mcp.example.com/github',
+        headers: { 'X-Key': 'abc' },
+      },
     });
+  });
+
+  it('recognises a stdio entry rather than silently dropping it', () => {
+    // Recognition is not permission: whether it may run is decided by the host
+    // (HostAdapter.isStdioMcpAllowed), never by this file. Parsing it here is
+    // what lets the caller warn about an ignored server.
+    const out = parseMcpServersJson({
+      mcpServers: {
+        fs: { command: 'npx', args: ['-y', 'server-filesystem', '/'], env: ['FOO'] },
+      },
+    });
+    expect(out.fs).toEqual({
+      transport: 'stdio',
+      command: 'npx',
+      args: ['-y', 'server-filesystem', '/'],
+      env: ['FOO'],
+    });
+  });
+
+  it('does not interpolate ${env:VAR} into a stdio env allowlist', () => {
+    // These are variable NAMES to pass through. Expanding them would write a
+    // secret's value into a committed file's semantics.
+    process.env.GH_TOKEN = 'secret-123';
+    const out = parseMcpServersJson({
+      mcpServers: { fs: { command: 'npx', env: ['${env:GH_TOKEN}'] } },
+    });
+    expect((out.fs as { env: string[] }).env).toEqual(['${env:GH_TOKEN}']);
+  });
+
+  it('prefers url when an entry somehow has both', () => {
+    const out = parseMcpServersJson({
+      mcpServers: { both: { url: 'https://x.example/mcp', command: 'npx' } },
+    });
+    expect(out.both?.transport).toBe('http');
   });
 
   it('interpolates ${env:VAR} in header values', () => {
@@ -346,7 +384,7 @@ describe('loadMcpServersConfig', () => {
       'utf8',
     );
     expect(await loadMcpServersConfig(dir)).toEqual({
-      github: { url: 'https://mcp.example.com/github' },
+      github: { transport: 'http', url: 'https://mcp.example.com/github' },
     });
   });
 });

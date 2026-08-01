@@ -15,25 +15,52 @@ export type CreativeMetricName =
   | 'CreativeQuotaDenied'
   | 'ProInvokeCount';
 
-export function creativeMetric(
-  name: CreativeMetricName,
-  fields: Record<string, string | number | boolean | undefined> = {},
-): void {
-  const env =
-    process.env.ENVIRONMENT ??
-    process.env.WALKCROACH_ENV ??
-    process.env.NODE_ENV ??
-    'dev';
-  const dims: Record<string, string> = { Environment: String(env) };
-  if (typeof fields.feature === 'string') dims.Feature = fields.feature;
-  if (typeof fields.tier === 'string') dims.Tier = fields.tier;
+/** EMF units used across WalkCroach namespaces. */
+export type MetricUnit = 'Count' | 'Milliseconds' | 'None';
+
+export function resolveEnvironment(
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return String(
+    env.ENVIRONMENT ?? env.WALKCROACH_ENV ?? env.NODE_ENV ?? 'dev',
+  );
+}
+
+/**
+ * Low-level EMF writer shared by every WalkCroach metric namespace.
+ *
+ * `dimensionFields` names the entries of `fields` that become CloudWatch
+ * dimensions; everything else rides along as a searchable log property but does
+ * not multiply the metric's cardinality. Environment is always a dimension.
+ */
+export function emitEmf(params: {
+  namespace: string;
+  name: string;
+  unit?: MetricUnit;
+  value?: number;
+  dimensionFields?: readonly string[];
+  fields?: Record<string, string | number | boolean | undefined>;
+}): void {
+  const fields = params.fields ?? {};
+  const dims: Record<string, string> = { Environment: resolveEnvironment() };
+  for (const key of params.dimensionFields ?? []) {
+    const v = fields[key];
+    if (typeof v === 'string') dims[key.charAt(0).toUpperCase() + key.slice(1)] = v;
+  }
 
   const dimensionKeys = Object.keys(dims);
-  const safe: Record<string, string | number | boolean> = { ...dims };
+  const payload: Record<string, string | number | boolean> = { ...dims };
   for (const [k, v] of Object.entries(fields)) {
-    if (v !== undefined && k !== 'feature' && k !== 'tier') safe[k] = v;
+    if (v !== undefined && !(params.dimensionFields ?? []).includes(k)) {
+      payload[k] = v;
+    }
   }
-  safe[name] = typeof fields.value === 'number' ? fields.value : 1;
+  payload[params.name] =
+    typeof params.value === 'number'
+      ? params.value
+      : typeof fields.value === 'number'
+        ? fields.value
+        : 1;
 
   console.log(
     JSON.stringify({
@@ -41,13 +68,26 @@ export function creativeMetric(
         Timestamp: Date.now(),
         CloudWatchMetrics: [
           {
-            Namespace: CREATIVE_METRIC_NAMESPACE,
+            Namespace: params.namespace,
             Dimensions: [dimensionKeys],
-            Metrics: [{ Name: name, Unit: 'Count' }],
+            Metrics: [{ Name: params.name, Unit: params.unit ?? 'Count' }],
           },
         ],
       },
-      ...safe,
+      ...payload,
     }),
   );
+}
+
+export function creativeMetric(
+  name: CreativeMetricName,
+  fields: Record<string, string | number | boolean | undefined> = {},
+): void {
+  emitEmf({
+    namespace: CREATIVE_METRIC_NAMESPACE,
+    name,
+    unit: 'Count',
+    dimensionFields: ['feature', 'tier'],
+    fields,
+  });
 }

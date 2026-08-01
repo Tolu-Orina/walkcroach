@@ -14,14 +14,22 @@ describe('generateOAuthState', () => {
   });
 });
 
-describe('legacy PKCE helpers', () => {
-  it('generateCodeVerifier returns base64url', () => {
-    const v = generateCodeVerifier();
-    expect(v).toMatch(/^[A-Za-z0-9_-]+$/);
+describe('PKCE re-exports', () => {
+  // The implementation and its RFC 7636 vector live in the engine
+  // (packages/agent-engine/src/pkce.test.ts). What matters here is only that the
+  // IDE re-exports the real thing — these names were `@deprecated` stubs wired to
+  // nothing until PKCE was actually implemented.
+  const RFC_VERIFIER = 'dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk';
+  const RFC_CHALLENGE = 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM';
+
+  it('re-exports a working S256 derivation', () => {
+    expect(codeChallengeS256(RFC_VERIFIER)).toBe(RFC_CHALLENGE);
   });
 
-  it('codeChallengeS256 is deterministic', () => {
-    expect(codeChallengeS256('abc')).toBe(codeChallengeS256('abc'));
+  it('re-exports a verifier generator inside the RFC length range', () => {
+    const v = generateCodeVerifier();
+    expect(v).toMatch(/^[A-Za-z0-9\-._~]+$/);
+    expect(v.length).toBeGreaterThanOrEqual(43);
   });
 });
 

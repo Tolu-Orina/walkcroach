@@ -25,6 +25,7 @@ import {
   RESERVED_COCKROACHDB_SERVER_NAME,
   type McpConfig,
 } from './mcp.js';
+import { registerConfiguredMcpServers } from './mcp-stdio.js';
 import { SkillsRegistry, defaultSkillRoots } from './skills.js';
 import { TelemetrySink } from './telemetry.js';
 import type { ProjectMemoryBridge } from './project-memory.js';
@@ -376,12 +377,24 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
   let mcpServerRegistry: McpServerRegistry | null = null;
   if (includePhaseB) {
     const fileServers = await loadMcpServersConfig(host.getWorkspaceRoot());
-    const names = Object.keys(fileServers).filter(
-      (n) => n !== RESERVED_COCKROACHDB_SERVER_NAME,
+    // The reserved name is dropped before registration so a workspace cannot
+    // shadow the built-in CockroachDB client by naming a server after it.
+    const configured = Object.fromEntries(
+      Object.entries(fileServers).filter(
+        ([n]) => n !== RESERVED_COCKROACHDB_SERVER_NAME,
+      ),
     );
-    if (names.length) {
+    if (Object.keys(configured).length) {
       mcpServerRegistry = new McpServerRegistry();
-      for (const n of names) mcpServerRegistry.register(n, fileServers[n]!);
+      // Gating for stdio servers (consent, resolved command, minimal env) lives
+      // in registerConfiguredMcpServers — see mcp-stdio.ts and
+      // docs/walkcroach-stdio-mcp-security-review.md §6.
+      await registerConfiguredMcpServers({
+        host,
+        registry: mcpServerRegistry,
+        fileServers: configured,
+        supervisor: host.stdioMcp,
+      });
       const errors = await mcpServerRegistry.connectAll();
       for (const [serverName, message] of errors) {
         host.emit({
