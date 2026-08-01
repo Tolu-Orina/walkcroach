@@ -149,6 +149,15 @@ Resources:
                   - codebuild:BatchGetBuilds
                   - codebuild:StartBuild
                 Resource: !GetAtt TerraformDeployProdBuild.Arn
+              # Every CodeBuild project referenced by a pipeline action needs its
+              # own grant here — this policy allowlists project ARNs one by one
+              # rather than using a wildcard, so adding a project to a stage is
+              # not enough on its own.
+              - Effect: Allow
+                Action:
+                  - codebuild:BatchGetBuilds
+                  - codebuild:StartBuild
+                Resource: !GetAtt CreativeImageBuild.Arn
               - Effect: Allow
                 Action:
                   - codestar-connections:UseConnection
