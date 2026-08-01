@@ -354,7 +354,8 @@ Resources:
                 Resource:
                   - !Sub 'arn:aws:bedrock:*:${AWS::AccountId}:guardrail/*'
                   - !Sub 'arn:aws:bedrock:*:${AWS::AccountId}:guardrail-profile/*'
-              # module.lambda_creative — ECR repo walkcroach-creative (+ lifecycle)
+              # module.lambda_creative — ECR repo walkcroach-<env>-creative (+ lifecycle).
+              # The `walkcroach*` prefix below already covers every environment.
               # CreateRepository often requires Resource '*' (repo does not exist yet).
               - Sid: EcrCreativeCreate
                 Effect: Allow
