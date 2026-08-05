@@ -162,6 +162,8 @@ module "lambda_ide" {
   runtime              = var.lambda_runtime
   timeout              = var.ide_lambda_timeout
   memory_mb            = var.ide_lambda_memory_mb
+  worker_timeout       = var.ide_worker_lambda_timeout
+  worker_memory_mb     = var.ide_worker_lambda_memory_mb
   bedrock_region       = var.bedrock_region
   nova_model_id        = var.nova_model_id
   titan_embed_model_id = var.titan_embed_model_id

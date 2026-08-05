@@ -1,0 +1,22 @@
+-- Widen the MVCC retention window on memory_entries so point-in-time recall is useful.
+--
+-- Measured 2026-08-04 (infra-backend/scripts/spike-asof-vector.mjs): the cluster
+-- default is gc.ttlseconds = 4500, i.e. 75 minutes. `AS OF SYSTEM TIME` cannot read
+-- past the GC window, so the SDK's `asOf()` / `diff()` — and the "what did the agent
+-- believe when it generated this?" story in the submission — had a 75-minute horizon.
+-- A judge trying it against yesterday's session would have got an error, not an answer.
+--
+-- 90000s = 25 hours. Chosen over a longer window because the realistic question is
+-- "what did it believe yesterday", and MVCC retention costs storage proportional to
+-- WRITE VOLUME, not row count: every superseded version and every delete tombstone is
+-- kept for the full window. memory_entries is append-mostly with a supersede path, so
+-- this is the table where that trade-off is worth making and the only table changed.
+--
+-- The spike also confirmed the C-SPANN index stays eligible under AS OF SYSTEM TIME
+-- (`• vector search … prefix spans: [/'<project_id>'/NULL - …]`), so historical recall
+-- is real semantic search rather than a scan.
+--
+-- If this fails with "zone configs are not supported" the cluster tier does not permit
+-- them; in that case asOf() must ship documenting the real 75-minute limit instead.
+
+ALTER TABLE memory_entries CONFIGURE ZONE USING gc.ttlseconds = 90000;

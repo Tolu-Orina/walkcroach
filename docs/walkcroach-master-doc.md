@@ -3,7 +3,9 @@
 **Compiled:** 2026-07-29 · **Refreshed:** 2026-07-31  
 **Method:** From-scratch code review of the monorepo (`walkcroach/`). Historical PRDs and deleted implementation plans are **not** sources of truth; when they conflict with this doc, prefer the code. Companion index: [`docs/README.md`](./README.md).
 
-**Scope:** Four shipped surfaces sharing one CockroachDB memory layer — **Web**, **Chrome**, **IDE**, **CLI** — plus shared **agent-engine** (IDE/CLI), **agent-harness** (Lambda / Web+Chrome), and backend infra. **Desktop** (sibling `walkcroach-desktop/`) remains postponed scaffolding, not a fifth shipped surface.
+**Scope:** **Six surfaces** on one CockroachDB memory layer — **Web**, **Chrome**, **IDE extension**, **CLI**, **SDK**, **Desktop IDE** — plus shared **agent-engine** (IDE/CLI/SDK/Desktop), **agent-harness** (Lambda / Web+Chrome), and backend infra.
+
+Maturity differs sharply and the table in §0.1 is the authority. Four surfaces are shipped and published; the **SDK** is built and partly proven; **Desktop** is an active build on a Code OSS fork and is **not** yet shippable. Do not describe either as shipped without checking §0.1.
 
 ---
 
@@ -19,7 +21,8 @@
 | **CLI** | **Published — `@walkcroach/cli@0.3.0` on npm** | Same engine as IDE. v0.3.0, browser **loopback** auth (RFC 8252; `--token` for CI), `bin` + `publishConfig` + `.github/workflows/publish-cli.yml` (OIDC). PKCE (S256) landed 2026-08-01. |
 | **Shared agent-engine** | **Most mature module** | gather→act→verify, hard verify, adversarial review, checkpoints, hooks, tool-loop-guard. Has dedicated `loop.test.ts`. |
 | **agent-harness** | **Mature, creative-heavy** | Web/Chrome Lambda loop (~2.9k lines `loop.ts`); creatives, connectors, guardrails, EMF metrics. **`loop.test.ts` landed 2026-08-01** — 45 mutation-verified tests. |
-| **Desktop IDE** | **Postponed / scaffold only** | Sibling repo; docs archived under `docs/archive/`. Do not describe as shipped. |
+| **SDK** | **Built 2026-08-04/05; memory half proven, agent half unrun** | `@walkcroach/sdk` (memory, `asOf`/`diff`, export/import), `@walkcroach/sdk-mcp` (MCP **2026-07-28**), `@walkcroach/sdk-host` (programmatic `HostAdapter`). Async run model — submit → worker Lambda → poll. Memory paths verified against the live cluster; **the agent path has never executed**. See [`walkcroach-sdk-implementation-plan.md`](./walkcroach-sdk-implementation-plan.md) §0.5. |
+| **Desktop IDE** | **Active build — not shippable** | Code OSS fork pinned `1.129.0`; phases marked "structural" mean scaffolding verifies, not that the fork compiles. Going **native via the VS Code Agent Host (shipped upstream 1.130)** rather than a bespoke runtime. Plan: [`walkcroach-desktop-implementation-plan.md`](./walkcroach-desktop-implementation-plan.md). Do not describe as shipped. |
 | **Backend infra** | **Real; expanded Jul 30–31, hardened Aug 1** | **32** CockroachDB migrations; Terraform modules include creative Lambda, video SFN (optional), guardrails, creative budget/dashboard. DB client now verifies TLS and retries 40001. Soft spots remain (empty video worker ARN, pipeline IAM asymmetry, likely-orphaned `agent_locks`). |
 
 ### 0.2 What changed since the 2026-07-29 audit
@@ -131,9 +134,20 @@ Same engine; TUI / pipe / `--json`; approvals; BYOK; doctor. **Auth:** browser l
 
 ---
 
-## 4. Desktop IDE (postponed)
+## 4. Desktop IDE (active build, native agent)
 
-Sibling `walkcroach-desktop/` exists beside this monorepo. Plans/PRDs live in [`docs/archive/`](./archive/). Core native agent / full fork compile were not a shipped product as of the Jul 29 audit; treat as **out of monorepo delivery scope** until revived.
+Sibling `walkcroach-desktop/` — a Code OSS **fork**, not an Electron shell around the extension. Revived 2026-08-05 with a native-agent architecture. Full plan: [`walkcroach-desktop-implementation-plan.md`](./walkcroach-desktop-implementation-plan.md).
+
+**The architectural fact that drives it:** VS Code shipped an **Agent Host** in **1.130 (2026-07-22)** — a dedicated process running agent harnesses, spoken to over the open **Agent Host Protocol (AHP)**, with upstream adapters for Copilot, Claude and Codex. The fork is pinned to **1.129.0**, one release before it. So the native runtime Phase B set out to build now exists upstream as an extension point, and WalkCroach ships an **AHP adapter** instead.
+
+What that buys over the VSIX, precisely:
+- Agent runs in its own process, so a busy extension host cannot stall it — the real performance win, since VS Code's IPC itself is fast and rarely the bottleneck.
+- Direct workbench services: `ITextModelService` (unsaved buffers), `ISearchService` (the editor's ripgrep index), `ITerminalService`, `IEditorService`.
+- Sessions survive the window closing; multiple windows share one session; remote execution comes free.
+
+**Deliberately not:** a second agent loop (`agent-engine` remains the loop), a Marketplace proxy (Open VSX only), or loading the WalkCroach VSIX inside Desktop — two agents would mean two auth sessions and two memory writers racing on `source_surface`.
+
+**State, honestly:** the fork has never been compiled end-to-end here. Phases marked "✅ Structural" mean `phase*-verify.mjs` passes on scaffolding. `packages/desktop-agent/desktopHostAdapter.ts` exists as a fourth `HostAdapter` implementation. Nothing is shippable yet.
 
 ---
 
@@ -193,7 +207,8 @@ Seventeen `walkcroach-*` skill directories + `NOTICE.md` (Apache vs proprietary)
 
 | # | Gap | Why it matters |
 |---|---|---|
-| 1 | Desktop not a shipped surface | Don’t market a fifth surface |
+| 1 | **Desktop is an active build, not a shipped surface.** The fork has never fully compiled here and the pin (1.129.0) predates the Agent Host it now depends on | Six surfaces exist; only four are shipped. Don't market Desktop |
+| 1b | **SDK agent path has never executed.** Memory paths are proven live; the loop, GitHub PR, and Bedrock embed paths are covered only by mocks | The `AGENTS.md` bug — 24 green tests over a feature that was dead in production — is what unrun seams look like |
 | ~~2~~ | ~~`agent-harness` `loop.ts` lacks dedicated unit tests~~ | ✅ Closed 2026-08-01 — `loop.test.ts`, 45 tests, verified against 4 deliberate mutations |
 | 3 | Lambda BFF handler tests still thin vs client/engine; no Lambda error/latency alarms | Money, merge, deploy, video + ops |
 | 4 | Creative image not yet pushed | Wiring complete — `creative_lambda_image_tag` creates the creative Lambda and chains the video SFN worker off its ARN. One `scripts/push-creative-image.sh` + apply away from live |

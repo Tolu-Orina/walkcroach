@@ -1,0 +1,41 @@
+{
+  "name": "@walkcroach/sdk-mcp",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "MCP server (2026-07-28) exposing the WalkCroach agentic memory layer to any compliant host",
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "walkcroach-mcp": "./dist/bin.js"
+  },
+  "files": ["dist", "README.md"],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "serve": "node dist/bin.js serve"
+  },
+  "keywords": ["mcp", "model-context-protocol", "agent-memory", "cockroachdb"],
+  "dependencies": {
+    "@walkcroach/sdk": "file:../sdk"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "@vitest/coverage-v8": "^3.2.7",
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

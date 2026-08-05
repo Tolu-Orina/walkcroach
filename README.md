@@ -1,6 +1,13 @@
 # WalkCroach
 
-Agentic memory-first AI platform — one CockroachDB memory layer across a web builder, browser copilot, IDE agent, and CLI.
+Agentic memory-first AI platform — one CockroachDB memory layer across **six surfaces**:
+a web builder, a browser copilot, an IDE extension, a CLI, an SDK, and a native Desktop IDE.
+
+| Surface | State |
+|---|---|
+| Web · Chrome · IDE extension · CLI | Shipped |
+| **SDK** (`@walkcroach/sdk`, `sdk-mcp`, `sdk-host`) | Built; agent path not yet run end-to-end |
+| **Desktop IDE** (Code OSS fork, native agent) | In build — see [plan](./docs/walkcroach-desktop-implementation-plan.md) |
 
 Built for the **CockroachDB × AWS Hackathon — Build with Agentic Memory**.
 
@@ -12,7 +19,10 @@ walkcroach/
 ├── chrome/                           # Manifest V3 extension (WXT) — own npm project
 ├── ide/                              # VS Code extension — own npm project
 ├── cli/                              # CLI (same agent engine as IDE) — own npm project
-├── packages/agent-engine/            # Shared IDE/CLI agent engine (no vscode imports)
+├── packages/agent-engine/            # Shared agent loop — IDE, CLI, SDK, Desktop (no vscode imports)
+├── packages/sdk/                     # @walkcroach/sdk — memory client
+├── packages/sdk-mcp/                 # MCP server (2026-07-28) over the memory layer
+├── packages/sdk-host/                # Programmatic HostAdapter — the loop, driven by API
 ├── packages/templates/               # Shared project templates
 ├── skills/web/                       # WalkCroach Agent Skills (Web)
 ├── infra-backend/                    # Terraform + own npm workspaces

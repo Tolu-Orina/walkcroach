@@ -76,8 +76,30 @@ variable "ide_lambda_zip_path" {
 
 variable "ide_lambda_timeout" {
   type        = number
-  description = "IDE BFF Lambda timeout seconds"
-  default     = 60
+  description = <<-EOT
+    IDE BFF Lambda timeout, seconds — the *request* path only.
+
+    Raised from 60 because a memory recall embeds its query through Bedrock
+    first, and a cold Bedrock call plus a CockroachDB round trip left very
+    little headroom under load.
+
+    Deliberately NOT raised to Lambda's maximum: long agent runs execute on the
+    separate worker function, and a generous timeout here would mean a hung
+    request holds a concurrency slot for as long as it takes to notice.
+  EOT
+  default     = 120
+}
+
+variable "ide_worker_lambda_timeout" {
+  type        = number
+  description = "Async run worker timeout, seconds. 900 is Lambda's maximum and the ceiling on one run."
+  default     = 900
+}
+
+variable "ide_worker_lambda_memory_mb" {
+  type        = number
+  description = "Async run worker memory. Holds repository context and the agent transcript."
+  default     = 2048
 }
 
 variable "ide_lambda_memory_mb" {

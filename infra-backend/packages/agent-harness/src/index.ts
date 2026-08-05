@@ -102,6 +102,101 @@ export {
   RECALL_OVERFETCH,
 } from './memory.js';
 export {
+  recallProjectMemoryAsOf,
+  diffProjectMemory,
+  toSystemTimeLiteral,
+  RetentionWindowError,
+  MEMORY_GC_TTL_SECONDS,
+  type MemoryDiff,
+} from './memory-timetravel.js';
+export {
+  openContentPullRequest,
+  readRepoContext,
+  getInstallationToken,
+  getDefaultBranch,
+  contentBranchName,
+  createGithubAppJwt,
+  type RepoFile,
+  type PullRequestResult,
+} from './github-pr.js';
+export {
+  submitRun,
+  claimRun,
+  heartbeatRun,
+  completeRun,
+  cancelRun,
+  getRun,
+  appendRunEvent,
+  listRunEvents,
+  reapExpiredRuns,
+  isTerminal,
+  LEASE_SECONDS,
+  TERMINAL_STATUSES,
+  type AgentRun,
+  type RunEvent,
+  type RunStatus,
+} from './run-store.js';
+export {
+  publishContent,
+  deriveTitle,
+  renderPrBody,
+  type AgentRunner,
+  type PublishSource,
+  type PublishResult,
+} from './content-publish.js';
+export {
+  resolveAgentsChain,
+  renderAgentsInstructions,
+  extractAgentsRules,
+  isAgentsFile,
+  AGENTS_FILENAMES,
+  MAX_AGENTS_LINES,
+} from './agents-md.js';
+export {
+  fenceUntrusted,
+  detectInjection,
+  inspectGeneratedContent,
+  renderSecurityNotes,
+  type InjectionSignal,
+  type FencedContent,
+  type OutputFlag,
+} from './untrusted-content.js';
+export {
+  discoverHouseStyle,
+  inferRepoRules,
+  mergeHouseStyle,
+  parseMemoryRules,
+  ruleToMemoryText,
+  renderHouseStyle,
+  skillRules,
+  SKILL_DEFAULTS,
+  MEMORY_RULE_PREFIX,
+  type StyleRule,
+  type RuleSource,
+  type HouseStyle,
+} from './house-style.js';
+export {
+  getImageBudget,
+  reserveImageBudget,
+  releaseImageBudget,
+  ImageBudgetExceededError,
+  DEFAULT_IMAGE_DAILY_LIMIT,
+  type BudgetState,
+} from './image-budget.js';
+export {
+  exportProjectMemory,
+  importProjectMemory,
+  validateExport,
+  parseVector,
+  ImportFormatError,
+  EXPORT_FORMAT,
+  EXPORT_VERSION,
+  EMBEDDING_DIMENSIONS,
+  type MemoryExport,
+  type ExportedEntry,
+  type ImportResult,
+} from './memory-portability.js';
+export {
   memoryMetric,
   observeRecall,
   MEMORY_METRIC_NAMESPACE,

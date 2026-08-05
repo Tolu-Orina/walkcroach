@@ -11,9 +11,11 @@
     "dev": "node --import tsx --watch src/local-server.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-lambda": "^3.1103.0",
     "@aws-sdk/client-secrets-manager": "^3.800.0",
     "@walkcroach/agent-harness": "*",
     "@walkcroach/db": "*",
+    "@walkcroach/sdk-host": "file:../../../../packages/sdk-host",
     "aws-jwt-verify": "^5.0.0"
   },
   "devDependencies": {

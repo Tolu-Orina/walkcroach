@@ -6,11 +6,20 @@
  */
 import { CognitoJwtVerifier } from 'aws-jwt-verify';
 import type { CognitoJwtVerifierSingleUserPool } from 'aws-jwt-verify/cognito-verifier';
+import { createDbClient } from '@walkcroach/db';
+import { isApiKey, verifyApiKey, type ApiKeyScope } from './api-keys.js';
 
 export type AuthContext = {
   ownerId: string;
   isAnonymous: boolean;
-  source: 'jwt' | 'dev';
+  source: 'jwt' | 'dev' | 'apikey';
+  /**
+   * Present only for API-key callers. `undefined` means "a Cognito user", which
+   * carries no scope restriction — see `hasScope`. Scopes narrow a key; they
+   * never widen anything.
+   */
+  scopes?: ApiKeyScope[];
+  keyId?: string;
 };
 
 let idVerifier: CognitoJwtVerifierSingleUserPool<{
@@ -132,6 +141,28 @@ async function verifyJwt(token: string): Promise<AuthContext | null> {
   return null;
 }
 
+/**
+ * API keys are checked before JWTs and are unambiguous by prefix, so a key is
+ * never fed to the Cognito verifier (which would log a parse failure per call).
+ */
+async function resolveApiKeyAuth(token: string): Promise<AuthContext | null> {
+  if (!isApiKey(token)) return null;
+  const db = createDbClient();
+  try {
+    const ctx = await verifyApiKey(db, token);
+    if (!ctx) return null;
+    return {
+      ownerId: ctx.ownerId,
+      isAnonymous: false,
+      source: 'apikey',
+      scopes: ctx.scopes,
+      keyId: ctx.keyId,
+    };
+  } finally {
+    await db.close();
+  }
+}
+
 export async function resolveAuth(
   headers: Record<string, string | undefined> | undefined,
 ): Promise<AuthContext | null> {
@@ -141,8 +172,16 @@ export async function resolveAuth(
   const dev = resolveDevToken(token);
   if (dev) return dev;
 
+  const key = await resolveApiKeyAuth(token);
+  if (key) return key;
+  // A malformed or revoked `wc_live_` token must fail, not fall through to the
+  // JWT path where it would produce a confusing "invalid token" from Cognito.
+  if (isApiKey(token)) return null;
+
   return verifyJwt(token);
 }
+
+export type { ApiKeyScope };
 
 export async function requireAuth(
   headers: Record<string, string | undefined> | undefined,

@@ -19,6 +19,7 @@ import {
   handleCreateSessionCode,
   handleExchangeToken,
 } from './oauth.js';
+import { handleSdkRest, isSdkPath } from './sdk.js';
 import { handleSkillsList, handleSkillsMirror } from './skills.js';
 
 /** Strip API Gateway stage prefix if present (`/v1/ide/...` → `/ide/...`). */
@@ -39,6 +40,13 @@ export async function handleIdeRest(req: HttpRequest) {
       headers: CORS_HEADERS,
       body: '',
     };
+  }
+
+  // Public SDK surface. Checked before the `/ide/v1` routes and matched on the
+  // raw path — `isSdkPath` only claims `/memory`, `/keys`, `/health`, so it
+  // cannot shadow anything under `/ide/v1`.
+  if (isSdkPath(req.path)) {
+    return handleSdkRest(req);
   }
 
   if (method === 'GET' && /\/ide\/v1\/health\/?$/.test(path)) {

@@ -30,9 +30,11 @@
 
 ## 1. What WalkCroach is
 
-An agentic platform where **one CockroachDB memory layer is shared across four
+An agentic platform where **one CockroachDB memory layer is shared across six
 surfaces**: a web app-builder, a Chrome side-panel copilot, a VS Code / Cursor
-extension, and a CLI.
+extension, a CLI, an **SDK** (the agent loop driven programmatically, plus an MCP
+server any compliant host can attach to), and a **Desktop IDE** built on a Code OSS
+fork with a native agent.
 
 The thesis: an agent loop cannot build coherently without recalling what it already
 decided. A decision made in the browser has to be available to the agent in your
@@ -46,8 +48,17 @@ test that creates a Web project, links an IDE repo key, mirrors a decision, and
 recalls it from the other side:
 [`tests/integration/cross-surface.integration.test.ts`](../tests/integration/cross-surface.integration.test.ts).
 
-**Scope honesty:** four surfaces ship. The sibling `walkcroach-desktop/` is
-postponed scaffolding and is **not** a fifth surface — do not present it as one.
+**Scope honesty — six surfaces exist, four ship.**
+
+| Surface | May be demoed / claimed? |
+|---|---|
+| Web, Chrome, IDE extension, CLI | ✅ Shipped and published |
+| **SDK** | ⚠️ **Partly.** Memory, MCP, keys, budgets, and the async run model are verified against the live cluster. The **agent path has never executed** — see §5.11 and §7 row 11 |
+| **Desktop IDE** | ❌ **No.** Active build on a Code OSS fork; the fork has never fully compiled here. Not a demoable surface |
+
+Presenting six *shipped* surfaces would be false. The honest framing is: one memory
+layer, four shipped clients of it, plus an SDK that lets anyone else become a
+client, and a native Desktop IDE in build.
 
 ---
 
@@ -501,6 +512,71 @@ infra commands permanently outside auto-approve. Chrome threat model is written 
 separately in
 [`walkcroach-chrome-threat-model.md`](./walkcroach-chrome-threat-model.md).
 
+### 5.11 The memory layer is consumable by third parties — SDK + MCP
+
+**Status: built 2026-08-04, verified against the live cluster. Two paths remain
+unverified — see the end of this section — and those two specifically must stay out of
+the video until a deployed smoke test passes.**
+
+Four first-party surfaces sharing a database is what a monorepo looks like. It does not,
+on its own, demonstrate that the memory layer is a *product* rather than an internal
+module. The SDK is what makes the thesis falsifiable by someone who is not us:
+
+- **`@walkcroach/sdk`** — a typed, isomorphic client for the memory layer only.
+  `remember` / `recall` / `list` / `forget`, plus point-in-time `asOf()` and `diff()`
+  built on `AS OF SYSTEM TIME`. No embeddings, distances, or index hints are exposed;
+  `project_id` is required on every read so an unscoped recall — which would silently
+  bypass the tenant-prefixed C-SPANN index rebuilt in `026`–`032` — cannot be expressed.
+- **`@walkcroach/sdk-mcp`** — an MCP server implementing the **2026-07-28** revision,
+  which reached stable six days before this work started.
+
+The MCP server is the part that matters for judging. It means Claude Code, Cursor, or any
+compliant host can read and write the same CockroachDB memory the four surfaces use —
+a fifth surface we did not have to build.
+
+**Why the new spec fits rather than fights us.** The 2026-07-28 revision removed
+protocol-level sessions and the `Mcp-Session-Id` header entirely; servers needing
+cross-call state now use *server-minted handles passed as ordinary tool arguments*
+(SEP-2567), and the `initialize` handshake is gone in favour of per-request `_meta`
+(SEP-2575). That is a description of the architecture this repo already had. The locked
+client-resume decision — sandbox tools resume the stream via
+`POST /sessions/:id/tool-result` because API Gateway + `streamifyResponse` holds no
+cross-call state — stopped being a constraint we designed around and became the shape the
+specification now prescribes. We are not adopting the new spec by rewriting; we are
+adopting it by deleting the workarounds.
+
+**Memory you can take with you.** `walkcroach-memory-export/1.0` is a documented JSON
+envelope carrying every entry, its embedding, and — critically — the superseded entries
+and their supersede links. Every incumbent in this category monetises lock-in and ships
+no export at all, while the EU Data Act's switching provisions (in force since
+2025-09-12) and a W3C AI Agent Memory Interoperability community group (proposed
+2026-05-18) both point the other way. Because the bundle names the model that produced
+its vectors, import is exact and needs no inference call when the model matches —
+demonstrated end-to-end on a machine with no AWS credentials at all.
+
+**What was measured, not assumed.** The point-in-time story rested on an untested
+assumption: that CockroachDB would still use the C-SPANN index under `AS OF SYSTEM TIME`.
+`infra-backend/scripts/spike-asof-vector.mjs` settled it against the live cluster —
+forcing the index plans `• vector search … prefix spans: [/'<project_id>'/NULL - …]`
+historically as well as at present time, so `asOf()` is real semantic search rather than
+a full scan. The same spike found `gc.ttlseconds = 4500`, meaning the provenance window
+was **75 minutes** and a judge trying yesterday's session would have got an error;
+migration `034` raised it to 25 hours on `memory_entries` alone.
+
+**Verified live:** cross-tenant reads refused with 404 (not 403 — a 403 would confirm
+existence and let a caller enumerate other tenants' project ids); a `memory:read` key
+refused `remember` naming the missing scope; API keys refused key management outright, so
+a leaked key cannot mint its own replacements; export/import round-trip preserving the
+supersede chain across id remapping, idempotent on re-import.
+
+**Not yet verified:** `recall` and `remember` call Bedrock for embeddings, and the build
+machine has no AWS credentials (deploys are gitops). Both are covered by mocked tests and
+share the `/v1` handler with paths proven live, but the embed round-trip has not executed.
+Those two claims wait on a deployed smoke test.
+
+Full design, measured findings, and the honest scope/deadline argument:
+[`walkcroach-sdk-implementation-plan.md`](./walkcroach-sdk-implementation-plan.md).
+
 ---
 
 ## 6. Video plan (< 3 min) — TODO to record
@@ -531,6 +607,9 @@ Lead with the cross-surface moment; do not tour features.
 | 7 | Connector credentials | Google (Calendar/Gmail/Sheets), Slack and Stripe are all one OAuth app each — demoable. Gmail/Calendar run test-user-only until Google verifies restricted scopes, which will not complete before the deadline. **HubSpot is marked coming-soon in code** (their Projects framework replaced legacy public apps). Remote site profiles still need an Ed25519 signing key. |
 | ~~8~~ | ~~Chrome Web Store~~ | ✅ **0.6.0 approved and live.** Release is tag-driven (`publish-chrome.yml`, `chrome-v*`) like the CLI and IDE. |
 | ~~9~~ | ~~CLI/IDE not published~~ | ✅ **Closed 2026-08-01.** `@walkcroach/cli@0.3.0` on npm via OIDC trusted publishing, carrying a SLSA provenance attestation; `walkcroach.walkcroach-ide@0.2.0` on Open VSX. PKCE closed the same day — see §5.9. |
+| 11 | **SDK + MCP server (§5.11)** | ⚠️ **Mostly closed 2026-08-04.** Conformance (29 tests), tenant isolation, scope enforcement, time-travel, and portability all verified against the live cluster. `AS OF SYSTEM TIME` index eligibility confirmed; retention widened to 25h by migration `034`. **Remaining:** `recall`/`remember` embed via Bedrock and have never run outside mocks on this machine (no AWS creds by design). Smoke-test both against a deployed environment before the video, or demo only `list_memory` / `memory_timeline`. |
+| 13 | **Desktop IDE (6th surface)** | Active build, native agent via the VS Code Agent Host. Gate is green only when the fork compiles on two platforms, a WalkCroach session appears in the Agents window, and `DesktopHostAdapter` passes the `agent-engine` conformance suite. Until then Desktop must not appear in the video, the README, or the surface count as *shipped*. Plan: [`walkcroach-desktop-implementation-plan.md`](./walkcroach-desktop-implementation-plan.md). |
+| 12 | **Seed data is stale and duplicated** | The cluster holds 9 memory entries, all written 2026-07-17, 8 of them byte-identical, none superseded. That predates the supersede path (landed 2026-08-01), so it is not a defect — but it means the supersede path has **never executed against a real write**, and video beat 2:10–2:35 depends on demonstrating exactly that. Seed a fresh project and rehearse the contradiction beat before recording. |
 | ~~10~~ | ~~`agent-harness/loop.ts` has no dedicated unit suite~~ | ✅ **Closed 2026-08-01.** `loop.test.ts` — 45 tests over memory recall, the session state machine, mode escalation, and loop termination. Mutation-verified (see §5.7). |
 
 ---

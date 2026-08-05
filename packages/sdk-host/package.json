@@ -1,0 +1,33 @@
+{
+  "name": "@walkcroach/sdk-host",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Programmatic HostAdapter for @walkcroach/agent-engine — the WalkCroach IDE agent loop driven over a sandbox instead of an editor",
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@walkcroach/agent-engine": "file:../agent-engine"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "@vitest/coverage-v8": "^3.2.7",
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

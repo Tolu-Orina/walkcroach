@@ -1,0 +1,42 @@
+{
+  "name": "@walkcroach/sdk",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Typed client for the WalkCroach agentic memory layer — durable, tenant-scoped, provenance-preserving memory on CockroachDB",
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "README.md"],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
+  },
+  "keywords": [
+    "agent-memory",
+    "cockroachdb",
+    "mcp",
+    "llm",
+    "vector-search",
+    "provenance"
+  ],
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "@vitest/coverage-v8": "^3.2.7",
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
