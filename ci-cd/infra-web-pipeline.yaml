@@ -265,13 +265,14 @@ Resources:
                 Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*'
 
   # ─── IAM Roles for CodeBuild - Terraform Operations, split per environment ──
-  # infra-web's Terraform config (main.tf + modules/{s3,cloudfront,dns,acm})
-  # never creates DynamoDB/Lambda/Cognito/API GW/KMS/IAM resources — those
-  # broad grants from the backend template are omitted. Remaining grants
-  # (S3, CloudFront, Route53, ACM, SSM) are split per env. DynamoDB is
-  # limited to the shared Terraform state lock table only. CloudFront/
-  # Route53/ACM stay on Resource: '*' because those services use opaque
-  # AWS-generated IDs (no name-based ARN for Create*).
+  # infra-web's Terraform config (main.tf + modules/{s3,cloudfront,dns,acm,
+  # desktop-releases}) never creates DynamoDB/Lambda/Cognito/API GW/KMS/IAM
+  # resources — those broad grants from the backend template are omitted.
+  # Remaining grants (S3 SPA + desktop-releases + logs, CloudFront, Route53,
+  # ACM, SSM) are split per env. DynamoDB is limited to the shared Terraform
+  # state lock table only. CloudFront/Route53/ACM stay on Resource: '*'
+  # because those services use opaque AWS-generated IDs (no name-based ARN
+  # for Create*).
   CodeBuildTerraformRoleDev:
     Type: AWS::IAM::Role
     Properties:
@@ -314,6 +315,8 @@ Resources:
                   - 'arn:aws:s3:::walkcroach-web-dev/*'
                   - 'arn:aws:s3:::walkcroach-logs-dev'
                   - 'arn:aws:s3:::walkcroach-logs-dev/*'
+                  - 'arn:aws:s3:::walkcroach-desktop-releases-dev'
+                  - 'arn:aws:s3:::walkcroach-desktop-releases-dev/*'
               - Sid: TerraformStateObjectsDev
                 Effect: Allow
                 Action:
@@ -403,6 +406,8 @@ Resources:
                   - 'arn:aws:s3:::walkcroach-web-test/*'
                   - 'arn:aws:s3:::walkcroach-logs-test'
                   - 'arn:aws:s3:::walkcroach-logs-test/*'
+                  - 'arn:aws:s3:::walkcroach-desktop-releases-test'
+                  - 'arn:aws:s3:::walkcroach-desktop-releases-test/*'
               - Sid: TerraformStateObjectsTest
                 Effect: Allow
                 Action:
@@ -492,6 +497,8 @@ Resources:
                   - 'arn:aws:s3:::walkcroach-web-prod/*'
                   - 'arn:aws:s3:::walkcroach-logs-prod'
                   - 'arn:aws:s3:::walkcroach-logs-prod/*'
+                  - 'arn:aws:s3:::walkcroach-desktop-releases-prod'
+                  - 'arn:aws:s3:::walkcroach-desktop-releases-prod/*'
               - Sid: TerraformStateObjectsProd
                 Effect: Allow
                 Action:

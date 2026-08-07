@@ -15,7 +15,6 @@
   "files": ["dist", "src", "fixtures", "README.md"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "prepare": "npm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "check:drift": "node scripts/check-memory-contracts-drift.mjs"
