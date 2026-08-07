@@ -13,24 +13,10 @@ phases:
     commands:
       - |
         set -eu
-        # Private file: packages — dist/ is gitignored. Build before infra-backend
-        # typecheck (ide-api → sdk-host → agent-engine; harness → memory-contracts).
-        # Use CODEBUILD_SRC_DIR: cd persists across commands in a phase.
-        cd "${CODEBUILD_SRC_DIR}/packages/memory-contracts"
-        npm ci --include=dev
-        npm run build
-
-        cd "${CODEBUILD_SRC_DIR}/packages/agent-engine"
-        npm ci --include=dev
-        npm run build
-
-        cd "${CODEBUILD_SRC_DIR}/packages/sdk-host"
-        npm ci --include=dev
-        npm run build
-
+        # build:shared (via typecheck → build:packages) npm ci's + builds
+        # memory-contracts, agent-engine, and sdk-host under packages/.
         cd "${CODEBUILD_SRC_DIR}/infra-backend"
         npm ci
-        # Root typecheck builds workspace packages (dist/) then tsc in each
         npm run typecheck
         npm run test
 artifacts:

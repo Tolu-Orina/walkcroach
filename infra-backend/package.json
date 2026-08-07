@@ -11,9 +11,9 @@
   ],
   "scripts": {
     "build": "npm run build:shared && npm run build -w @walkcroach/db && npm run build -w @walkcroach/ledger && npm run build -w @walkcroach/storage && npm run build -w @walkcroach/connectors && npm run build -w @walkcroach/agent-harness && npm run build -w @walkcroach/backend && npm run build -w @walkcroach/chrome-api && npm run build -w @walkcroach/ide-api",
-    "build:memory-contracts": "npm run build --prefix ../packages/memory-contracts",
-    "build:agent-engine": "npm run build --prefix ../packages/agent-engine",
-    "build:sdk-host": "npm run build --prefix ../packages/sdk-host",
+    "build:memory-contracts": "npm ci --include=dev --prefix ../packages/memory-contracts && npm run build --prefix ../packages/memory-contracts",
+    "build:agent-engine": "npm ci --include=dev --prefix ../packages/agent-engine && npm run build --prefix ../packages/agent-engine",
+    "build:sdk-host": "npm ci --include=dev --prefix ../packages/sdk-host && npm run build --prefix ../packages/sdk-host",
     "build:shared": "npm run build:memory-contracts && npm run build:agent-engine && npm run build:sdk-host",
     "build:packages": "npm run build:shared && npm run build -w @walkcroach/db && npm run build -w @walkcroach/ledger && npm run build -w @walkcroach/storage && npm run build -w @walkcroach/connectors && npm run build -w @walkcroach/agent-harness",
     "dev": "npm run dev -w @walkcroach/backend",
