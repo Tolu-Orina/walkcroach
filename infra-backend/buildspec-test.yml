@@ -13,16 +13,24 @@ phases:
     commands:
       - |
         set -eu
-        # file: dep of agent-harness — dist/ is gitignored; no prepare script
-        # (prepare broke npm ci when typescript was not on PATH yet).
+        # Private file: packages — dist/ is gitignored. Build before infra-backend
+        # typecheck (ide-api → sdk-host → agent-engine; harness → memory-contracts).
         # Use CODEBUILD_SRC_DIR: cd persists across commands in a phase.
         cd "${CODEBUILD_SRC_DIR}/packages/memory-contracts"
         npm ci --include=dev
         npm run build
 
+        cd "${CODEBUILD_SRC_DIR}/packages/agent-engine"
+        npm ci --include=dev
+        npm run build
+
+        cd "${CODEBUILD_SRC_DIR}/packages/sdk-host"
+        npm ci --include=dev
+        npm run build
+
         cd "${CODEBUILD_SRC_DIR}/infra-backend"
         npm ci
-        # Root typecheck builds packages (dist/) then runs tsc in each workspace
+        # Root typecheck builds workspace packages (dist/) then tsc in each
         npm run typecheck
         npm run test
 artifacts:
