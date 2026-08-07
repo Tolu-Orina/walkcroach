@@ -6,6 +6,11 @@ Versioning follows [SemVer](https://semver.org/) and `docs/VERSIONING.md`.
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-08-07
+
+### Changed
+- Publishability: private `@walkcroach/memory-contracts` is **vendored at build** into `src/vendor/` instead of a `file:` runtime dependency (installers cannot resolve `file:`).
+
 ### Added
 - Durable run interrupt/resume (`threadId`, `interrupt`, `RunInterruptedError`, `RunHandle.resume`, OpenAPI `POST /v1/runs/{id}/resume`).
 

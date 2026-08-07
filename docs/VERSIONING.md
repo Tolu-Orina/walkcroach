@@ -6,7 +6,7 @@
 |---|---|---|
 | `@walkcroach/sdk` | yes | npm SemVer; OpenAPI `info.version` tracks **HTTP major.minor** |
 | `@walkcroach/sdk-mcp` | yes | npm SemVer; follows MCP protocol revisions in README |
-| `@walkcroach/memory-contracts` | private | bump when kinds/export break; consumed in-repo |
+| `@walkcroach/memory-contracts` | private | bump when kinds/export break; consumed in-repo; **vendored into `@walkcroach/sdk` at build** (not published) |
 | `@walkcroach/agent-engine` | **no** | not published (see ARCHITECTURE / Phase 6 gate) |
 
 ## OpenAPI vs npm

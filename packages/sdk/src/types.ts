@@ -1,6 +1,7 @@
 /**
  * SDK public types. Memory kinds / export / remember shapes come from
- * `@walkcroach/memory-contracts` (Phase 4) — do not redefine them here.
+ * `@walkcroach/memory-contracts` (Phase 4), vendored into this package at
+ * build time so the published tarball has no private `file:` dependency.
  */
 export {
   MEMORY_KINDS,
@@ -22,7 +23,7 @@ export {
   isMemoryKind,
   validateExport,
   ImportFormatError,
-} from '@walkcroach/memory-contracts';
+} from './vendor/memory-contracts/index.js';
 
 export type WalkCroachConfig = {
   /** Service-account key (`wc_live_…`). Server-side only. */

@@ -6,7 +6,7 @@
  * one remember/recall/list contract with the public SDK.
  */
 import { WalkCroach } from './index.js';
-import { normalizeMemoryKind, type MemoryKind } from '@walkcroach/memory-contracts';
+import { normalizeMemoryKind, type MemoryKind } from './vendor/memory-contracts/index.js';
 
 export type HostMemoryHit = {
   id: string;

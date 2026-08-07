@@ -23,11 +23,12 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "serve": "node dist/bin.js serve"
+    "serve": "node dist/bin.js serve",
+    "prepack": "npm run build"
   },
   "keywords": ["mcp", "model-context-protocol", "agent-memory", "cockroachdb"],
   "dependencies": {
-    "@walkcroach/sdk": "file:../sdk"
+    "@walkcroach/sdk": "^0.2.0"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",

@@ -11,6 +11,8 @@ name: Publish SDK packages
 #
 # Tags: sdk-vX.Y.Z → sdk only; sdk-mcp-vX.Y.Z → sdk-mcp only.
 # workflow_dispatch with dry_run=true packs without publishing.
+#
+# `@walkcroach/memory-contracts` stays private: the SDK vendors it at build time.
 
 on:
   push:
@@ -50,10 +52,10 @@ jobs:
       - name: Use npm >= 11.5.1
         run: npm install -g npm@^11
 
-      - name: Build memory-contracts
+      - name: Build memory-contracts (SDK vendor source)
         working-directory: packages/memory-contracts
         run: |
-          npm ci || npm install
+          npm ci --include=dev || npm install
           npm run build
           npm test
           npm run check:drift
@@ -61,16 +63,19 @@ jobs:
       - name: Build & test sdk
         working-directory: packages/sdk
         run: |
-          npm ci || npm install
+          npm ci --include=dev || npm install
           npm run build
           npm test
           npm run check:openapi
           npm run check:memory-contracts
 
-      - name: Build & test sdk-mcp
+      - name: Build & test sdk-mcp against local sdk
         working-directory: packages/sdk-mcp
         run: |
-          npm ci || npm install
+          npm ci --include=dev || npm install
+          # package.json depends on ^0.1.0 from the registry; for this job use
+          # the sibling package we just built (pre-publish / same-SHA cut).
+          npm install --no-save file:../sdk
           npm run build
           npm test
 
