@@ -61,7 +61,7 @@ describe('package manifest', () => {
     // npm rejects when package.json repository.url is missing or mismatched.
     expect(pkg.repository).toMatchObject({
       type: 'git',
-      url: 'https://github.com/Tolu-Orina/walkcroach',
+      url: 'git+https://github.com/Tolu-Orina/walkcroach.git',
       directory: 'packages/sdk',
     });
   });

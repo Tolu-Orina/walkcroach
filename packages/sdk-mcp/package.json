@@ -1,13 +1,13 @@
 {
   "name": "@walkcroach/sdk-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "MCP server (2026-07-28) exposing the WalkCroach agentic memory layer to any compliant host",
   "license": "MIT",
   "homepage": "https://walkcroach.rinegansolutions.com",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Tolu-Orina/walkcroach",
+    "url": "git+https://github.com/Tolu-Orina/walkcroach.git",
     "directory": "packages/sdk-mcp"
   },
   "bugs": {
@@ -22,14 +22,14 @@
     }
   },
   "bin": {
-    "walkcroach-mcp": "./dist/bin.js"
+    "walkcroach-mcp": "dist/bin.js"
   },
   "files": ["dist", "README.md"],
   "publishConfig": {
     "access": "public"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/ensure-bin-shebang.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "serve": "node dist/bin.js serve",

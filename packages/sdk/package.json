@@ -7,7 +7,7 @@
   "homepage": "https://walkcroach.rinegansolutions.com",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Tolu-Orina/walkcroach",
+    "url": "git+https://github.com/Tolu-Orina/walkcroach.git",
     "directory": "packages/sdk"
   },
   "bugs": {

@@ -2,8 +2,11 @@
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-08-07
+
 ### Changed
-- Depends on published `@walkcroach/sdk` `^0.2.0` (0.x caret: `^0.1.0` would not accept 0.2.0).
+- Depends on published `@walkcroach/sdk` `^0.2.0` (no `file:` dependency).
+- Bin path + shebang gate so npm keeps `walkcroach-mcp` on publish.
 
 ## [0.1.0] — 2026-08-07
 
