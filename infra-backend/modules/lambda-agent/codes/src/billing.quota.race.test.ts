@@ -111,7 +111,9 @@ function serializingDebitDb(monthly = 500) {
           };
         }
         if (/INSERT INTO usage_ledger/.test(sql)) {
-          return { rows: [] };
+          // debitCredits treats a missing RETURNING id as failure even when the
+          // balance UPDATE succeeded — mirror a real insert.
+          return { rows: [{ id: `ledger-${state.used}-${Math.random()}` }] };
         }
         if (/FROM entitlements/.test(sql)) {
           return { rows: [{ plan: 'paid' }] };

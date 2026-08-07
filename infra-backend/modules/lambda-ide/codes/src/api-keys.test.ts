@@ -57,8 +57,12 @@ describe('scope checks', () => {
     expect(hasScope([], 'memory:read')).toBe(false);
   });
 
-  it('exposes both scopes', () => {
-    expect([...ALL_SCOPES]).toEqual(['memory:read', 'memory:write']);
+  it('exposes memory and content scopes', () => {
+    expect([...ALL_SCOPES]).toEqual([
+      'memory:read',
+      'memory:write',
+      'content:run',
+    ]);
   });
 });
 
