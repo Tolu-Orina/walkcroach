@@ -4,6 +4,15 @@
   "type": "module",
   "description": "Typed client for the WalkCroach agentic memory layer — durable, tenant-scoped, provenance-preserving memory on CockroachDB",
   "license": "MIT",
+  "homepage": "https://walkcroach.rinegansolutions.com",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Tolu-Orina/walkcroach",
+    "directory": "packages/sdk"
+  },
+  "bugs": {
+    "url": "https://github.com/Tolu-Orina/walkcroach/issues"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {

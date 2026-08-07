@@ -55,6 +55,16 @@ describe('package manifest', () => {
   it('ships only dist, docs, and openapi', () => {
     expect(pkg.files).toEqual(['dist', 'README.md', 'openapi']);
   });
+
+  it('declares repository.url for npm provenance', () => {
+    // OIDC trusted publish embeds the GitHub repo in the Sigstore bundle;
+    // npm rejects when package.json repository.url is missing or mismatched.
+    expect(pkg.repository).toMatchObject({
+      type: 'git',
+      url: 'https://github.com/Tolu-Orina/walkcroach',
+      directory: 'packages/sdk',
+    });
+  });
 });
 
 describe('vendor sync', () => {

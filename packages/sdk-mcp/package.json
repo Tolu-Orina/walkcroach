@@ -4,6 +4,15 @@
   "type": "module",
   "description": "MCP server (2026-07-28) exposing the WalkCroach agentic memory layer to any compliant host",
   "license": "MIT",
+  "homepage": "https://walkcroach.rinegansolutions.com",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Tolu-Orina/walkcroach",
+    "directory": "packages/sdk-mcp"
+  },
+  "bugs": {
+    "url": "https://github.com/Tolu-Orina/walkcroach/issues"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
