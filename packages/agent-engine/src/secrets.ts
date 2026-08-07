@@ -11,6 +11,11 @@ export const SECRET_KEYS = {
   cognitoRefreshToken: 'walkcroach.auth.refreshToken',
   cognitoIdToken: 'walkcroach.auth.idToken',
   cognitoExpiresAt: 'walkcroach.auth.expiresAt',
+  /** Linked WalkCroach project (Desktop → Agent Host FileSecrets). */
+  linkedProjectId: 'walkcroach.link.projectId',
+  linkedProjectName: 'walkcroach.link.projectName',
+  /** /ide BFF base URL for Agent Host memory bridge. */
+  apiBaseUrl: 'walkcroach.desktop.apiBaseUrl',
   /** Ephemeral PKCE pending state (survives extension host restart). */
   pendingPkce: 'walkcroach.auth.pendingPkce',
 } as const;

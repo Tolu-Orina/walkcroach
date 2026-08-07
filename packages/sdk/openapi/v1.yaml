@@ -1,0 +1,502 @@
+openapi: 3.0.3
+info:
+  title: WalkCroach Public SDK API
+  version: '1.0.0'
+  description: |
+    Control plane for `@walkcroach/sdk` and `@walkcroach/sdk-mcp`.
+
+    **Path note:** Behind API Gateway the stage is already named `v1`.
+    Custom domain `api.walkcroach.rinegansolutions.com` maps base path
+    `v1` → stage `v1`, so public URLs look like
+    `https://api.walkcroach.rinegansolutions.com/v1/sdk-health`.
+    Clients using `invoke_url` / custom-domain base ending in `/v1` call
+    stage-relative paths (`/keys`, `/memory/…`, `/sdk-health`).
+    The TypeScript SDK uses host origin + `/v1/...` absolute paths — same
+    public URLs.
+
+    Agent smoke health remains `GET /health` on the shared gateway and is
+    **not** this document. SDK capability health is `GET /sdk-health` (or
+    `/v1/health` on the ide-local server).
+servers:
+  - url: https://api.walkcroach.rinegansolutions.com/v1
+    description: Production custom domain (P5.1)
+  - url: http://localhost:3003/v1
+    description: ide-api local server (`npm run dev:ide`)
+paths:
+  /sdk-health:
+    get:
+      operationId: getSdkHealth
+      summary: SDK liveness + capabilities + retention window
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SdkHealth'
+  /health:
+    get:
+      operationId: getSdkHealthAlias
+      summary: Same as /sdk-health (ide-local and ide-only hosts)
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SdkHealth'
+  /keys:
+    get:
+      operationId: listApiKeys
+      summary: List API keys for the signed-in user
+      security:
+        - cognitoBearer: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [keys]
+                properties:
+                  keys:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ApiKeySummary'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      operationId: createApiKey
+      summary: Mint an API key (plaintext returned once)
+      security:
+        - cognitoBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  maxLength: 100
+                scopes:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/ApiKeyScope'
+                expiresInDays:
+                  type: number
+                  minimum: 1
+                  maximum: 365
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatedApiKey'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /keys/{id}:
+    delete:
+      operationId: revokeApiKey
+      summary: Revoke an API key
+      security:
+        - cognitoBearer: []
+      parameters:
+        - $ref: '#/components/parameters/KeyId'
+      responses:
+        '200':
+          description: Revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, id]
+                properties:
+                  ok:
+                    type: boolean
+                  id:
+                    type: string
+                    format: uuid
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /keys/usage:
+    get:
+      operationId: listApiKeyUsage
+      summary: Per-key remember/recall/import counts for the current month
+      security:
+        - cognitoBearer: []
+      responses:
+        '200':
+          description: Aggregates from usage_ledger (metadata.keyId)
+  /memory/entries:
+    get:
+      operationId: listMemoryEntries
+      summary: List recent memory entries
+      security:
+        - cognitoBearer: []
+        - apiKeyBearer: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdQuery'
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - name: surfaces
+          in: query
+          schema:
+            type: string
+            description: Comma-separated source_surface filter
+      responses:
+        '200':
+          description: OK
+    post:
+      operationId: rememberMemory
+      summary: Write a memory entry (may supersede)
+      security:
+        - cognitoBearer: []
+        - apiKeyBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RememberRequest'
+      responses:
+        '200':
+          description: Written
+  /memory/recall:
+    post:
+      operationId: recallMemory
+      summary: Semantic recall (project-scoped)
+      security:
+        - cognitoBearer: []
+        - apiKeyBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecallRequest'
+      responses:
+        '200':
+          description: Hits
+  /memory/diff:
+    post:
+      operationId: diffMemory
+      summary: Belief diff between two instants
+      security:
+        - cognitoBearer: []
+        - apiKeyBearer: []
+      responses:
+        '200':
+          description: Diff
+  /memory/export:
+    get:
+      operationId: exportMemory
+      summary: Portable export bundle
+      security:
+        - cognitoBearer: []
+        - apiKeyBearer: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdQuery'
+      responses:
+        '200':
+          description: Bundle
+  /memory/import:
+    post:
+      operationId: importMemory
+      summary: Idempotent import
+      security:
+        - cognitoBearer: []
+        - apiKeyBearer: []
+      responses:
+        '200':
+          description: Import result
+        '429':
+          description: Quota exceeded
+  /memory/erase:
+    post:
+      operationId: eraseMemory
+      summary: Tombstone erase (ADR-0002) — redacts text, nulls embedding, audits
+      security:
+        - cognitoBearer: []
+        - apiKeyBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [projectId, reason]
+              properties:
+                projectId:
+                  type: string
+                  format: uuid
+                reason:
+                  type: string
+                  maxLength: 500
+                entryIds:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+                exportFirst:
+                  type: boolean
+                  description: Return an export bundle before tombstoning
+      responses:
+        '200':
+          description: Erase result
+  /memory/audit:
+    get:
+      operationId: listMemoryAudit
+      summary: Append-only control-plane audit for a project
+      security:
+        - cognitoBearer: []
+        - apiKeyBearer: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdQuery'
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+      responses:
+        '200':
+          description: Audit events
+  /content/publish:
+    post:
+      operationId: publishContent
+      summary: Start a programmatic content/agent run
+      security:
+        - cognitoBearer: []
+        - apiKeyBearer: []
+      responses:
+        '200':
+          description: Run accepted
+        '202':
+          description: Run accepted (async)
+  /runs/{id}:
+    get:
+      operationId: getRun
+      summary: Poll run status / events (includes threadId + interrupt when paused)
+      security:
+        - cognitoBearer: []
+        - apiKeyBearer: []
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      responses:
+        '200':
+          description: Snapshot
+    delete:
+      operationId: cancelRun
+      summary: Cancel a run
+      security:
+        - cognitoBearer: []
+        - apiKeyBearer: []
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      responses:
+        '200':
+          description: Cancelled
+  /runs/{id}/resume:
+    post:
+      operationId: resumeRun
+      summary: Resume an interrupted run (LangGraph-style interruptId + value)
+      security:
+        - cognitoBearer: []
+        - apiKeyBearer: []
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [interruptId, value]
+              properties:
+                interruptId:
+                  type: string
+                value: {}
+      responses:
+        '200':
+          description: Re-queued
+        '409':
+          description: Not interrupted / interrupt id mismatch
+components:
+  securitySchemes:
+    cognitoBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Cognito id/access token. Required for key management.
+    apiKeyBearer:
+      type: http
+      scheme: bearer
+      description: 'API key (`wc_live_…`). Server-side only.'
+  parameters:
+    KeyId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    RunId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    ProjectIdQuery:
+      name: projectId
+      in: query
+      required: true
+      schema:
+        type: string
+        format: uuid
+  responses:
+    BadRequest:
+      description: Validation error
+    Unauthorized:
+      description: Missing/invalid credentials
+    Forbidden:
+      description: Authenticated but not allowed (e.g. API key managing keys)
+    NotFound:
+      description: Not found (or not yours)
+  schemas:
+    ApiKeyScope:
+      type: string
+      enum: [memory:read, memory:write, content:run]
+    ApiKeySummary:
+      type: object
+      required: [id, name, prefix, scopes, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        prefix:
+          type: string
+        scopes:
+          type: array
+          items:
+            $ref: '#/components/schemas/ApiKeyScope'
+        createdAt:
+          type: string
+          format: date-time
+        lastUsedAt:
+          type: string
+          format: date-time
+          nullable: true
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        revokedAt:
+          type: string
+          format: date-time
+          nullable: true
+    CreatedApiKey:
+      allOf:
+        - $ref: '#/components/schemas/ApiKeySummary'
+        - type: object
+          required: [key, warning]
+          properties:
+            key:
+              type: string
+            warning:
+              type: string
+    SdkHealth:
+      type: object
+      required: [ok, surface, version, capabilities, retention]
+      properties:
+        ok:
+          type: boolean
+        surface:
+          type: string
+          enum: [sdk]
+        version:
+          type: string
+          enum: [v1]
+        capabilities:
+          type: array
+          items:
+            type: string
+        retention:
+          type: object
+          required: [asOfSeconds, asOfHuman, mechanism, note]
+          properties:
+            asOfSeconds:
+              type: integer
+              enum: [90000]
+            asOfHuman:
+              type: string
+            mechanism:
+              type: string
+              enum: [cockroachdb_mvcc_gc_ttl]
+            note:
+              type: string
+            governance:
+              type: object
+              properties:
+                asOf:
+                  type: string
+                audit:
+                  type: string
+                erase:
+                  type: string
+    MemoryKind:
+      type: string
+      enum: [decision, preference, convention, summary, capture, qa]
+    RememberRequest:
+      type: object
+      required: [projectId, text]
+      properties:
+        projectId:
+          type: string
+          format: uuid
+        text:
+          type: string
+        kind:
+          $ref: '#/components/schemas/MemoryKind'
+        surface:
+          type: string
+    RecallRequest:
+      type: object
+      required: [projectId, query]
+      properties:
+        projectId:
+          type: string
+          format: uuid
+        query:
+          type: string
+        limit:
+          type: integer
+        kinds:
+          type: array
+          items:
+            $ref: '#/components/schemas/MemoryKind'
+        surfaces:
+          type: array
+          items:
+            type: string
+        asOf:
+          type: string
+          format: date-time

@@ -33,5 +33,5 @@ variable "domain_name" {
 variable "hosted_zone_name" {
   type        = string
   description = "Route53 public hosted zone that contains domain_name"
-  default     = "conquerorfoundation.com"
+  default     = "rinegansolutions.com"
 }

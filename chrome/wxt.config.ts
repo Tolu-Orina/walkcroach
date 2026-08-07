@@ -10,6 +10,16 @@ const privacyUrl =
   'http://localhost:5173/chrome-privacy.html';
 const webUrl =
   process.env.WALKCROACH_WEB_URL ?? 'http://localhost:5173';
+/**
+ * IDE / public SDK API (memory `/v1`). Local default is ide-api :3003.
+ * Production shares the custom domain with the chrome BFF — omit to derive
+ * from WALKCROACH_API_BASE host.
+ */
+const ideApiBase =
+  process.env.WALKCROACH_IDE_API_BASE ??
+  (apiBase.includes('localhost') || apiBase.includes('127.0.0.1')
+    ? 'http://localhost:3003'
+    : apiBase.replace(/\/v1\/?$/i, '') || apiBase);
 
 if (requireProdEnv && !process.env.WALKCROACH_API_BASE) {
   throw new Error(
@@ -29,6 +39,7 @@ if (requireProdEnv && !process.env.WALKCROACH_WEB_URL) {
 if (requireProdEnv) {
   for (const [label, value] of [
     ['WALKCROACH_API_BASE', apiBase],
+    ['WALKCROACH_IDE_API_BASE', ideApiBase],
     ['WALKCROACH_PRIVACY_URL', privacyUrl],
     ['WALKCROACH_WEB_URL', webUrl],
   ] as const) {
@@ -47,6 +58,9 @@ function apiHostPermission(base: string): string {
 }
 
 const apiHost = apiHostPermission(apiBase);
+const ideApiHost = apiHostPermission(ideApiBase);
+/** Deduped install-time hosts (prod: chrome BFF + IDE share one origin). */
+const apiHosts = [...new Set([apiHost, ideApiHost])];
 /** Only WalkCroach Web may navigate to auth.html (Phase A4). */
 const webMatchPattern = apiHostPermission(webUrl);
 
@@ -133,7 +147,7 @@ export default defineConfig({
         description: 'Open WalkCroach for this page',
       },
     },
-    host_permissions: [apiHost, ...testGrantOrigins],
+    host_permissions: [...apiHosts, ...testGrantOrigins],
     /**
      * No install-time page access and no scary warning. The panel requests one
      * origin at a time from the click that needs it (Phase A1), and the Sites
@@ -162,6 +176,7 @@ export default defineConfig({
   vite: () => ({
     define: {
       __WALKCROACH_API_BASE__: JSON.stringify(apiBase),
+      __WALKCROACH_IDE_API_BASE__: JSON.stringify(ideApiBase),
       __WALKCROACH_PRIVACY_URL__: JSON.stringify(privacyUrl),
       __WALKCROACH_WEB_URL__: JSON.stringify(webUrl),
       __WALKCROACH_PROFILES_PUBLIC_KEY__: JSON.stringify(profilesPublicKey),

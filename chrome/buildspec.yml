@@ -12,7 +12,17 @@ phases:
     commands:
       - |
         set -eu
-        cd chrome
+        # file: dep — dist/ is gitignored; must build before chrome typecheck/build.
+        # --include=dev: CodeBuild NODE_ENV=production would skip typescript.
+        cd packages/memory-contracts
+        npm ci --include=dev
+        npm run build
+
+        cd ../sdk
+        npm ci --include=dev
+        npm run build
+
+        cd ../../chrome
         # Fail closed: production zip must not ship localhost defaults
         if [ -z "${WALKCROACH_API_BASE:-}" ]; then
           echo "WALKCROACH_API_BASE is required for chrome production builds" >&2
@@ -23,7 +33,7 @@ phases:
           exit 1
         fi
         export WALKCROACH_REQUIRE_PROD_ENV=true
-        npm ci
+        npm ci --include=dev
         npm run typecheck
         npm run test
         npm run build

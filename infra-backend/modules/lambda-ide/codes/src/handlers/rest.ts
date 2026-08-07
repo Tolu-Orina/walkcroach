@@ -9,6 +9,7 @@ import {
 } from './links.js';
 import {
   handleListMemoryEntries,
+  handleMemoryDiff,
   handleMemoryMirror,
   handleMemoryRecall,
   handleUpdateMemoryEntry,
@@ -43,8 +44,8 @@ export async function handleIdeRest(req: HttpRequest) {
   }
 
   // Public SDK surface. Checked before the `/ide/v1` routes and matched on the
-  // raw path — `isSdkPath` only claims `/memory`, `/keys`, `/health`, so it
-  // cannot shadow anything under `/ide/v1`.
+  // raw path — `isSdkPath` only claims SDK roots (`memory`, `keys`, `health`,
+  // `sdk-health`, `content`, `runs`), so it cannot shadow `/ide/v1`.
   if (isSdkPath(req.path)) {
     return handleSdkRest(req);
   }
@@ -106,6 +107,10 @@ export async function handleIdeRest(req: HttpRequest) {
 
   if (method === 'POST' && /\/ide\/v1\/memory\/recall\/?$/.test(path)) {
     return handleMemoryRecall(auth, req.body);
+  }
+
+  if (method === 'POST' && /\/ide\/v1\/memory\/diff\/?$/.test(path)) {
+    return handleMemoryDiff(auth, req.body);
   }
 
   if (method === 'GET' && /\/ide\/v1\/memory\/entries\/?$/.test(path)) {

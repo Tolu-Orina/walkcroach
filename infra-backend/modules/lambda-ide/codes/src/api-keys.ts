@@ -20,9 +20,13 @@ const scrypt = promisify(scryptCb) as (
   keylen: number,
 ) => Promise<Buffer>;
 
-export type ApiKeyScope = 'memory:read' | 'memory:write';
+export type ApiKeyScope = 'memory:read' | 'memory:write' | 'content:run';
 
-export const ALL_SCOPES: readonly ApiKeyScope[] = ['memory:read', 'memory:write'];
+export const ALL_SCOPES: readonly ApiKeyScope[] = [
+  'memory:read',
+  'memory:write',
+  'content:run',
+];
 
 export type ApiKeyContext = {
   ownerId: string;

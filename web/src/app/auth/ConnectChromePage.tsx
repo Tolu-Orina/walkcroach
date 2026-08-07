@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, Navigate, useSearchParams } from 'react-router-dom';
+import { getChromeApiBaseUrl } from '../../api/client';
 import { loadStoredAuth } from '../../auth/storage';
 import { useAuth } from '../../auth/useAuth';
 import { AuthCard, AuthError, AuthLink } from '../../components/auth/AuthCard';
@@ -16,7 +17,7 @@ const REDIRECT_PATTERN =
   /^(?:chrome-extension:\/\/[a-p]{32}\/auth\.html|https:\/\/[a-p]{32}\.chromiumapp\.org\/auth)$/;
 
 function chromeApiBase(): string {
-  return String(import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
+  return getChromeApiBaseUrl();
 }
 
 /**

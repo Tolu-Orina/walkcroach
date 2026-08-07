@@ -14,7 +14,7 @@ function usage(): never {
       '',
       'Environment:',
       '  WALKCROACH_API_KEY   required — a wc_live_… service key',
-      '  WALKCROACH_BASE_URL  optional — defaults to https://api.walkcroach.dev',
+      '  WALKCROACH_BASE_URL  optional — defaults to https://api.walkcroach.rinegansolutions.com',
     ].join('\n'),
   );
   process.exit(1);

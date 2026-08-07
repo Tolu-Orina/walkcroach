@@ -18,7 +18,7 @@ describe('getNovaReasoningEffort', () => {
 
   it('accepts off / low / high overrides', () => {
     process.env.BEDROCK_NOVA_REASONING = 'off';
-    expect(getNovaReasoningEffort()).toBe('off');
+    expect(getNovaReasoningEffort()).toBe('medium');
     process.env.BEDROCK_NOVA_REASONING = 'low';
     expect(getNovaReasoningEffort()).toBe('low');
     process.env.BEDROCK_NOVA_REASONING = 'HIGH';

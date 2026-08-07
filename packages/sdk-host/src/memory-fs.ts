@@ -26,22 +26,49 @@ export type MemoryFsOptions = {
    * band (a typecheck run elsewhere, say) without a general shell.
    */
   commands?: Record<string, SandboxExec>;
+  /**
+   * Hard cap on total UTF-8 bytes across all files (P3.8). Writes that would
+   * exceed this fail closed — content runs must not fill memory unbounded.
+   */
+  maxBytes?: number;
 };
 
 export class MemoryFileSystem implements SandboxLike {
   readonly kind = 'memory';
   private readonly files: Map<string, string>;
   private readonly commands: Record<string, SandboxExec>;
+  private readonly maxBytes: number | undefined;
+  private totalBytes = 0;
   /** Commands the agent attempted, so a caller can see what it wanted to run. */
   readonly attemptedCommands: string[] = [];
 
   constructor(opts: MemoryFsOptions = {}) {
     this.files = new Map(Object.entries(opts.files ?? {}));
     this.commands = opts.commands ?? {};
+    this.maxBytes = opts.maxBytes;
+    for (const content of this.files.values()) {
+      this.totalBytes += utf8Bytes(content);
+    }
+    if (this.maxBytes !== undefined && this.totalBytes > this.maxBytes) {
+      throw new Error(
+        `MemoryFileSystem seed exceeds maxBytes (${this.totalBytes} > ${this.maxBytes})`,
+      );
+    }
   }
 
   async writeFile(path: string, content: string): Promise<void> {
-    this.files.set(normalise(path), content);
+    const key = normalise(path);
+    const next = utf8Bytes(content);
+    const prev = this.files.has(key) ? utf8Bytes(this.files.get(key)!) : 0;
+    const projected = this.totalBytes - prev + next;
+    if (this.maxBytes !== undefined && projected > this.maxBytes) {
+      throw new Error(
+        `disk quota exceeded: write of ${next} bytes to '${path}' would use ` +
+          `${projected} / ${this.maxBytes} bytes`,
+      );
+    }
+    this.files.set(key, content);
+    this.totalBytes = projected;
   }
 
   async readFile(path: string): Promise<string> {
@@ -97,4 +124,8 @@ function normalise(path: string): string {
     else out.push(part);
   }
   return (absolute ? '/' : '') + out.join('/');
+}
+
+function utf8Bytes(s: string): number {
+  return Buffer.byteLength(s, 'utf8');
 }

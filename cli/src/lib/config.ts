@@ -3,7 +3,13 @@ import { dirname, join, resolve } from 'node:path';
 import { mkdir, readFile, writeFile, chmod } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import { getRuntimeFlags } from './runtime.js';
-import { keychainDelete, keychainGet, keychainSet } from './credential-store.js';
+import {
+  allowPlaintextSecrets,
+  keychainDelete,
+  keychainGet,
+  keychainSet,
+  PlaintextSecretsRefusedError,
+} from './credential-store.js';
 
 export type WalkcroachConfig = {
   apiBaseUrl: string;
@@ -37,17 +43,17 @@ export type WalkcroachConfig = {
  * Production API, same stage the IDE extension ships as its default
  * (`ide/package.json` → `walkcroach.ide.apiBaseUrl`).
  *
- * This used to be `http://localhost:3003` (C0.2), which is correct for someone
- * running `npm run dev:ide` in this repo and useless for everyone else — a
- * published CLI would have talked to nothing on a fresh machine. Local
- * development is now the explicit case, not the default one:
+ * Custom domain (P5.1): api.walkcroach.rinegansolutions.com/v1
+ * (owned zone rinegansolutions.com — not *.walkcroach.dev).
+ *
+ * Local development is explicit:
  *
  *   walkcroach config apiBaseUrl http://localhost:3003
  *   WALKCROACH_API_BASE_URL=http://localhost:3003 walkcroach doctor
  *   walkcroach --api-url http://localhost:3003 doctor
  */
 export const DEFAULT_API_BASE_URL =
-  'https://awbcf4clij.execute-api.eu-west-2.amazonaws.com/v1';
+  'https://api.walkcroach.rinegansolutions.com/v1';
 
 const DEFAULTS: WalkcroachConfig = {
   apiBaseUrl: DEFAULT_API_BASE_URL,
@@ -175,6 +181,9 @@ export async function setSecret(key: string, value: string): Promise<void> {
       await saveSecrets(secrets);
     }
     return;
+  }
+  if (!allowPlaintextSecrets()) {
+    throw new PlaintextSecretsRefusedError();
   }
   const secrets = await loadSecrets();
   secrets[key] = value;

@@ -13,7 +13,25 @@ const AUTH_SOURCE = 'wc_auth_source'; // 'device' | 'cognito'
 const TOKEN_EXPIRES_AT = 'wc_token_expires_at';
 const REFRESH_TOKEN = 'wc_refresh_token';
 const ID_TOKEN = 'wc_id_token';
+/** Real Cognito access_token (for `@walkcroach/sdk` / IDE `/v1`). */
+const COGNITO_ACCESS_TOKEN = 'wc_cognito_access_token';
 const OAUTH_PENDING = 'wc_oauth_pending';
+
+async function storeCognitoTokenPair(tokens: {
+  access_token?: string;
+  id_token?: string;
+}): Promise<void> {
+  const patch: Record<string, string | null> = {};
+  if (tokens.access_token?.trim()) {
+    patch[COGNITO_ACCESS_TOKEN] = tokens.access_token.trim();
+  }
+  if (tokens.id_token?.trim()) {
+    patch[ID_TOKEN] = tokens.id_token.trim();
+  }
+  if (Object.keys(patch).length) {
+    await chrome.storage.local.set(patch);
+  }
+}
 
 const EXPIRY_SKEW_MS = 60_000;
 
@@ -155,9 +173,7 @@ async function tryRefreshCognito(
     if (tokens.refresh_token) {
       await chrome.storage.local.set({ [REFRESH_TOKEN]: tokens.refresh_token });
     }
-    if (tokens.id_token) {
-      await chrome.storage.local.set({ [ID_TOKEN]: tokens.id_token });
-    }
+    await storeCognitoTokenPair(tokens);
     return session;
   } catch {
     return null;
@@ -208,7 +224,11 @@ export async function ensureDeviceSession(
         };
         await saveSession(session);
         if (existing.source === 'cognito') {
-          await chrome.storage.local.remove([REFRESH_TOKEN, ID_TOKEN]);
+          await chrome.storage.local.remove([
+            REFRESH_TOKEN,
+            ID_TOKEN,
+            COGNITO_ACCESS_TOKEN,
+          ]);
         }
         return session;
       } catch {
@@ -402,7 +422,10 @@ export async function completeWebSignIn(
   await saveSession(session);
   await chrome.storage.local.set({
     [REFRESH_TOKEN]: tokens.refresh_token ?? null,
-    [ID_TOKEN]: tokens.id_token ?? cognitoToken,
+  });
+  await storeCognitoTokenPair({
+    access_token: tokens.access_token,
+    id_token: tokens.id_token ?? cognitoToken,
   });
   await chrome.storage.session.remove(OAUTH_PENDING);
   return session;
@@ -432,6 +455,11 @@ export async function upgradeToCognito(
     expiresAt,
   };
   await saveSession(session);
+  // Paste upgrade: treat the pasted JWT as the SDK bearer (often an id token).
+  await storeCognitoTokenPair({
+    access_token: cognitoAccessToken,
+    id_token: cognitoAccessToken,
+  });
   return session;
 }
 
@@ -446,7 +474,11 @@ export async function signOutToDevice(
 ): Promise<StoredSession> {
   const existing = await loadSession();
   const deviceKey = existing?.deviceKey ?? mintClientDeviceKey();
-  await chrome.storage.local.remove([REFRESH_TOKEN, ID_TOKEN]);
+  await chrome.storage.local.remove([
+    REFRESH_TOKEN,
+    ID_TOKEN,
+    COGNITO_ACCESS_TOKEN,
+  ]);
   const minted = await createSession(deviceKey);
   const session: StoredSession = {
     deviceKey: minted.deviceKey ?? deviceKey,

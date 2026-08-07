@@ -5,7 +5,7 @@
   "type": "module",
   "license": "MIT",
   "author": "Conqueror Foundation",
-  "homepage": "https://walkcroach.conquerorfoundation.com",
+  "homepage": "https://walkcroach.rinegansolutions.com",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Tolu-Orina/walkcroach.git",
@@ -60,6 +60,7 @@
     "@types/react": "18.3.18",
     "@vitest/coverage-v8": "^3.2.7",
     "@walkcroach/agent-engine": "file:../packages/agent-engine",
+    "@walkcroach/sdk": "file:../packages/sdk",
     "@walkcroach/templates": "file:../packages/templates",
     "esbuild": "^0.25.0",
     "tsx": "^4.19.0",

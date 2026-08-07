@@ -11,7 +11,7 @@
     "type": "git",
     "url": "https://github.com/Tolu-Orina/walkcroach.git"
   },
-  "homepage": "https://walkcroach.conquerorfoundation.com",
+  "homepage": "https://walkcroach.rinegansolutions.com",
   "bugs": {
     "url": "https://github.com/Tolu-Orina/walkcroach/issues"
   },
@@ -121,12 +121,12 @@
       "properties": {
         "walkcroach.ide.apiBaseUrl": {
           "type": "string",
-          "default": "https://awbcf4clij.execute-api.eu-west-2.amazonaws.com/v1",
+          "default": "https://api.walkcroach.rinegansolutions.com/v1",
           "description": "Base URL for the WalkCroach IDE BFF (/ide/*)."
         },
         "walkcroach.ide.webAppUrl": {
           "type": "string",
-          "default": "https://walkcroach.conquerorfoundation.com",
+          "default": "https://walkcroach.rinegansolutions.com",
           "description": "WalkCroach Web app URL used for Sign In (shared Cognito account)."
         },
         "walkcroach.ide.cognitoClientId": {
@@ -152,26 +152,24 @@
         "walkcroach.ide.bedrockModelId": {
           "type": "string",
           "default": "",
-          "description": "Optional Bedrock model ID override (e.g. global.amazon.nova-pro-v1:0). Empty uses Nova 2 Lite (global.amazon.nova-2-lite-v1:0) or BEDROCK_NOVA_MODEL_ID."
+          "description": "Optional Bedrock model ID override. Empty uses Nova 2 Lite (global.amazon.nova-2-lite-v1:0) or BEDROCK_NOVA_MODEL_ID. Amazon Nova 1 Pro is not supported."
         },
         "walkcroach.ide.reasoningEffort": {
           "type": "string",
           "enum": [
             "",
-            "off",
             "low",
             "medium",
             "high"
           ],
           "enumDescriptions": [
             "Use the default (medium)",
-            "Disable extended thinking",
             "Low effort — fastest, least reasoning",
-            "Medium effort — same tier as WalkCroach Web App Builder",
+            "Medium effort — default; same tier as WalkCroach Web App Builder",
             "High effort — slowest, most thorough (disables the output-token cap)"
           ],
           "default": "",
-          "description": "Nova 2 Lite extended-thinking tier for the agent loop. Empty uses the default (medium)."
+          "description": "Nova 2 Lite extended-thinking tier (always on). Empty uses medium. Off is not offered — thinking cannot be disabled."
         },
         "walkcroach.ide.mcp.allowStdio": {
           "type": "boolean",
@@ -201,6 +199,7 @@
   },
   "dependencies": {
     "@walkcroach/agent-engine": "file:../packages/agent-engine",
+    "@walkcroach/sdk": "file:../packages/sdk",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1"
   },

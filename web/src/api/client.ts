@@ -16,6 +16,47 @@ const API_URL = (import.meta.env.VITE_API_URL ?? 'http://localhost:3001').replac
   '',
 );
 
+/**
+ * IDE / public SDK BFF (keys, /v1/memory, …). Local default is ide-api on :3003
+ * (`npm run dev:ide` in infra-backend). When unset in production, fall back to
+ * API_URL — same host once `/keys` (etc.) are routed to the IDE Lambda.
+ */
+const IDE_API_URL = (
+  import.meta.env.VITE_IDE_API_URL ??
+  import.meta.env.VITE_API_URL ??
+  'http://localhost:3003'
+).replace(/\/$/, '');
+
+/** Resolve SDK paths whether base already ends in `/v1` (API Gateway stage) or not. */
+function sdkUrl(path: string): string {
+  const p = path.startsWith('/') ? path : `/${path}`;
+  if (/\/v1$/i.test(IDE_API_URL)) return `${IDE_API_URL}${p}`;
+  return `${IDE_API_URL}/v1${p}`;
+}
+
+export function getSdkApiBaseUrl(): string {
+  return /\/v1$/i.test(IDE_API_URL) ? IDE_API_URL.replace(/\/v1$/i, '') : IDE_API_URL;
+}
+
+/**
+ * Chrome BFF base for oauth session-code + chat handoff.
+ * Local: `npm run dev:chrome` → :3002. Prod: same shared GW as agent (VITE_API_URL).
+ */
+const CHROME_API_URL = (
+  import.meta.env.VITE_CHROME_API_URL ??
+  import.meta.env.VITE_API_URL ??
+  'http://localhost:3002'
+).replace(/\/$/, '');
+
+export function getChromeApiBaseUrl(): string {
+  return CHROME_API_URL;
+}
+
+/** Agent harness API base (projects, sessions, billing, sandbox). */
+export function getAgentApiBaseUrl(): string {
+  return API_URL;
+}
+
 function authHeaders(): Record<string, string> {
   const headers: Record<string, string> = { 'content-type': 'application/json' };
   try {
@@ -200,10 +241,46 @@ export async function deleteProjectDocument(
 export async function listProjectMemory(
   projectId: string,
 ): Promise<{ summary: string | null; entries: ProjectMemoryEntry[] }> {
-  const res = await fetch(`${API_URL}/projects/${projectId}/memory`, {
-    headers: authHeaders(),
+  // Public memory contract via `@walkcroach/sdk` → `/v1/memory/entries`
+  // (not the harness `GET /projects/:id/memory`). Agent-turn recall stays on
+  // the harness stream.
+  const { createWalkCroachClient } = await import('./sdkClient.js');
+  const wc = createWalkCroachClient();
+  const entries = await wc.memory.list({ projectId, limit: 100 });
+  return {
+    summary: null,
+    entries: entries.map((e) => ({
+      id: e.id,
+      kind: e.kind,
+      text: e.text,
+      sourceSurface: e.surface,
+      createdAt: e.createdAt,
+    })),
+  };
+}
+
+/** User-authored remember via SDK (surface = web). */
+export async function rememberProjectMemory(opts: {
+  projectId: string;
+  kind: string;
+  text: string;
+}): Promise<{ id: string; supersededId: string | null }> {
+  const { createWalkCroachClient } = await import('./sdkClient.js');
+  const wc = createWalkCroachClient();
+  const result = await wc.memory.remember({
+    projectId: opts.projectId,
+    kind: opts.kind as never,
+    text: opts.text,
+    surface: 'web',
   });
-  return parseJson(res);
+  return { id: result.id, supersededId: result.supersededId ?? null };
+}
+
+/** Export project memory bundle via SDK. */
+export async function exportProjectMemory(projectId: string) {
+  const { createWalkCroachClient } = await import('./sdkClient.js');
+  const wc = createWalkCroachClient();
+  return wc.memory.export({ projectId });
 }
 
 export async function archiveProject(projectId: string): Promise<void> {
@@ -896,7 +973,7 @@ export async function fetchChromeChatHandoff(code: string): Promise<{
   question?: string | null;
 }> {
   const res = await fetch(
-    `${API_URL}/chrome/v1/chat-handoff/${encodeURIComponent(code)}`,
+    `${CHROME_API_URL}/chrome/v1/chat-handoff/${encodeURIComponent(code)}`,
     { headers: authHeaders() },
   );
   return parseJson(res);
@@ -992,4 +1069,111 @@ export async function declineConnectorRun(runId: string): Promise<void> {
     { method: 'POST', headers: authHeaders() },
   );
   await parseJson(res);
+}
+
+// ── Developer portal / public SDK API keys (Cognito only) ─────────────────
+
+export type ApiKeyScope = 'memory:read' | 'memory:write' | 'content:run';
+
+export type ApiKeySummary = {
+  id: string;
+  name: string;
+  prefix: string;
+  scopes: string[];
+  createdAt: string;
+  lastUsedAt: string | null;
+  expiresAt: string | null;
+  revokedAt: string | null;
+};
+
+export type CreatedApiKey = ApiKeySummary & {
+  key: string;
+  warning: string;
+};
+
+export async function listApiKeys(): Promise<ApiKeySummary[]> {
+  const res = await fetch(sdkUrl('/keys'), {
+    headers: authHeaders(),
+  });
+  const data = await parseJson<{ keys: ApiKeySummary[] }>(res);
+  return data.keys ?? [];
+}
+
+export type ApiKeyUsageRow = {
+  keyId: string;
+  remember: number;
+  recall: number;
+  import: number;
+  contentPublish: number;
+  credits: number;
+};
+
+/** Per-key ledger aggregates for the current billing month (P2.5). */
+export async function listApiKeyUsage(): Promise<{
+  period: string;
+  keys: ApiKeyUsageRow[];
+}> {
+  const res = await fetch(sdkUrl('/keys/usage'), {
+    headers: authHeaders(),
+  });
+  return parseJson(res);
+}
+
+export async function createApiKey(opts: {
+  name: string;
+  scopes?: ApiKeyScope[];
+  expiresInDays?: number;
+}): Promise<CreatedApiKey> {
+  const res = await fetch(sdkUrl('/keys'), {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify(opts),
+  });
+  return parseJson(res);
+}
+
+export async function revokeApiKey(id: string): Promise<{ ok: boolean; id: string }> {
+  const res = await fetch(sdkUrl(`/keys/${encodeURIComponent(id)}`), {
+    method: 'DELETE',
+    headers: authHeaders(),
+  });
+  return parseJson(res);
+}
+
+export type SdkHealthResponse = {
+  ok: boolean;
+  version: string;
+  capabilities: string[];
+  surface?: string;
+  retention?: {
+    asOfSeconds: number;
+    asOfHuman: string;
+    mechanism: string;
+    note: string;
+  };
+};
+
+function isSdkHealthBody(body: unknown): body is SdkHealthResponse {
+  if (!body || typeof body !== 'object') return false;
+  const b = body as Record<string, unknown>;
+  return (
+    b.surface === 'sdk' ||
+    (Array.isArray(b.capabilities) && typeof b.version === 'string')
+  );
+}
+
+export async function getSdkHealth(): Promise<SdkHealthResponse> {
+  // Prefer APIGW-safe `/sdk-health` first. Ide-local also serves `/health` as
+  // an alias; on the shared gateway `/health` is the *agent* smoke endpoint.
+  try {
+    const preferred = await fetch(sdkUrl('/sdk-health'));
+    if (preferred.ok) {
+      const body: unknown = await preferred.json();
+      if (isSdkHealthBody(body)) return body;
+    }
+  } catch {
+    /* try alias */
+  }
+  const res = await fetch(sdkUrl('/health'));
+  return parseJson(res);
 }

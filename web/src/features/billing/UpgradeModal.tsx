@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { startBillingCheckout } from '../../api/client';
+import { useEffect, useState } from 'react';
+import { getBillingStatus, startBillingCheckout } from '../../api/client';
 
 type Props = {
   open: boolean;
@@ -15,10 +15,29 @@ type Props = {
 export function UpgradeModal({ open, message, feature, onClose }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [checkoutEnabled, setCheckoutEnabled] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setError(null);
+    setCheckoutEnabled(null);
+    void getBillingStatus()
+      .then((s) => {
+        if (!cancelled) setCheckoutEnabled(s.checkoutEnabled);
+      })
+      .catch(() => {
+        if (!cancelled) setCheckoutEnabled(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   if (!open) return null;
 
   const onUpgrade = async () => {
+    if (checkoutEnabled === false) return;
     setBusy(true);
     setError(null);
     try {
@@ -37,7 +56,7 @@ export function UpgradeModal({ open, message, feature, onClose }: Props) {
       aria-modal="true"
       aria-labelledby="upgrade-title"
     >
-      <div className="w-full max-w-md rounded-[var(--radius-surface)] border border-signal/40 bg-panel p-5 shadow-xl">
+      <div className="depth-surface glass-strong glass-hairline w-full max-w-md p-5">
         <p className="font-mono text-[10px] uppercase tracking-wide text-signal">
           Paid plan · ~$20/mo
         </p>
@@ -54,20 +73,29 @@ export function UpgradeModal({ open, message, feature, onClose }: Props) {
           </p>
         )}
         <ul className="mt-4 space-y-1.5 text-[13px] text-mist">
-          <li>Nova Pro slides, flyers, and video studio</li>
-          <li>Images ≤3/day · Video ≤1/72h (hard caps protect margin)</li>
+          <li>Nova image creatives (slides, flyers, Canvas)</li>
+          <li>Images ≤3/day · Video ≤1/72h when studio is live (hard caps)</li>
           <li>Connector writes (Gmail, Calendar, Slack, …)</li>
           <li>Shared credit pool with Chrome</li>
         </ul>
+        {checkoutEnabled === false && (
+          <p className="mt-3 text-sm text-mist" role="status">
+            Billing checkout is not configured in this environment yet.
+          </p>
+        )}
         {error && <p className="mt-3 text-sm text-ember">{error}</p>}
         <div className="mt-5 flex flex-wrap gap-2">
           <button
             type="button"
-            disabled={busy}
+            disabled={busy || checkoutEnabled !== true}
             onClick={() => void onUpgrade()}
             className="interactive rounded-[var(--radius-control)] bg-signal px-4 py-2 text-sm font-semibold text-ink disabled:opacity-50"
           >
-            {busy ? 'Opening Checkout…' : 'Upgrade · ~$20/mo'}
+            {busy
+              ? 'Opening Checkout…'
+              : checkoutEnabled === null
+                ? 'Checking billing…'
+                : 'Upgrade · ~$20/mo'}
           </button>
           <button
             type="button"

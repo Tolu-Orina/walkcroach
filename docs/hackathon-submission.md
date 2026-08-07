@@ -19,7 +19,7 @@
 | Open-source licence detectable in About | ✅ MIT, [`LICENSE`](../LICENSE) at repo root |
 | README with setup + run instructions | ✅ [`README.md`](../README.md) — verified by following it from scratch |
 | Dependencies / example config | ✅ per-module `package.json`; [`.env.example`](../.env.example) |
-| **Functional demo app URL** | ✅ [`walkcroach.conquerorfoundation.com`](https://walkcroach.conquerorfoundation.com) |
+| **Functional demo app URL** | ✅ [`walkcroach.rinegansolutions.com`](https://walkcroach.rinegansolutions.com) |
 | **Video < 3 min, public on YouTube/Vimeo** | ❌ **TODO** — script in §6 |
 | Which CockroachDB tools, and what the agent did with them | ✅ §2 |
 | Which AWS services, and how | ✅ §3 |
@@ -598,7 +598,7 @@ Lead with the cross-surface moment; do not tour features.
 
 | # | Gate | Owner action |
 |---|---|---|
-| ~~1~~ | ~~Demo URL~~ | ✅ `walkcroach.conquerorfoundation.com`. **Still seed a demo project** — first-load recall with nothing to find makes the memory story invisible, which is the one thing this submission cannot afford. |
+| ~~1~~ | ~~Demo URL~~ | ✅ `walkcroach.rinegansolutions.com`. **Still seed a demo project** — first-load recall with nothing to find makes the memory story invisible, which is the one thing this submission cannot afford. |
 | 2 | **Video** | Record per §6. |
 | ~~3~~ | ~~Repo public~~ | ✅ Public, MIT detectable in About. |
 | ~~4~~ | ~~Scale evidence~~ | ✅ **Closed 2026-08-01 by fixing what it found.** Measuring exposed that no recall query could use its index at all; `031`/`032` plus rewritten queries fixed it, verified against the live cluster. A throughput benchmark is deliberately *not* claimed — see §5.5. |
@@ -608,7 +608,7 @@ Lead with the cross-surface moment; do not tour features.
 | ~~8~~ | ~~Chrome Web Store~~ | ✅ **0.6.0 approved and live.** Release is tag-driven (`publish-chrome.yml`, `chrome-v*`) like the CLI and IDE. |
 | ~~9~~ | ~~CLI/IDE not published~~ | ✅ **Closed 2026-08-01.** `@walkcroach/cli@0.3.0` on npm via OIDC trusted publishing, carrying a SLSA provenance attestation; `walkcroach.walkcroach-ide@0.2.0` on Open VSX. PKCE closed the same day — see §5.9. |
 | 11 | **SDK + MCP server (§5.11)** | ⚠️ **Mostly closed 2026-08-04.** Conformance (29 tests), tenant isolation, scope enforcement, time-travel, and portability all verified against the live cluster. `AS OF SYSTEM TIME` index eligibility confirmed; retention widened to 25h by migration `034`. **Remaining:** `recall`/`remember` embed via Bedrock and have never run outside mocks on this machine (no AWS creds by design). Smoke-test both against a deployed environment before the video, or demo only `list_memory` / `memory_timeline`. |
-| 13 | **Desktop IDE (6th surface)** | Active build, native agent via the VS Code Agent Host. Gate is green only when the fork compiles on two platforms, a WalkCroach session appears in the Agents window, and `DesktopHostAdapter` passes the `agent-engine` conformance suite. Until then Desktop must not appear in the video, the README, or the surface count as *shipped*. Plan: [`walkcroach-desktop-implementation-plan.md`](./walkcroach-desktop-implementation-plan.md). |
+| 13 | **Desktop IDE (6th surface)** | Preview-capable via native Agent Host; unsigned Windows portable only. Gate for “shipped” marketing: published preview Release + honest unsigned wording. Do not claim signed/notarized. Truth: [`walkcroach-desktop.md`](./walkcroach-desktop.md). |
 | 12 | **Seed data is stale and duplicated** | The cluster holds 9 memory entries, all written 2026-07-17, 8 of them byte-identical, none superseded. That predates the supersede path (landed 2026-08-01), so it is not a defect — but it means the supersede path has **never executed against a real write**, and video beat 2:10–2:35 depends on demonstrating exactly that. Seed a fresh project and rehearse the contradiction beat before recording. |
 | ~~10~~ | ~~`agent-harness/loop.ts` has no dedicated unit suite~~ | ✅ **Closed 2026-08-01.** `loop.test.ts` — 45 tests over memory recall, the session state machine, mode escalation, and loop termination. Mutation-verified (see §5.7). |
 

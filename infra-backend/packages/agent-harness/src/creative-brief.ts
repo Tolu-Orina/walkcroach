@@ -1,14 +1,20 @@
 /**
- * Nova Pro creative brief generation (Phase B2).
+ * Creative brief generation (slides / flyer / video) via Nova 2 Lite.
  *
- * Returns structured JSON the ConfirmCard and render_pptx both consume.
  * Paid-only at the tool gate — this module only talks to Bedrock.
+ * Extended thinking is always on (same policy as the agent loop).
+ * We do **not** use Amazon Nova 1 Pro — AWS recommends Nova 2 Lite +
+ * extended thinking for former Pro workloads (see docs/nova-2-lite.md).
  */
 import {
   BedrockRuntimeClient,
   ConverseCommand,
 } from '@aws-sdk/client-bedrock-runtime';
-import { getBedrockRegion } from './bedrock.js';
+import {
+  getBedrockRegion,
+  getNovaModelId,
+  getNovaReasoningEffort,
+} from './bedrock.js';
 import { creativeMetric } from './metrics.js';
 
 export type CreativeBriefSlide = {
@@ -28,12 +34,31 @@ export type CreativeBrief = {
   palette?: string[];
 };
 
+/** @deprecated Removed — call getNovaModelId(). Kept as alias so old imports compile. */
 export function getNovaProModelId(): string {
-  return (
-    process.env.NOVA_PRO_MODEL_ID ??
-    process.env.BEDROCK_NOVA_PRO_MODEL_ID ??
-    'amazon.nova-pro-v1:0'
-  );
+  return getNovaModelId();
+}
+
+function creativeConverseExtras(): {
+  additionalModelRequestFields: {
+    reasoningConfig: {
+      type: 'enabled';
+      maxReasoningEffort: 'low' | 'medium' | 'high';
+    };
+  };
+  inferenceConfig?: { maxTokens: number };
+} {
+  const effort = getNovaReasoningEffort();
+  return {
+    additionalModelRequestFields: {
+      reasoningConfig: {
+        type: 'enabled',
+        maxReasoningEffort: effort,
+      },
+    },
+    // High forbids maxTokens; medium/low use the reasoning output budget.
+    ...(effort === 'high' ? {} : { inferenceConfig: { maxTokens: 30_000 } }),
+  };
 }
 
 function extractJsonObject(text: string): Record<string, unknown> | null {
@@ -106,8 +131,8 @@ function normalizeBrief(raw: Record<string, unknown>, topic: string): CreativeBr
 }
 
 /**
- * Ask Nova Pro for a structured slide brief.
- * Falls back to a deterministic Lite-free stub brief if Pro is unavailable —
+ * Ask Nova 2 Lite (extended thinking) for a structured slide brief.
+ * Falls back to a deterministic stub if Bedrock is unavailable —
  * the stub is still valid for render_pptx so local/dev is unblocked.
  */
 export async function generateCreativeBrief(params: {
@@ -118,7 +143,7 @@ export async function generateCreativeBrief(params: {
 }): Promise<{ brief: CreativeBrief; modelId: string; stub: boolean }> {
   const topic = params.topic.trim().slice(0, 2000);
   const slideCount = Math.min(8, Math.max(3, Number(params.slideCount ?? 5)));
-  const modelId = getNovaProModelId();
+  const modelId = getNovaModelId();
 
   const system = `You are WalkCroach Creative Studio. Output ONLY a JSON object for a PowerPoint brief.
 Schema:
@@ -152,7 +177,7 @@ Rules:
         modelId,
         system: [{ text: system }],
         messages: [{ role: 'user', content: [{ text: user }] }],
-        inferenceConfig: { maxTokens: 2048, temperature: 0.4 },
+        ...creativeConverseExtras(),
       }),
     );
     creativeMetric('ProInvokeCount', { feature: 'creative_brief', tier: 'paid' });
@@ -161,10 +186,10 @@ Rules:
         ?.map((b) => ('text' in b && typeof b.text === 'string' ? b.text : ''))
         .join('\n') ?? '';
     const parsed = extractJsonObject(text);
-    if (!parsed) throw new Error('Nova Pro returned no JSON brief');
+    if (!parsed) throw new Error('Nova 2 Lite returned no JSON brief');
     return { brief: normalizeBrief(parsed, topic), modelId, stub: false };
   } catch {
-    // Deterministic stub so local/CI can exercise render without Pro access
+    // Deterministic stub so local/CI can exercise render without Bedrock access
     const stub: CreativeBrief = {
       title: topic.slice(0, 80) || 'WalkCroach deck',
       subtitle: params.audience
@@ -262,7 +287,7 @@ function normalizeFlyerBrief(raw: Record<string, unknown>, topic: string): Flyer
 }
 
 /**
- * Nova Pro flyer brief with walkcroach-creative-philosophy (Phase C2).
+ * Flyer brief with walkcroach-creative-philosophy (Phase C2) via Nova 2 Lite.
  * Philosophy is stored on the brief for ConfirmCard + renderer atmosphere.
  */
 export async function generateFlyerBrief(params: {
@@ -272,7 +297,7 @@ export async function generateFlyerBrief(params: {
   audience?: string;
 }): Promise<{ brief: FlyerBrief; modelId: string; stub: boolean }> {
   const topic = params.topic.trim().slice(0, 2000);
-  const modelId = getNovaProModelId();
+  const modelId = getNovaModelId();
   const preferred = params.template ?? 'sale';
 
   const system = `You are WalkCroach Flyer Studio. Follow walkcroach-creative-philosophy:
@@ -317,7 +342,7 @@ Rules:
         modelId,
         system: [{ text: system }],
         messages: [{ role: 'user', content: [{ text: user }] }],
-        inferenceConfig: { maxTokens: 1200, temperature: 0.45 },
+        ...creativeConverseExtras(),
       }),
     );
     creativeMetric('ProInvokeCount', { feature: 'flyer_brief', tier: 'paid' });
@@ -326,7 +351,7 @@ Rules:
         ?.map((b) => ('text' in b && typeof b.text === 'string' ? b.text : ''))
         .join('\n') ?? '';
     const parsed = extractJsonObject(text);
-    if (!parsed) throw new Error('Nova Pro returned no flyer JSON');
+    if (!parsed) throw new Error('Nova 2 Lite returned no flyer JSON');
     return { brief: normalizeFlyerBrief(parsed, topic), modelId, stub: false };
   } catch {
     const stub: FlyerBrief = {
@@ -405,7 +430,7 @@ function normalizeVideoBrief(raw: Record<string, unknown>, topic: string): Video
 }
 
 /**
- * Nova Pro video brief — one 30s MULTI_SHOT_AUTOMATED Reel job + Polly script.
+ * Video brief via Nova 2 Lite — one 30s MULTI_SHOT_AUTOMATED Reel job + Polly script.
  */
 export async function generateVideoBrief(params: {
   topic: string;
@@ -414,7 +439,7 @@ export async function generateVideoBrief(params: {
   aspect?: '16:9' | '9:16';
 }): Promise<{ brief: VideoBrief; modelId: string; stub: boolean }> {
   const topic = params.topic.trim().slice(0, 2000);
-  const modelId = getNovaProModelId();
+  const modelId = getNovaModelId();
   const preferredAspect = params.aspect ?? '16:9';
 
   const system = `You are WalkCroach Video Studio. Output ONLY JSON for a single 30-second Nova Reel MULTI_SHOT_AUTOMATED job (one StartAsyncInvoke, durationSeconds=30 — not five separate 6s clips):
@@ -447,7 +472,7 @@ Rules:
         modelId,
         system: [{ text: system }],
         messages: [{ role: 'user', content: [{ text: user }] }],
-        inferenceConfig: { maxTokens: 2048, temperature: 0.4 },
+        ...creativeConverseExtras(),
       }),
     );
     creativeMetric('ProInvokeCount', { feature: 'video_brief', tier: 'paid' });
@@ -456,7 +481,7 @@ Rules:
         ?.map((b) => ('text' in b && typeof b.text === 'string' ? b.text : ''))
         .join('\n') ?? '';
     const parsed = extractJsonObject(text);
-    if (!parsed) throw new Error('Nova Pro returned no video JSON');
+    if (!parsed) throw new Error('Nova 2 Lite returned no video JSON');
     if (params.aspect) parsed.aspect = params.aspect;
     if (params.brand) parsed.brand = params.brand;
     return { brief: normalizeVideoBrief(parsed, topic), modelId, stub: false };

@@ -1,7 +1,7 @@
 ---
 name: walkcroach-pptx
 description: >-
-  Creates professional PowerPoint decks for SME users via Nova Pro brief +
+  Creates professional PowerPoint decks for SME users via Nova 2 Lite brief +
   Nova Canvas imagery + server-side render_pptx, then deterministic script QA
   (validate_pptx, thumbnail_pptx, add_hd_image). Use for slides, pitch decks,
   presentations, or .pptx. Paid-only.
@@ -11,7 +11,7 @@ origin: walkcroach:web-modules
 
 # WalkCroach PPTX (Creative Studio — Slides)
 
-Skills are **instructions + executable scripts**. Nova Pro plans; scripts enforce
+Skills are **instructions + executable scripts**. Nova 2 Lite plans; scripts enforce
 quality deterministically inside `lambda-creative` (do not rely on the model to
 "notice" corrupt OOXML or overflow).
 
@@ -19,7 +19,7 @@ quality deterministically inside `lambda-creative` (do not rely on the model to
 
 ```
 propose brief → confirm
- → Nova Pro: structured brief JSON
+ → Nova 2 Lite: structured brief JSON
  → Nova Canvas images (quota!)
  → render_pptx (server)
  → python scripts/validate_pptx.py deck.pptx --json
@@ -64,7 +64,7 @@ python skills/web/walkcroach-pptx/scripts/thumbnail_pptx.py /tmp/out.pptx /tmp/t
 ## Credits & caps
 
 - Deck **20 credits**; images count toward **3/day**
-- Paid + Nova Pro orchestration only
+- Paid + Nova 2 Lite orchestration only
 
 ## Memory
 

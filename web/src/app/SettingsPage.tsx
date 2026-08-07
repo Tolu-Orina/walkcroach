@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
+  getBillingStatus,
   getGithubStatus,
   getUsage,
   listProjects,
@@ -29,8 +30,10 @@ export function SettingsPage() {
   const [usageError, setUsageError] = useState<string | null>(null);
   const [billingBusy, setBillingBusy] = useState(false);
   const [billingError, setBillingError] = useState<string | null>(null);
+  const [checkoutEnabled, setCheckoutEnabled] = useState<boolean | null>(null);
   const [githubRows, setGithubRows] = useState<GhRow[]>([]);
   const [githubLoading, setGithubLoading] = useState(true);
+  const [githubError, setGithubError] = useState<string | null>(null);
   const billingFlash = searchParams.get('billing');
 
   useEffect(() => {
@@ -43,12 +46,16 @@ export function SettingsPage() {
         setUsage(null);
         setUsageError(err instanceof Error ? err.message : String(err));
       });
+    void getBillingStatus()
+      .then((s) => setCheckoutEnabled(s.checkoutEnabled))
+      .catch(() => setCheckoutEnabled(false));
   }, [billingFlash]);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setGithubLoading(true);
+      setGithubError(null);
       try {
         const projects = await listProjects();
         const slice = projects.slice(0, 8);
@@ -73,8 +80,13 @@ export function SettingsPage() {
           }),
         );
         if (!cancelled) setGithubRows(rows);
-      } catch {
-        if (!cancelled) setGithubRows([]);
+      } catch (err) {
+        if (!cancelled) {
+          setGithubRows([]);
+          setGithubError(
+            err instanceof Error ? err.message : 'Could not load GitHub status',
+          );
+        }
       } finally {
         if (!cancelled) setGithubLoading(false);
       }
@@ -216,7 +228,7 @@ export function SettingsPage() {
           {usage?.plan !== 'paid' ? (
             <button
               type="button"
-              disabled={billingBusy}
+              disabled={billingBusy || checkoutEnabled !== true}
               className="interactive rounded-[var(--radius-control)] bg-signal px-3 py-1.5 text-xs font-semibold text-ink disabled:opacity-50"
               onClick={() => {
                 setBillingBusy(true);
@@ -233,7 +245,13 @@ export function SettingsPage() {
                   });
               }}
             >
-              {billingBusy ? 'Opening…' : 'Upgrade · ~$20/mo'}
+              {billingBusy
+                ? 'Opening…'
+                : checkoutEnabled === false
+                  ? 'Billing unavailable'
+                  : checkoutEnabled === null
+                    ? 'Checking…'
+                    : 'Upgrade · ~$20/mo'}
             </button>
           ) : (
             <button
@@ -289,6 +307,22 @@ export function SettingsPage() {
           </Link>
         </div>
 
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-line/60 pb-3">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-paper">Developer API</p>
+            <p className="mt-0.5 text-[12px] leading-relaxed text-mist">
+              API keys for <code className="font-mono text-paper">@walkcroach/sdk</code>{' '}
+              — same memory graph as your projects.
+            </p>
+          </div>
+          <Link
+            to="/app/developer/keys"
+            className="btn-secondary shrink-0 text-xs"
+          >
+            API keys
+          </Link>
+        </div>
+
         <div className="space-y-3">
           <div className="flex flex-wrap items-start justify-between gap-3 border-b border-line/60 pb-3">
             <div className="min-w-0">
@@ -309,10 +343,17 @@ export function SettingsPage() {
                 <p className="mt-0.5 text-[12px] leading-relaxed text-mist">
                   {githubLoading
                     ? 'Checking projects…'
-                    : connectedCount > 0
-                      ? `${connectedCount} project${connectedCount === 1 ? '' : 's'} connected`
-                      : 'No repos connected yet — open Builder → Ship.'}
+                    : githubError
+                      ? 'Could not load GitHub status for your projects.'
+                      : connectedCount > 0
+                        ? `${connectedCount} project${connectedCount === 1 ? '' : 's'} connected`
+                        : 'No repos connected yet — open Builder → Ship.'}
                 </p>
+                {githubError && (
+                  <p className="mt-1 text-[11px] text-ember" role="status">
+                    {githubError}
+                  </p>
+                )}
               </div>
               <Link
                 to="/app/projects"

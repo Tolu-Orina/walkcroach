@@ -273,7 +273,8 @@ export class SandboxHostAdapter implements HostAdapter {
     options: string[];
     allowFreeText?: boolean;
   }): Promise<UserQuestionAnswer> {
-    const supplied = this.answers[params.question];
+    const supplied =
+      this.answers[params.question] ?? this.answers['*'];
     if (supplied !== undefined) return { selected: supplied };
 
     this.inputRequired ??= { question: params.question, options: params.options };

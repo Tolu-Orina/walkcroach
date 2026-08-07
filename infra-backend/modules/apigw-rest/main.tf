@@ -234,7 +234,13 @@ resource "aws_api_gateway_deployment" "this" {
         aws_api_gateway_integration.ide_proxy_any.id,
         aws_api_gateway_integration.ide_proxy_options.id,
         aws_api_gateway_integration.ide_options.id,
+        aws_api_gateway_integration.sdk_health_get.id,
+        aws_api_gateway_integration.sdk_health_options.id,
       ],
+      [for k, v in aws_api_gateway_integration.sdk_root_any : v.id],
+      [for k, v in aws_api_gateway_integration.sdk_proxy_any : v.id],
+      [for k, v in aws_api_gateway_integration.sdk_root_options : v.id],
+      [for k, v in aws_api_gateway_integration.sdk_proxy_options : v.id],
       [for k, v in aws_api_gateway_integration.options : v.id],
       [
         aws_api_gateway_gateway_response.unauthorized.id,
@@ -265,6 +271,12 @@ resource "aws_api_gateway_deployment" "this" {
     aws_api_gateway_integration.ide_proxy_any,
     aws_api_gateway_integration.ide_proxy_options,
     aws_api_gateway_integration.ide_options,
+    aws_api_gateway_integration.sdk_health_get,
+    aws_api_gateway_integration.sdk_health_options,
+    aws_api_gateway_integration.sdk_root_any,
+    aws_api_gateway_integration.sdk_proxy_any,
+    aws_api_gateway_integration.sdk_root_options,
+    aws_api_gateway_integration.sdk_proxy_options,
     aws_api_gateway_integration.options,
     aws_api_gateway_gateway_response.unauthorized,
     aws_api_gateway_gateway_response.access_denied,
@@ -286,6 +298,14 @@ output "rest_api_id" {
 
 output "invoke_url" {
   value = aws_api_gateway_stage.this.invoke_url
+}
+
+/**
+ * Prefer the custom domain when configured (P5.1); otherwise execute-api.
+ * Used for SSM / client defaults after apply.
+ */
+output "public_api_url" {
+  value = local.enable_api_domain ? "https://${var.api_custom_domain_name}/${var.stage_name}" : aws_api_gateway_stage.this.invoke_url
 }
 
 output "execution_arn" {

@@ -58,17 +58,23 @@ jobs:
 
       - name: Build the private packages the CLI bundles
         run: |
-          cd packages/agent-engine
-          npm ci
+          cd packages/memory-contracts
+          npm ci --include=dev
+          npm run build
+          cd ../sdk
+          npm ci --include=dev
+          npm run build
+          cd ../agent-engine
+          npm ci --include=dev
           npm run build
           cd ../templates
-          npm ci
+          npm ci --include=dev
           npm run build
 
       - name: Install, typecheck, test
         working-directory: cli
         run: |
-          npm ci
+          npm ci --include=dev
           npm run typecheck
           npm test
           npm run build

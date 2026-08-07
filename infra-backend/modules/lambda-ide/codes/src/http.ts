@@ -27,6 +27,7 @@ export const CORS_HEADERS: Record<string, string> = new Proxy({} as Record<strin
 export function jsonResponse(
   statusCode: number,
   body: unknown,
+  extraHeaders?: Record<string, string>,
 ): {
   statusCode: number;
   headers: Record<string, string>;
@@ -37,6 +38,7 @@ export function jsonResponse(
     headers: {
       'content-type': 'application/json',
       ...getCorsHeaders(),
+      ...(extraHeaders ?? {}),
     },
     body: JSON.stringify(body),
   };

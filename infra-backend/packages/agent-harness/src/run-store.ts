@@ -1,17 +1,36 @@
 /**
  * Durable state for asynchronous agent runs.
  *
- * The lifecycle is deliberately small — `queued → running → succeeded|failed`,
- * plus `cancelled` — and every transition is guarded so a late or duplicate
- * writer cannot corrupt it. The guards matter more than the states: the failure
- * modes here are a zombie worker resurrecting a timed-out run, and a retried
- * submit starting a second job.
+ * Lifecycle: `queued → running → succeeded|failed|interrupted`, plus `cancelled`.
+ * `interrupted` is a LangGraph-style pause (HITL): the worker stopped with an
+ * interrupt payload; `resumeRun` re-queues with the caller's value.
+ *
+ * Every transition is guarded so a late or duplicate writer cannot corrupt it.
+ * Failure modes: zombie worker after lease expiry; retried submit starting a
+ * second job; resume of the wrong interrupt id.
  */
 import type { DbClient } from '@walkcroach/db';
 
-export type RunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+export type RunStatus =
+  | 'queued'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled'
+  | 'interrupted';
 
-export const TERMINAL_STATUSES: readonly RunStatus[] = ['succeeded', 'failed', 'cancelled'];
+export const TERMINAL_STATUSES: readonly RunStatus[] = [
+  'succeeded',
+  'failed',
+  'cancelled',
+];
+
+/** Statuses that still accept cancel. */
+export const CANCELLABLE_STATUSES: readonly RunStatus[] = [
+  'queued',
+  'running',
+  'interrupted',
+];
 
 export function isTerminal(status: RunStatus): boolean {
   return TERMINAL_STATUSES.includes(status);
@@ -178,6 +197,98 @@ export async function completeRun(params: {
   return (res.rowCount ?? 0) > 0;
 }
 
+/**
+ * Pause a running job for human input (LangGraph-style interrupt).
+ *
+ * Stores the interrupt on `result.interrupt` and clears the lease so the
+ * reaper does not treat the pause as a dead worker. Not terminal — `resumeRun`
+ * returns the job to `queued`.
+ */
+export async function interruptRun(params: {
+  db: DbClient;
+  runId: string;
+  interrupt: {
+    id: string;
+    kind: string;
+    payload: Record<string, unknown>;
+    createdAt: string;
+  };
+  /** Partial publish/agent result so far (files, refusals, …). */
+  result?: Record<string, unknown> | null;
+}): Promise<boolean> {
+  const merged = {
+    ...(params.result ?? {}),
+    interrupt: params.interrupt,
+    ok: false,
+    reason: 'interrupted',
+  };
+  const res = await params.db.query(
+    `UPDATE agent_runs
+        SET status = 'interrupted',
+            result = $2::jsonb,
+            error = NULL,
+            finished_at = NULL,
+            lease_expires_at = NULL
+      WHERE id = $1::uuid AND status = 'running'`,
+    [params.runId, JSON.stringify(merged)],
+  );
+  return (res.rowCount ?? 0) > 0;
+}
+
+/**
+ * Resume after an interrupt: verify interrupt id, stash resume value on the
+ * request, and re-queue for a worker claim.
+ */
+export async function resumeRun(params: {
+  db: DbClient;
+  runId: string;
+  ownerId: string;
+  interruptId: string;
+  value: unknown;
+}): Promise<{ ok: true; run: AgentRun } | { ok: false; error: string; status?: RunStatus }> {
+  const run = await getRun({
+    db: params.db,
+    runId: params.runId,
+    ownerId: params.ownerId,
+  });
+  if (!run) return { ok: false, error: 'run not found' };
+  if (run.status !== 'interrupted') {
+    return { ok: false, error: `run is ${run.status}, not interrupted`, status: run.status };
+  }
+  const interrupt = (run.result?.interrupt ?? null) as
+    | { id?: string }
+    | null;
+  if (!interrupt?.id || interrupt.id !== params.interruptId) {
+    return { ok: false, error: 'interrupt id does not match' };
+  }
+
+  const nextRequest = {
+    ...run.request,
+    resume: {
+      interruptId: params.interruptId,
+      value: params.value,
+      resumedAt: new Date().toISOString(),
+    },
+  };
+
+  const res = await params.db.query<Parameters<typeof toRun>[0]>(
+    `UPDATE agent_runs
+        SET status = 'queued',
+            request = $3::jsonb,
+            result = NULL,
+            error = NULL,
+            finished_at = NULL,
+            lease_expires_at = NULL
+      WHERE id = $1::uuid AND owner_id = $2 AND status = 'interrupted'
+      RETURNING ${SELECT}`,
+    [params.runId, params.ownerId, JSON.stringify(nextRequest)],
+  );
+  if (!res.rows[0]) {
+    return { ok: false, error: 'resume race: run left interrupted state' };
+  }
+  return { ok: true, run: toRun(res.rows[0]) };
+}
+
 /** Cancel, but only while there is still something to cancel. */
 export async function cancelRun(params: {
   db: DbClient;
@@ -187,7 +298,8 @@ export async function cancelRun(params: {
   const res = await params.db.query(
     `UPDATE agent_runs
         SET status = 'cancelled', finished_at = now(), lease_expires_at = NULL
-      WHERE id = $1::uuid AND owner_id = $2 AND status IN ('queued', 'running')`,
+      WHERE id = $1::uuid AND owner_id = $2
+        AND status IN ('queued', 'running', 'interrupted')`,
     [params.runId, params.ownerId],
   );
   return (res.rowCount ?? 0) > 0;

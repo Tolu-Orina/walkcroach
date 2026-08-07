@@ -36,6 +36,11 @@ export const CREDIT_COSTS: Record<string, number> = {
   start_video_job: 270,
   connector_write: 2,
   connector_read: 1,
+  /** Public SDK memory control plane (Phase P1.5). */
+  memory_remember: 1,
+  memory_recall: 1,
+  memory_import: 2,
+  content_publish: 5,
 };
 
 export type BalanceRow = {
@@ -133,7 +138,10 @@ export async function debitCredits(
   actionType: string,
   projectId?: string,
   metadata: Record<string, unknown> = {},
-): Promise<{ ok: true; remaining: number } | { ok: false; remaining: number }> {
+): Promise<
+  | { ok: true; remaining: number; ledgerId: string | null; credits: number }
+  | { ok: false; remaining: number }
+> {
   const cost = CREDIT_COSTS[actionType] ?? 0;
   await ensureBalanceRow(db, ownerId);
 
@@ -170,21 +178,40 @@ export async function debitCredits(
         [ownerId, cost],
       );
 
-      if (!rows[0]) return false;
+      if (!rows[0]) return null;
     }
 
-    await tx.query(
+    const { rows: ledgerRows } = await tx.query<{ id: string }>(
       `INSERT INTO usage_ledger (owner_id, project_id, action_type, credits, metadata)
-       VALUES ($1, $2::uuid, $3, $4, $5::jsonb)`,
+       VALUES ($1, $2::uuid, $3, $4, $5::jsonb)
+       RETURNING id`,
       [ownerId, projectId ?? null, actionType, cost, JSON.stringify(metadata)],
     );
-    return true;
+    return ledgerRows[0]?.id ?? null;
   });
 
   const summary = await getUsageSummary(db, ownerId);
-  return debited
-    ? { ok: true, remaining: summary.remaining }
-    : { ok: false, remaining: summary.remaining };
+  if (debited === null && cost > 0) {
+    return { ok: false, remaining: summary.remaining };
+  }
+  const out = {
+    ok: true as const,
+    remaining: summary.remaining,
+    ledgerId: debited,
+    credits: cost,
+  };
+  // P5.2 — every debit can meter; never block the ledger on Stripe.
+  if (out.ledgerId && out.credits > 0) {
+    void import('./stripe-meter.js')
+      .then(({ maybeEmitMeterForDebit }) =>
+        maybeEmitMeterForDebit(db, ownerId, {
+          ledgerId: out.ledgerId,
+          credits: out.credits,
+        }),
+      )
+      .catch(() => undefined);
+  }
+  return out;
 }
 
 /**
@@ -259,3 +286,12 @@ export async function getEntitlementRow(
     stripeCustomerId: rows[0]?.stripe_customer_id ?? null,
   };
 }
+
+export {
+  emitBillingMeterEvent,
+  maybeEmitMeterForDebit,
+  stripeMeterConfigured,
+  stripeMeterEventName,
+  DEFAULT_STRIPE_METER_EVENT_NAME,
+  type MeterEmitResult,
+} from './stripe-meter.js';

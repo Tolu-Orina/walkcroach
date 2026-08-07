@@ -3,7 +3,7 @@
 Align every checkbox with the shipping manifest and the live privacy policy.
 
 **Privacy policy URL (paste exactly):**  
-https://walkcroach.conquerorfoundation.com/chrome-privacy.html
+https://walkcroach.rinegansolutions.com/chrome-privacy.html
 
 Source file (must be redeployed with Web before submit):  
 `web/public/chrome-privacy.html`
@@ -51,8 +51,11 @@ Before upload, verify the dashboard permissions list matches the built manifest:
 
 - `storage`, `activeTab`, `scripting`, `sidePanel`, `identity`, `contextMenus` —
   all six, each justified in `PERMISSION_JUSTIFICATIONS.md`
-- **One** install-time host only: `https://awbcf4clij.execute-api.eu-west-2.amazonaws.com/*`
-  (or the baked `WALKCROACH_API_BASE` origin)
+- **One** install-time host in production: `https://api.walkcroach.rinegansolutions.com/*`
+  (Chrome BFF + public memory `/v1` share that origin; local builds may add
+  `localhost:3003` for the IDE API)
+  (legacy execute-api host may appear in older builds during cutover)
+  (or the baked `WALKCROACH_API_BASE` / `WALKCROACH_IDE_API_BASE` origins)
 - **Optional** host permissions: the broad http/https wildcards are expected and
   correct — see below
 - **No** `<all_urls>` anywhere, no `tabs`, no `content_scripts`

@@ -37,6 +37,29 @@ describeDeployed('deployed API — surface health + auth gates', () => {
     expect(body.surface).toBe('ide');
   });
 
+  it('GET /sdk-health (public SDK capabilities)', async () => {
+    const res = await get('/sdk-health');
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      surface: string;
+      version: string;
+      capabilities: string[];
+      retention: { asOfSeconds: number; mechanism: string };
+    };
+    expect(body.ok).toBe(true);
+    expect(body.surface).toBe('sdk');
+    expect(body.version).toBe('v1');
+    expect(body.capabilities).toEqual(expect.arrayContaining(['memory:read']));
+    expect(body.retention.mechanism).toBe('cockroachdb_mvcc_gc_ttl');
+    expect(body.retention.asOfSeconds).toBe(90_000);
+  });
+
+  it('GET /keys returns 401 without Authorization', async () => {
+    const res = await get('/keys');
+    expect(res.status).toBe(401);
+  });
+
   it('protected agent routes return 401 without Authorization', async () => {
     const res = await get('/projects');
     expect(res.status).toBe(401);

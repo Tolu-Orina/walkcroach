@@ -2,7 +2,7 @@
 
 Provisions S3 + CloudFront (+ optional ACM/Route53) for the builder SPA.
 
-**Demo / prod URL:** https://walkcroach.conquerorfoundation.com
+**Demo / prod URL:** https://walkcroach.rinegansolutions.com
 
 **Critical headers (WebContainer):**
 
@@ -17,21 +17,26 @@ Region: **eu-west-2** (ACM for CloudFront is issued in **us-east-1**).
 infra-web/
 ├── modules/
 │   ├── s3/
-│   ├── cloudfront/   # OAC + COOP/COEP
-│   ├── acm/          # us-east-1 cert + DNS validation
-│   └── dns/          # A/AAAA alias → CloudFront
+│   ├── cloudfront/         # SPA OAC + COOP/COEP
+│   ├── desktop-releases/   # Desktop Setup.exe CDN (S3 + CloudFront + SSM URL)
+│   ├── acm/                # us-east-1 cert + DNS validation
+│   └── dns/                # A/AAAA alias → CloudFront
 ├── environments/{dev,test,prod}.tfvars
 └── buildspec-*.yml
 ```
 
+Desktop stable download (after apply + `npm run publish:desktop-cdn` in walkcroach-desktop):
+
+- SSM: `/walkcroach/{env}/web/desktop_download_url`
+- Object: `desktop/preview/latest/WalkCroach-Setup.exe`
 ## Domain
 
 | Env | `domain_name` |
 |-----|----------------|
-| prod | `walkcroach.conquerorfoundation.com` |
+| prod | `walkcroach.rinegansolutions.com` |
 | dev / test | empty (CloudFront default URL) unless you set one |
 
-Requires a public Route53 zone for `conquerorfoundation.com` in the same account.
+Requires a public Route53 zone for `rinegansolutions.com` in the same account.
 
 ## Local apply (prod)
 

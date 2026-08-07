@@ -85,12 +85,26 @@ phases:
         else
           echo "VITE_ALLOW_GITHUB_PAT=true" >> web/.env.production
         fi
+
+        DESKTOP_DL=$(read_ssm "/walkcroach/${ENV}/web/desktop_download_url")
+        if [ -n "$DESKTOP_DL" ] && [ "$DESKTOP_DL" != "None" ]; then
+          echo "VITE_DESKTOP_DOWNLOAD_URL=${DESKTOP_DL}" >> web/.env.production
+          echo "Desktop download URL configured"
+        fi
   build:
     commands:
       - |
         set -eu
-        # file: dependency — dist/ is gitignored; must build before web typecheck.
+        # file: dependencies — dist/ is gitignored; must build before web.
         # CodeBuild often sets NODE_ENV=production, which omits typescript (devDep).
+        cd "${CODEBUILD_SRC_DIR}/packages/memory-contracts"
+        npm ci --include=dev
+        npm run build
+
+        cd "${CODEBUILD_SRC_DIR}/packages/sdk"
+        npm ci --include=dev
+        npm run build
+
         cd "${CODEBUILD_SRC_DIR}/packages/templates"
         npm ci --include=dev
         npm run build

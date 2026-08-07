@@ -2,6 +2,7 @@ import type { DbClient } from '@walkcroach/db';
 import { embedText } from './bedrock.js';
 import { memoryMetric, observeRecall } from './memory-metrics.js';
 import type { MemoryHit, MemoryKind } from './types.js';
+import type { SupersedeWriteResult } from '@walkcroach/memory-contracts';
 
 /** Format a float vector for CockroachDB VECTOR / array cast. */
 export function formatVector(embedding: number[]): string {
@@ -53,7 +54,13 @@ export async function writeMemoryEntryDetailed(params: {
   sourceSurface: string;
   kind: MemoryKind;
   text: string;
-}): Promise<{ id: string; supersededId: string | null }> {
+  /** Tenant principal that authored the write (Cognito sub / key owner). */
+  actorOwnerId?: string | null;
+  /** API key id when the caller authenticated with a key. */
+  actorKeyId?: string | null;
+  /** Optional request / event id for lineage (Oracle/Attestor pattern). */
+  sourceEventId?: string | null;
+}): Promise<SupersedeWriteResult> {
   const embedStarted = Date.now();
   let embedding: number[];
   try {
@@ -96,8 +103,9 @@ export async function writeMemoryEntryDetailed(params: {
         id: string;
         kind: string;
         distance: string | null;
+        erased_at: Date | null;
       }>(
-        `SELECT id, kind, embedding <=> $2::vector AS distance
+        `SELECT id, kind, erased_at, embedding <=> $2::vector AS distance
            FROM memory_entries
           WHERE project_id = $1::uuid
             AND superseded_by IS NULL
@@ -106,7 +114,10 @@ export async function writeMemoryEntryDetailed(params: {
         [params.projectId, vec],
       );
       const candidate = near.find(
-        (r) => r.kind === params.kind && r.distance !== null,
+        (r) =>
+          r.kind === params.kind &&
+          r.distance !== null &&
+          r.erased_at == null,
       );
       if (candidate && Number(candidate.distance) <= threshold) {
         supersededId = candidate.id;
@@ -114,10 +125,21 @@ export async function writeMemoryEntryDetailed(params: {
     }
 
     const { rows } = await tx.query<{ id: string }>(
-      `INSERT INTO memory_entries (project_id, source_surface, kind, text, embedding)
-       VALUES ($1::uuid, $2, $3, $4, $5::vector)
+      `INSERT INTO memory_entries
+         (project_id, source_surface, kind, text, embedding,
+          actor_owner_id, actor_key_id, source_event_id)
+       VALUES ($1::uuid, $2, $3, $4, $5::vector, $6, $7::uuid, $8)
        RETURNING id`,
-      [params.projectId, params.sourceSurface, params.kind, params.text, vec],
+      [
+        params.projectId,
+        params.sourceSurface,
+        params.kind,
+        params.text,
+        vec,
+        params.actorOwnerId ?? null,
+        params.actorKeyId ?? null,
+        params.sourceEventId ?? null,
+      ],
     );
     const id = rows[0]!.id;
 
@@ -225,8 +247,10 @@ export async function recallProjectMemory(params: {
         text: string;
         distance: number | null;
         source_surface: string;
+        created_at: Date | string;
+        erased_at: Date | null;
       }>(
-        `SELECT id, kind, text, source_surface,
+        `SELECT id, kind, text, source_surface, created_at, erased_at,
                 embedding <=> $2::vector AS distance
            FROM memory_entries
           WHERE project_id = $1::uuid
@@ -239,10 +263,8 @@ export async function recallProjectMemory(params: {
       const surfaceSet = surfaces.length > 0 ? new Set(surfaces) : null;
 
       return rows
-        // A row with no embedding sorts with a NULL distance rather than being
-        // excluded by the index, so it can only appear on the exact-scan path.
-        // Dropping it here keeps both paths returning the same thing.
         .filter((r) => r.distance !== null)
+        .filter((r) => r.erased_at == null)
         .filter((r) => !surfaceSet || surfaceSet.has(r.source_surface))
         .slice(0, limit)
         .map((r) => ({
@@ -251,6 +273,10 @@ export async function recallProjectMemory(params: {
           text: r.text,
           distance: Number(r.distance),
           sourceSurface: r.source_surface,
+          createdAt:
+            r.created_at instanceof Date
+              ? r.created_at.toISOString()
+              : String(r.created_at),
         }));
     },
   );
@@ -286,6 +312,7 @@ export async function listProjectMemoryEntries(params: {
        FROM memory_entries
        WHERE project_id = $1::uuid
          AND superseded_by IS NULL
+         AND erased_at IS NULL
          AND source_surface = ANY($3::string[])
        ORDER BY created_at DESC
        LIMIT $2`,
@@ -311,6 +338,7 @@ export async function listProjectMemoryEntries(params: {
      FROM memory_entries
      WHERE project_id = $1::uuid
        AND superseded_by IS NULL
+       AND erased_at IS NULL
      ORDER BY created_at DESC
      LIMIT $2`,
     [params.projectId, limit],
@@ -342,7 +370,8 @@ export async function updateMemoryEntryText(params: {
          WHERE id = $1::uuid
            AND project_id = $2::uuid
            AND source_surface = $5
-           AND superseded_by IS NULL`,
+           AND superseded_by IS NULL
+           AND erased_at IS NULL`,
         [
           params.entryId,
           params.projectId,
@@ -356,7 +385,8 @@ export async function updateMemoryEntryText(params: {
          SET text = $3, embedding = $4::vector
          WHERE id = $1::uuid
            AND project_id = $2::uuid
-           AND superseded_by IS NULL`,
+           AND superseded_by IS NULL
+           AND erased_at IS NULL`,
         [params.entryId, params.projectId, params.text, vec],
       );
   return (result.rowCount ?? 0) > 0;

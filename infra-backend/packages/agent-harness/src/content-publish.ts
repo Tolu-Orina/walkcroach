@@ -50,6 +50,8 @@ export type AgentRunner = (params: {
   workspaceRoot: string;
   prompt: string;
   context: string;
+  /** Pre-answered ask_user keys (from a prior resume). */
+  answers?: Record<string, string>;
 }) => Promise<{
   ok: boolean;
   reason: string;
@@ -58,6 +60,8 @@ export type AgentRunner = (params: {
   /** Full contents after the run, keyed by absolute path. */
   snapshot: Record<string, string>;
   refusals: Array<{ rule: string; reason: string; subject: string }>;
+  /** When set, the durable run should interrupt (not fail). */
+  inputRequired?: { question: string; options: string[] };
   error?: string;
 }>;
 
@@ -82,6 +86,8 @@ export type PublishResult = {
   learned: string[];
   reason: string;
   error?: string;
+  /** When set, the durable run should interrupt (not fail). */
+  inputRequired?: { question: string; options: string[] };
 };
 
 const WORKSPACE = '/workspace';
@@ -109,6 +115,8 @@ export async function publishContent(params: {
   runAgent: AgentRunner;
   /** Skip the PR and return the files instead. */
   dryRun?: boolean;
+  /** Resume answers from a prior interrupt (ask_user question → answer). */
+  answers?: Record<string, string>;
 }): Promise<PublishResult> {
   const title = deriveTitle(params.source);
 
@@ -178,7 +186,25 @@ export async function publishContent(params: {
       .filter(Boolean)
       .join('\n'),
     context,
+    answers: params.answers,
   });
+
+  if (run.inputRequired || run.reason === 'input_required') {
+    return {
+      ok: false,
+      filesWritten: run.filesWritten,
+      signals: fenced.signals,
+      flags: [],
+      refusals: run.refusals,
+      learned: [],
+      reason: 'input_required',
+      inputRequired: run.inputRequired ?? {
+        question: run.error ?? 'input required',
+        options: [],
+      },
+      ...(run.error ? { error: run.error } : {}),
+    };
+  }
 
   if (!run.ok) {
     return {

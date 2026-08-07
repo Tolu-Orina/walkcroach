@@ -1,6 +1,6 @@
 variable "domain_name" {
   type        = string
-  description = "FQDN for the SPA (e.g. walkcroach.conquerorfoundation.com)"
+  description = "FQDN for the SPA (e.g. walkcroach.rinegansolutions.com)"
 }
 
 variable "hosted_zone_name" {

@@ -17,10 +17,10 @@ import { fileURLToPath } from 'node:url';
 const root = join(fileURLToPath(import.meta.url), '..', '..');
 
 const DEFAULT_API =
-  'https://awbcf4clij.execute-api.eu-west-2.amazonaws.com/v1';
+  'https://api.walkcroach.rinegansolutions.com/v1';
 const DEFAULT_PRIVACY =
-  'https://walkcroach.conquerorfoundation.com/chrome-privacy.html';
-const DEFAULT_WEB = 'https://walkcroach.conquerorfoundation.com';
+  'https://walkcroach.rinegansolutions.com/chrome-privacy.html';
+const DEFAULT_WEB = 'https://walkcroach.rinegansolutions.com';
 
 const apiBase = (process.env.WALKCROACH_API_BASE ?? DEFAULT_API).replace(
   /\/$/,

@@ -98,8 +98,11 @@ describeLive('deployed IDE API — auth + link + memory', () => {
     });
     expect(recallRes.status).toBe(200);
     const recalled = (await recallRes.json()) as {
-      hits: Array<{ text: string }>;
+      hits: Array<{ text: string; sourceSurface?: string }>;
     };
     expect(recalled.hits.some((h) => h.text.includes(marker))).toBe(true);
+    expect(
+      recalled.hits.some((h) => h.text.includes(marker) && h.sourceSurface === 'ide'),
+    ).toBe(true);
   });
 });

@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, Navigate, useSearchParams } from 'react-router-dom';
+import { getSdkApiBaseUrl } from '../../api/client';
 import { loadStoredAuth } from '../../auth/storage';
 import { useAuth } from '../../auth/useAuth';
 import { AuthCard, AuthError, AuthLink } from '../../components/auth/AuthCard';
 import { isCliRedirectUri } from './cliRedirectUri';
 
 function ideApiBase(): string {
-  return String(import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
+  return getSdkApiBaseUrl();
 }
 
 /**

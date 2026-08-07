@@ -9,7 +9,7 @@
 | [walkcroach-master-doc.md](./walkcroach-master-doc.md) | Ecosystem status, architecture facts, gaps |
 | [hackathon-submission.md](./hackathon-submission.md) | **Draft submission write-up** — tools/AWS mapping, memory-design narrative, video plan, open gates |
 | [walkcroach-sdk-implementation-plan.md](./walkcroach-sdk-implementation-plan.md) | **SDK — built, agent path unrun.** Read §0.5 first: it supersedes §1–§12 |
-| [walkcroach-desktop-implementation-plan.md](./walkcroach-desktop-implementation-plan.md) | **Desktop IDE — active build.** Native agent via the VS Code Agent Host (AHP), Code OSS fork |
+| [walkcroach-desktop.md](./walkcroach-desktop.md) | **Desktop IDE — codebase truth.** Native Agent Host fork; detail in `walkcroach-desktop/docs/` |
 | [runtime-secrets-and-ssm.md](./runtime-secrets-and-ssm.md) | Secrets Manager / SSM catalogue |
 | [smoke-and-redirects.md](./smoke-and-redirects.md) | Weekend / prod smoke checklist |
 | [web-claims-audit.md](./web-claims-audit.md) | Marketing/UI claims vs shipped behaviour |
@@ -30,6 +30,7 @@
 
 Historical PRDs live in [`archive/`](./archive/). They are **not** build truth.
 
-The archived Desktop PRD and Phase A–F plan are no longer present; the Desktop plan above replaces them, and its phase numbering (D1–D6) is deliberately different so the old "✅ Structural" verifiers cannot be mistaken for coverage of the new work.
+The archived Desktop PRDs and multi-doc plans live under [`archive/`](./archive/) (`walkcroach-desktop-*`). Living Desktop truth: [`walkcroach-desktop.md`](./walkcroach-desktop.md) plus `walkcroach-desktop/docs/{ARCHITECTURE,STATUS,SHIPPING}.md`.
+
 
 Finished surface implementation plans (Web Modules, Chrome, CLI, master ecosystem) were removed once the work landed; status lives in the master doc.

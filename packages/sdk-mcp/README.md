@@ -78,6 +78,34 @@ const server = createMcpHttpServer({ apiKey, port: 7801 });
 
 The dispatcher retains nothing between calls, so one instance serves concurrent clients safely.
 
+## Host configs
+
+### Claude Code (HTTP)
+
+```bash
+export WALKCROACH_API_KEY=wc_live_…
+export WALKCROACH_BASE_URL=https://api.walkcroach.rinegansolutions.com
+npx -y @walkcroach/sdk-mcp serve --port 7801
+
+claude mcp add --transport http walkcroach http://127.0.0.1:7801/mcp
+```
+
+### Cursor / VS Code
+
+Run the same `serve` process, then in MCP settings:
+
+```json
+{
+  "mcpServers": {
+    "walkcroach": {
+      "url": "http://127.0.0.1:7801/mcp"
+    }
+  }
+}
+```
+
+**Do not** configure a stdio `command`/`args` entry for this package — stdio is not implemented.
+
 ## Scopes
 
 A key minted with only `memory:read` cannot call `remember`; the refusal names the missing scope. Mint keys with the least scope the integration needs.

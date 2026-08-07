@@ -221,4 +221,58 @@ export class MemoryApi implements MemoryReader {
       },
     });
   }
+
+  /**
+   * Legal erase (ADR-0002): tombstone + redact. Never silent hard DELETE.
+   * Requires `memory:write`.
+   */
+  async erase(opts: {
+    projectId: string;
+    reason: string;
+    entryIds?: string[];
+    exportFirst?: boolean;
+  }): Promise<{
+    projectId: string;
+    erased: number;
+    entryIds: string[];
+    export: MemoryExport | null;
+  }> {
+    assertProjectId(opts.projectId);
+    if (!opts.reason?.trim()) {
+      throw new ValidationError('reason is required', 400, null, { field: 'reason' });
+    }
+    return this.transport.request('POST', '/v1/memory/erase', {
+      body: {
+        projectId: opts.projectId,
+        reason: opts.reason,
+        entryIds: opts.entryIds,
+        exportFirst: opts.exportFirst,
+      },
+    });
+  }
+
+  /** Append-only control-plane audit for a project. Requires `memory:read`. */
+  async audit(opts: {
+    projectId: string;
+    limit?: number;
+  }): Promise<{
+    projectId: string;
+    events: Array<{
+      id: string;
+      action: string;
+      entryId: string | null;
+      actorKeyId: string | null;
+      requestId: string | null;
+      detail: unknown;
+      createdAt: string;
+    }>;
+  }> {
+    assertProjectId(opts.projectId);
+    return this.transport.request('GET', '/v1/memory/audit', {
+      query: {
+        projectId: opts.projectId,
+        limit: opts.limit,
+      },
+    });
+  }
 }

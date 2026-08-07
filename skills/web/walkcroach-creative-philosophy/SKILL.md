@@ -40,7 +40,7 @@ Full upstream package also mirrored at `vendor/apache/canvas-design/` for refere
 
 ## Constraints (WalkCroach)
 
-- Requires **paid** tier + Nova Pro orchestration (`walkcroach-model-routing`)
+- Requires **paid** tier + Nova 2 Lite orchestration (`walkcroach-model-routing`)
 - Image generations count against **3/day** hard cap (`walkcroach-quota-and-credits`)
 - Propose the brief (philosophy + copy + palette) → user confirms → execute tools
 - Persist successful briefs to `creative_assets` for memory recall

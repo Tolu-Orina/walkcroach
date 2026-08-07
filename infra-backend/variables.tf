@@ -116,7 +116,7 @@ variable "bedrock_region" {
 
 variable "nova_model_id" {
   type        = string
-  description = "Bedrock Nova model ID"
+  description = "Bedrock Nova 2 Lite model ID (text + creative briefs; extended thinking always on)"
   default     = "global.amazon.nova-2-lite-v1:0"
 }
 
@@ -124,12 +124,6 @@ variable "nova_canvas_model_id" {
   type        = string
   description = "Bedrock Nova Canvas model ID (image generation)"
   default     = "amazon.nova-canvas-v1:0"
-}
-
-variable "nova_pro_model_id" {
-  type        = string
-  description = "Bedrock Nova Pro model ID (paid creative orchestration)"
-  default     = "amazon.nova-pro-v1:0"
 }
 
 variable "creative_lambda_image_uri" {
@@ -175,7 +169,13 @@ variable "api_stage_name" {
 
 variable "hosted_zone_name" {
   type        = string
-  description = "Route53 zone for deployed app wildcard (prod)"
+  description = "Route53 zone for deployed app wildcard and API custom domain (prod)"
+  default     = ""
+}
+
+variable "api_custom_domain_name" {
+  type        = string
+  description = "Regional API custom domain (e.g. api.walkcroach.rinegansolutions.com). Empty keeps execute-api only."
   default     = ""
 }
 

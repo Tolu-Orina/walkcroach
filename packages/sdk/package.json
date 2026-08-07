@@ -12,7 +12,7 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist", "README.md"],
+  "files": ["dist", "README.md", "openapi"],
   "publishConfig": {
     "access": "public"
   },
@@ -20,7 +20,9 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "check:openapi": "node scripts/check-openapi-drift.mjs",
+    "check:memory-contracts": "node ../memory-contracts/scripts/check-memory-contracts-drift.mjs"
   },
   "keywords": [
     "agent-memory",
@@ -30,6 +32,9 @@
     "vector-search",
     "provenance"
   ],
+  "dependencies": {
+    "@walkcroach/memory-contracts": "file:../memory-contracts"
+  },
   "devDependencies": {
     "@types/node": "^22.15.0",
     "@vitest/coverage-v8": "^3.2.7",

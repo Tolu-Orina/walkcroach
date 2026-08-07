@@ -14,6 +14,11 @@ output "api_invoke_url" {
   value = module.apigw.invoke_url
 }
 
+output "api_public_url" {
+  description = "Preferred client base URL (custom domain when configured)"
+  value       = module.apigw.public_api_url
+}
+
 output "lambda_function_name" {
   value = module.lambda_agent.function_name
 }

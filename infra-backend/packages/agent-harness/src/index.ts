@@ -10,6 +10,7 @@ export {
   formatBedrockModelErrorForLogs,
   formatBedrockErrorForUser,
   getNovaReasoningEffort,
+  resolveNovaReasoningEffort,
   getGuardrailConfig,
 } from './bedrock.js';
 export {
@@ -34,7 +35,6 @@ export {
   generateCreativeBrief,
   generateFlyerBrief,
   generateVideoBrief,
-  getNovaProModelId,
   type CreativeBrief,
   type FlyerBrief,
   type VideoBrief,
@@ -124,6 +124,8 @@ export {
   claimRun,
   heartbeatRun,
   completeRun,
+  interruptRun,
+  resumeRun,
   cancelRun,
   getRun,
   appendRunEvent,
@@ -132,6 +134,7 @@ export {
   isTerminal,
   LEASE_SECONDS,
   TERMINAL_STATUSES,
+  CANCELLABLE_STATUSES,
   type AgentRun,
   type RunEvent,
   type RunStatus,
@@ -186,16 +189,32 @@ export {
 export {
   exportProjectMemory,
   importProjectMemory,
-  validateExport,
   parseVector,
-  ImportFormatError,
   EXPORT_FORMAT,
   EXPORT_VERSION,
   EMBEDDING_DIMENSIONS,
+  validateExport,
+  ImportFormatError,
   type MemoryExport,
   type ExportedEntry,
   type ImportResult,
 } from './memory-portability.js';
+export {
+  MEMORY_KINDS,
+  normalizeMemoryKind,
+  isMemoryKind,
+  type SupersedeWriteResult,
+  type SharedMemoryUiEvent,
+} from '@walkcroach/memory-contracts';
+export {
+  appendMemoryAudit,
+  listMemoryAudit,
+  type MemoryAuditAction,
+} from './memory-audit.js';
+export {
+  eraseMemoryEntries,
+  ERASED_TEXT_PLACEHOLDER,
+} from './memory-erase.js';
 export {
   memoryMetric,
   observeRecall,

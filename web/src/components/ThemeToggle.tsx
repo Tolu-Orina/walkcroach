@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { applyTheme, getStoredTheme, type Theme } from '../lib/theme';
+import { applyTheme, resolveTheme, type Theme } from '../lib/theme';
 
 export function ThemeToggle({ className = '' }: { className?: string }) {
-  const [theme, setTheme] = useState<Theme>(() => getStoredTheme() ?? 'dark');
+  const [theme, setTheme] = useState<Theme>(() => resolveTheme());
 
   useEffect(() => {
     applyTheme(theme);

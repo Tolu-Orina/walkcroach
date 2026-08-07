@@ -62,6 +62,12 @@ export {
   type ActiveSessionPointer,
 } from './session-store.js';
 export {
+  enterGitWorktree,
+  exitGitWorktree,
+  type WorktreeEnterResult,
+  type WorktreeExitResult,
+} from './worktree.js';
+export {
   parseHooksConfig,
   runPostToolUseHooks,
   runStopHooks,
@@ -152,6 +158,7 @@ export {
   createBedrockClient,
   getNovaModelId,
   getNovaReasoningEffort,
+  resolveNovaReasoningEffort,
   getTitanEmbedModelId,
   getBedrockRegion,
   normalizeBedrockApiKey,
@@ -215,9 +222,29 @@ export {
   type ToolLoopGuardState,
 } from './tool-loop-guard.js';
 
-export { ApprovalController, bindApprovals } from './approval-controller.js';
+export {
+  ApprovalController,
+  FleetApprovalRouter,
+  bindApprovals,
+  type ApprovalControllerOptions,
+} from './approval-controller.js';
 export { createFakeHost } from './fake-host.js';
 export { truncateText, DEFAULT_TOOL_RESULT_MAX_CHARS } from './truncate.js';
+export {
+  validateToolInput,
+  dispatchTool,
+  observeToolResult,
+} from './tools/dispatch.js';
+export {
+  DEFAULT_WORKTREE_POLICY,
+  FLEET_ISOLATION_POLICY,
+  resolveWorktreePolicy,
+  planFirstWriteIsolation,
+  type IsolationMode,
+  type CollisionMode,
+  type WorktreeIsolationPolicy,
+  type IsolationPlan,
+} from './worktree-policy.js';
 export {
   assembleSystemBlocks,
   buildUserTurn,
@@ -348,9 +375,25 @@ export {
 export {
   TelemetrySink,
   emptyTelemetry,
+  AGENT_SLIS,
   type TelemetryCounters,
   type TelemetryName,
+  type StructuredTelemetryEvent,
+  type AgentSliName,
 } from './telemetry.js';
+export {
+  attachEnvExporters,
+  createTelemetryForwarder,
+  toOtlpLogBody,
+  type TelemetryForwarder,
+  type ExporterEnv,
+} from './telemetry-exporters.js';
+export {
+  resolvePermissionMode,
+  permissionModeFromAutonomy,
+  type PermissionMode,
+  type PermissionResolved,
+} from './permission-mode.js';
 export {
   SECRET_KEYS,
   loadMcpConfigFromSecrets,

@@ -1,5 +1,5 @@
 /**
- * Public SDK surface: `/v1/*`.
+ * Public SDK surface: `/v1/*` (and APIGW stage-relative `/keys`, `/memory`, …).
  *
  * Dispatched ahead of the `/ide/v1/*` routes, which are untouched — `walkcroach-ide`
  * and `@walkcroach/cli` are published against those and must not move.
@@ -9,19 +9,31 @@
  * arrives intact; behind a `v1` stage the same call can also appear as
  * `/v1/v1/memory/recall`. Both are accepted rather than depending on deployment
  * shape, because getting this wrong fails only in the deployed environment.
+ *
+ * On the shared API Gateway, `/health` is the *agent* smoke endpoint. SDK
+ * capability health is also exposed as `/sdk-health` so it does not collide.
  */
 import { requireAuth } from '../auth.js';
 import type { HttpRequest } from '../event.js';
 import { CORS_HEADERS, jsonResponse } from '../http.js';
-import { handleContentPublish } from './content.js';
-import { handleCancelRun, handleGetRun } from './runs.js';
 import {
+  MEMORY_ASOF_RETENTION_SECONDS,
+  SDK_CAPABILITIES,
+  SDK_PROTOCOL_VERSION,
+  SDK_ROOT_SEGMENTS,
+} from '../sdk-contract.js';
+import { handleContentPublish } from './content.js';
+import { handleCancelRun, handleGetRun, handleResumeRun } from './runs.js';
+import {
+  handleApiKeyUsage,
   handleCreateApiKey,
   handleListApiKeys,
   handleRevokeApiKey,
 } from './keys.js';
 import {
+  handleSdkAuditList,
   handleSdkDiff,
+  handleSdkErase,
   handleSdkExport,
   handleSdkImport,
   handleSdkList,
@@ -39,7 +51,29 @@ export function normalizeSdkPath(path: string): string {
 /** True when this request belongs to the SDK surface rather than `/ide/v1`. */
 export function isSdkPath(path: string): boolean {
   const p = normalizeSdkPath(path);
-  return /^\/(memory|keys|health|content|runs)(\/|$)/.test(p);
+  const root = p.replace(/^\//, '').split('/')[0] ?? '';
+  return (SDK_ROOT_SEGMENTS as readonly string[]).includes(root);
+}
+
+function sdkHealthBody() {
+  return {
+    ok: true,
+    surface: 'sdk' as const,
+    version: SDK_PROTOCOL_VERSION,
+    capabilities: [...SDK_CAPABILITIES],
+    retention: {
+      asOfSeconds: MEMORY_ASOF_RETENTION_SECONDS,
+      asOfHuman: `${MEMORY_ASOF_RETENTION_SECONDS / 3600}h`,
+      mechanism: 'cockroachdb_mvcc_gc_ttl' as const,
+      note:
+        'Point-in-time recall (asOf/diff) cannot read past this MVCC window; older versions are garbage-collected. Long-lived governance uses memory_audit + erase tombstones (ADR-0001/0002), not multi-year asOf.',
+      governance: {
+        asOf: 'cockroachdb_mvcc_gc_ttl',
+        audit: 'memory_audit',
+        erase: 'tombstone_redact',
+      },
+    },
+  };
 }
 
 export async function handleSdkRest(req: HttpRequest) {
@@ -52,13 +86,12 @@ export async function handleSdkRest(req: HttpRequest) {
 
   // Unauthenticated: lets a client verify reachability and protocol version
   // before it has credentials to try.
-  if (method === 'GET' && /^\/health\/?$/.test(path)) {
-    return jsonResponse(200, {
-      ok: true,
-      surface: 'sdk',
-      version: 'v1',
-      capabilities: ['memory:read', 'memory:write', 'memory:asOf', 'memory:diff'],
-    });
+  // `/sdk-health` is the APIGW-safe alias when `/health` is owned by the agent.
+  if (
+    method === 'GET' &&
+    (/^\/health\/?$/.test(path) || /^\/sdk-health\/?$/.test(path))
+  ) {
+    return jsonResponse(200, sdkHealthBody());
   }
 
   const auth = await requireAuth(req.headers);
@@ -79,12 +112,22 @@ export async function handleSdkRest(req: HttpRequest) {
   if (method === 'POST' && /^\/memory\/diff\/?$/.test(path)) {
     return handleSdkDiff(auth, req.body);
   }
+  if (method === 'POST' && /^\/memory\/erase\/?$/.test(path)) {
+    return handleSdkErase(auth, req.body);
+  }
+  if (method === 'GET' && /^\/memory\/audit\/?$/.test(path)) {
+    return handleSdkAuditList(auth, req.queryStringParameters);
+  }
   // ── content ─────────────────────────────────────────────────────────────
   if (method === 'POST' && /^\/content\/publish\/?$/.test(path)) {
     return handleContentPublish(auth, req.body);
   }
 
   // ── runs ────────────────────────────────────────────────────────────────
+  const runResumeMatch = path.match(/^\/runs\/([^/]+)\/resume\/?$/);
+  if (method === 'POST' && runResumeMatch) {
+    return handleResumeRun(auth, runResumeMatch[1]!, req.body);
+  }
   const runMatch = path.match(/^\/runs\/([^/]+)\/?$/);
   if (method === 'GET' && runMatch) {
     return handleGetRun(auth, runMatch[1]!, req.queryStringParameters);
@@ -103,6 +146,9 @@ export async function handleSdkRest(req: HttpRequest) {
   // ── keys (Cognito-only; see keys.ts) ────────────────────────────────────
   if (method === 'POST' && /^\/keys\/?$/.test(path)) {
     return handleCreateApiKey(auth, req.body);
+  }
+  if (method === 'GET' && /^\/keys\/usage\/?$/.test(path)) {
+    return handleApiKeyUsage(auth);
   }
   if (method === 'GET' && /^\/keys\/?$/.test(path)) {
     return handleListApiKeys(auth);

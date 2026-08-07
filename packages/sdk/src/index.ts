@@ -14,9 +14,26 @@ export class WalkCroach {
     this.content = new ContentApi(this.transport);
   }
 
-  /** Liveness + advertised capabilities. Requires no credentials server-side. */
-  async health(): Promise<{ ok: boolean; version: string; capabilities: string[] }> {
-    return this.transport.request('GET', '/v1/health');
+  /**
+   * Liveness + advertised capabilities + retention window.
+   * Uses `/v1/sdk-health` (not `/v1/health`) so shared API Gateway does not
+   * collide with the agent smoke `GET /health`. Ide-local serves the same body
+   * on both paths. Server-side auth is not required; the client still needs a
+   * constructor credential today.
+   */
+  async health(): Promise<{
+    ok: boolean;
+    version: string;
+    capabilities: string[];
+    surface?: string;
+    retention?: {
+      asOfSeconds: number;
+      asOfHuman: string;
+      mechanism: string;
+      note: string;
+    };
+  }> {
+    return this.transport.request('GET', '/v1/sdk-health');
   }
 
   /**
@@ -29,7 +46,7 @@ export class WalkCroach {
   readonly keys = {
     create: async (opts: {
       name: string;
-      scopes?: Array<'memory:read' | 'memory:write'>;
+      scopes?: Array<'memory:read' | 'memory:write' | 'content:run'>;
       expiresInDays?: number;
     }): Promise<ApiKeySummary & { key: string; warning: string }> =>
       this.transport.request('POST', '/v1/keys', { body: opts }),
@@ -47,13 +64,26 @@ export class WalkCroach {
   };
 }
 
+export {
+  PRODUCTION_API_HOST,
+  PRODUCTION_API_ORIGIN,
+  PRODUCTION_API_BASE_URL,
+} from './defaults.js';
 export { MemoryApi, type MemoryReader, type RecallOptions } from './memory.js';
 export {
   ContentApi,
   RunHandle,
   RunFailedError,
+  RunInterruptedError,
   type PublishOptions,
 } from './content.js';
+export {
+  createAskUserInterrupt,
+  HARNESS_PAUSE_TO_INTERRUPT,
+  type InterruptKind,
+  type RunInterrupt,
+  type ResumeRequest,
+} from './interrupt.js';
 export {
   WalkCroachError,
   AuthError,
@@ -71,6 +101,7 @@ export type {
   MemoryEntry,
   MemoryExport,
   MemoryKind,
+  MemorySurface,
   PublishResult,
   PublishSource,
   RunEvent,
@@ -78,6 +109,23 @@ export type {
   RunStatus,
   RecallHit,
   RememberResult,
+  SharedMemoryUiEvent,
+  SupersedeWriteResult,
   WalkCroachConfig,
   WriteScope,
 } from './types.js';
+export {
+  MEMORY_KINDS,
+  EXPORT_FORMAT,
+  EXPORT_VERSION,
+  EMBEDDING_DIMENSIONS,
+  normalizeMemoryKind,
+  isMemoryKind,
+  validateExport,
+  ImportFormatError,
+} from './types.js';
+export {
+  createHostMemoryBridge,
+  type HostMemoryBridge,
+  type HostMemoryHit,
+} from './project-memory-bridge.js';

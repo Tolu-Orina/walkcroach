@@ -19,7 +19,7 @@ Open the Vite URL (COOP/COEP enabled). Set `VITE_API_URL` if the API is not on `
 
 ## Prod
 
-Deployed to **https://walkcroach.conquerorfoundation.com** (`infra-web` + pipeline). CloudFront must keep COOP/COEP for WebContainer.
+Deployed to **https://walkcroach.rinegansolutions.com** (`infra-web` + pipeline). CloudFront must keep COOP/COEP for WebContainer.
 
 ## Third-party
 

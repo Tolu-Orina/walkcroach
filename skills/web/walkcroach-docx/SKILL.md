@@ -18,7 +18,7 @@ must end with a deterministic open/round-trip check in `lambda-creative`.
 
 ## v1 scope
 
-- Generate from Nova Pro brief → `python-docx` render tool `render_docx`
+- Generate from Nova 2 Lite brief → `python-docx` render tool `render_docx`
 - Validate: file opens, has ≥1 paragraph, no lorem
 - Optional: export PDF via LibreOffice for preview (`walkcroach-pdf`)
 

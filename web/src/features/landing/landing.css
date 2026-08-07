@@ -1,0 +1,180 @@
+/*
+  Landing — Meridian Slate + WalkCroach brand green
+  Favicon lime #c7e54a for fills; deeper olive for text accents (WCAG).
+  Scoped under .landing-meridian so the app shell keeps Graphite Lumen.
+  Dark remap: html[data-theme='dark'] — same preference pipe as the app
+  (walkcroach.theme.v1 / initTheme). Light product imagery stays as-is.
+*/
+
+.landing-meridian {
+  --lp-canvas: #f4f6f8;
+  --lp-canvas-deep: #e8eef3;
+  --lp-ink: #0b1220;
+  --lp-muted: #5b6575;
+  --lp-panel: #ffffff;
+  --lp-line: #d5dde6;
+  /* Text / links / eyebrows — olive that passes AA on light canvas */
+  --lp-accent: #5a6618;
+  /* Brand lime from favicon — primary fills */
+  --lp-accent-bright: #c7e54a;
+  --lp-accent-hover: #b8d63a;
+  --lp-accent-soft: #f3f7d9;
+  --lp-on-accent: #0b1220;
+  --lp-footer: #0b1220;
+  --lp-footer-muted: #94a3b8;
+  --lp-radius: 0.75rem;
+  --lp-radius-control: 0.5rem;
+  --lp-shadow: 0 1px 0 rgb(11 18 32 / 4%), 0 12px 32px rgb(11 18 32 / 8%);
+  --lp-shadow-hover: 0 1px 0 rgb(11 18 32 / 5%), 0 18px 40px rgb(11 18 32 / 12%);
+  --lp-nav-bg: rgb(244 246 248 / 88%);
+  --lp-nav-line: rgb(213 221 230 / 80%);
+
+  min-height: 100%;
+  background:
+    radial-gradient(900px 480px at 85% 8%, rgb(199 229 74 / 18%) 0%, transparent 55%),
+    radial-gradient(700px 420px at 8% 20%, rgb(11 18 32 / 4%) 0%, transparent 50%),
+    linear-gradient(180deg, var(--lp-canvas) 0%, var(--lp-canvas-deep) 100%);
+  color: var(--lp-ink);
+  font-family: var(--font-sans);
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+/* Dark Meridian — peer palette, not an invert of light */
+html[data-theme='dark'] .landing-meridian {
+  --lp-canvas: #0b1220;
+  --lp-canvas-deep: #070a12;
+  --lp-ink: #e8eef3;
+  --lp-muted: #94a3b8;
+  --lp-panel: #141a24;
+  /* ≥3:1 vs canvas and panel for borders / UI chrome */
+  --lp-line: #64748b;
+  --lp-accent: #c7e54a;
+  --lp-accent-bright: #c7e54a;
+  --lp-accent-hover: #d4ee6a;
+  --lp-accent-soft: rgb(199 229 74 / 14%);
+  --lp-on-accent: #0b1220;
+  /* Footer sits slightly below canvas so it still reads as a band */
+  --lp-footer: #070a12;
+  --lp-footer-muted: #94a3b8;
+  --lp-shadow: 0 1px 0 rgb(255 255 255 / 4%), 0 16px 40px rgb(0 0 0 / 45%);
+  --lp-shadow-hover: 0 1px 0 rgb(255 255 255 / 6%), 0 22px 48px rgb(0 0 0 / 55%);
+  --lp-nav-bg: rgb(11 18 32 / 88%);
+  --lp-nav-line: rgb(100 116 139 / 45%);
+
+  background:
+    radial-gradient(900px 480px at 85% 8%, rgb(199 229 74 / 10%) 0%, transparent 55%),
+    radial-gradient(700px 420px at 8% 20%, rgb(199 229 74 / 4%) 0%, transparent 50%),
+    linear-gradient(180deg, var(--lp-canvas) 0%, var(--lp-canvas-deep) 100%);
+}
+
+.landing-meridian .lp-nav {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  border-bottom: none;
+  background: var(--lp-nav-bg);
+  backdrop-filter: blur(16px) saturate(1.2);
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+}
+
+.landing-meridian .lp-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: var(--lp-radius-control);
+  background: var(--lp-accent-bright);
+  padding: 0.625rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--lp-on-accent);
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.landing-meridian .lp-btn-primary:hover {
+  background: var(--lp-accent-hover);
+}
+
+.landing-meridian .lp-btn-primary:active {
+  transform: scale(0.98);
+}
+
+.landing-meridian .lp-btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: var(--lp-radius-control);
+  border: 1px solid var(--lp-line);
+  background: var(--lp-panel);
+  padding: 0.625rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--lp-ink);
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+}
+
+.landing-meridian .lp-btn-secondary:hover {
+  border-color: color-mix(in oklab, var(--lp-accent-bright) 45%, var(--lp-line));
+  background: var(--lp-accent-soft);
+}
+
+.landing-meridian .lp-btn-secondary:active {
+  transform: scale(0.98);
+}
+
+.landing-meridian .lp-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: var(--lp-radius-control);
+  border: 1px solid var(--lp-line);
+  background: var(--lp-panel);
+  color: var(--lp-ink);
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease,
+    transform 0.15s ease;
+}
+
+.landing-meridian .lp-btn-icon:hover {
+  border-color: color-mix(in oklab, var(--lp-accent-bright) 45%, var(--lp-line));
+  background: var(--lp-accent-soft);
+  color: var(--lp-accent);
+}
+
+.landing-meridian .lp-btn-icon:active {
+  transform: scale(0.98);
+}
+
+.landing-meridian .lp-card {
+  overflow: hidden;
+  border-radius: var(--lp-radius);
+  border: 1px solid var(--lp-line);
+  background: var(--lp-panel);
+  box-shadow: var(--lp-shadow);
+  transition: box-shadow 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
+}
+
+.landing-meridian .lp-card:hover {
+  border-color: color-mix(in oklab, var(--lp-accent-bright) 40%, var(--lp-line));
+  box-shadow: var(--lp-shadow-hover);
+  transform: translateY(-2px);
+}
+
+.landing-meridian .lp-eyebrow {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--lp-accent);
+}
+
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .landing-meridian .lp-nav {
+    background: var(--lp-canvas);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}

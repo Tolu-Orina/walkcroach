@@ -1257,7 +1257,7 @@ async function executeServerTool(params: {
           reason: 'paid_plan_required',
           feature: 'slides',
           message:
-            'Slide decks require Paid (~$20/mo). Upgrade to unlock Nova Pro briefs and pptx render.',
+            'Slide decks require Paid (~$20/mo). Upgrade to unlock creative briefs and pptx render.',
         });
         return {
           events,

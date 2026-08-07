@@ -32,22 +32,22 @@ Source: `web/public/privacy.html`
 
 ## UI surfaces to re-check before release
 
-- [ ] `web/src/features/billing/UpgradeModal.tsx` — creatives + caps language
-- [ ] `web/src/app/SettingsPage.tsx` — billing + connectors copy
-- [ ] `web/src/features/chat/ImageQuotaPill.tsx` — 3/24h and 1/72h
-- [ ] Chat ConfirmCard / VideoJobCard failure copy
+- [x] `web/src/features/billing/UpgradeModal.tsx` — creatives + caps language (images ≤3/day · video ≤1/72h when studio is live; checkout gated)
+- [x] `web/src/app/SettingsPage.tsx` — billing + connectors copy (hard caps + Secrets Manager; privacy link)
+- [x] `web/src/features/chat/ImageQuotaPill.tsx` — 3/24h and 1/72h (+ error/retry affordance)
+- [x] Chat ConfirmCard / VideoJobCard failure copy (stub badge; failed-job copy present)
 - [ ] Chrome store listing does not claim Web-only creatives as extension features without gating
 
 ## Privacy copy checklist
 
-- [ ] `privacy.html` deployed with SPA hosting
-- [ ] Settings footer links to `/privacy.html`
+- [x] `privacy.html` deployed with SPA hosting (`web/public/privacy.html`)
+- [x] Settings footer links to `/privacy.html`
 - [ ] Stripe / OAuth provider consoles use the live Web origin for redirects
-- [ ] No secret values in client bundles (NFR scan includes connector paths)
+- [x] No secret values in client bundles (NFR scan includes connector paths)
 
 ## Sign-off
 
 | Role | Date | Notes |
 |---|---|---|
-| Eng | | Phase H3 doc landed |
+| Eng | 2026-08-07 | Web UI claims re-check + P2 error-state fixes (quota pill, memory strip, Settings GitHub). Chrome store + Stripe console redirects still Product/ops. |
 | Product | | |

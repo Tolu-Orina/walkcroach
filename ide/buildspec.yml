@@ -10,14 +10,25 @@ phases:
   build:
     commands:
       - |
-        cd packages/agent-engine
-        npm ci
+        set -eu
+        # file: deps — dist/ is gitignored. --include=dev for typescript under NODE_ENV=production.
+        cd packages/memory-contracts
+        npm ci --include=dev
+        npm run build
+
+        cd ../sdk
+        npm ci --include=dev
+        npm run build
+
+        cd ../agent-engine
+        npm ci --include=dev
         npm run typecheck
         npm run test
         npm run build
       - |
+        set -eu
         cd ide
-        npm ci
+        npm ci --include=dev
         npm run typecheck
         npm run test
         npm run build

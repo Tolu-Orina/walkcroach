@@ -54,26 +54,47 @@ export function ProjectHomePage() {
   const fileRef = useRef<HTMLInputElement>(null);
   const loadGen = useRef(0);
 
+  const [memoryError, setMemoryError] = useState<string | null>(null);
+
   const load = useCallback(async () => {
     if (!projectId) return;
     const gen = ++loadGen.current;
     setLoading(true);
     setError(null);
+    setMemoryError(null);
     try {
-      const [p, docs, sess, mem] = await Promise.all([
-        getProject(projectId),
-        listProjectDocuments(projectId),
-        listProjectSessions(projectId),
-        listProjectMemory(projectId),
+      // Memory rides the IDE/SDK BFF — soft-fail so an IDE outage does not
+      // blank the whole project home (name, docs, chats live on agent API).
+      const [core, memResult] = await Promise.all([
+        Promise.all([
+          getProject(projectId),
+          listProjectDocuments(projectId),
+          listProjectSessions(projectId),
+        ]),
+        listProjectMemory(projectId)
+          .then((mem) => ({ ok: true as const, mem }))
+          .catch((err: unknown) => ({
+            ok: false as const,
+            message: err instanceof Error ? err.message : String(err),
+          })),
       ]);
       if (gen !== loadGen.current) return;
+      const [p, docs, sess] = core;
       setProject(p);
       setDescription(p.description ?? '');
       setInstructions(p.instructions ?? '');
       setDocuments(docs);
       setSessions(sess);
-      setMemorySummary(mem.summary);
-      setMemoryEntries(mem.entries ?? []);
+      if (memResult.ok) {
+        setMemorySummary(p.memorySummary ?? memResult.mem.summary);
+        setMemoryEntries(memResult.mem.entries ?? []);
+      } else {
+        setMemorySummary(p.memorySummary ?? null);
+        setMemoryEntries([]);
+        setMemoryError(
+          'message' in memResult ? memResult.message : 'Memory unavailable',
+        );
+      }
     } catch (err) {
       if (gen !== loadGen.current) return;
       setError(err instanceof Error ? err.message : String(err));
@@ -444,13 +465,29 @@ export function ProjectHomePage() {
               {memorySummary}
             </p>
           )}
-          {memoryEntries.length === 0 ? (
+          {memoryError && (
+            <p
+              className="rounded-sm border border-ember/30 bg-ember/10 px-3 py-2 text-sm text-ember"
+              role="status"
+            >
+              Memory service unavailable — project details still loaded.{' '}
+              <button
+                type="button"
+                className="underline hover:text-paper"
+                onClick={() => void load()}
+              >
+                Retry
+              </button>
+            </p>
+          )}
+          {!memoryError && memoryEntries.length === 0 && (
             <p className="text-sm text-mist">
               No memory entries yet — preferences appear here as you chat.
               Saves from WalkCroach Chrome also show up here when this project
               is linked.
             </p>
-          ) : (
+          )}
+          {!memoryError && memoryEntries.length > 0 && (
             <>
               <div className="flex flex-wrap gap-2">
                 {(

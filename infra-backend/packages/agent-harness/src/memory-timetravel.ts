@@ -103,8 +103,9 @@ export async function recallProjectMemoryAsOf(params: {
       text: string;
       distance: number | null;
       source_surface: string;
+      created_at: Date | string;
     }>(
-      `SELECT id, kind, text, source_surface,
+      `SELECT id, kind, text, source_surface, created_at,
               embedding <=> $2::vector AS distance
          FROM memory_entries AS OF SYSTEM TIME ${literal}
         WHERE project_id = $1::uuid
@@ -125,6 +126,10 @@ export async function recallProjectMemoryAsOf(params: {
         text: r.text,
         distance: Number(r.distance),
         sourceSurface: r.source_surface,
+        createdAt:
+          r.created_at instanceof Date
+            ? r.created_at.toISOString()
+            : String(r.created_at),
       }));
   } catch (err) {
     rethrowRetention(err, literal);

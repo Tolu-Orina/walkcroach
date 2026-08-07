@@ -14,7 +14,7 @@ export function AuthCard({ title, subtitle, children, footer }: AuthCardProps) {
   return (
     <AppShell marketing>
       <div className="prose-marketing flex min-h-[calc(100vh-4.25rem)] items-center justify-center px-4 py-12">
-        <div className="glass-strong glass-hairline wc-enter w-full max-w-md p-7 sm:p-9">
+        <div className="wc-enter glass-strong glass-hairline w-full max-w-md p-7 sm:p-9">
           <div className="mb-7 flex flex-col items-center text-center">
             <BrandLogo to="/" showWordmark={false} className="mb-4" />
             <h1 className="font-display text-[1.75rem] font-extrabold tracking-tight text-paper">

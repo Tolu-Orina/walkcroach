@@ -40,12 +40,6 @@ variable "nova_canvas_model_id" {
   default     = "amazon.nova-canvas-v1:0"
 }
 
-variable "nova_pro_model_id" {
-  type        = string
-  description = "Bedrock Nova Pro model ID (paid creative orchestration)"
-  default     = "amazon.nova-pro-v1:0"
-}
-
 variable "creative_lambda_arn" {
   type        = string
   description = "ARN of lambda-creative (empty until image is pushed)"
@@ -343,7 +337,6 @@ resource "aws_lambda_function" "agent" {
       BEDROCK_REGION             = var.bedrock_region
       NOVA_MODEL_ID              = var.nova_model_id
       NOVA_CANVAS_MODEL_ID       = var.nova_canvas_model_id
-      NOVA_PRO_MODEL_ID          = var.nova_pro_model_id
       CREATIVE_LAMBDA_NAME       = var.creative_lambda_name
       VIDEO_STATE_MACHINE_ARN    = var.video_state_machine_arn
       NOVA_REEL_MODEL_ID         = var.nova_reel_model_id

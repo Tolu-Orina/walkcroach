@@ -15,6 +15,8 @@ export type FakeHostOptions = {
   autoApprove?: boolean;
   autonomy?: AutonomyLevel;
   workspaceRoot?: string;
+  /** Optional fleet session binding for approval tests (P3.2). */
+  sessionId?: string;
 };
 
 /**
@@ -32,20 +34,23 @@ export function createFakeHost(opts: FakeHostOptions = {}): HostAdapter & {
   let currentSignal: AbortSignal | undefined;
   const sessions = new InteractiveSessionRegistry({ forcePipe: true });
 
-  const gate = new ApprovalController((req) => {
-    events.push({ type: 'approval_request', request: req });
-    if (opts.autoApprove) {
-      queueMicrotask(() => {
-        if (req.kind === 'question') {
-          gate.resolveQuestion(req.stepId, {
-            selected: req.options?.[0] ?? 'ok',
-          });
-        } else {
-          gate.resolveApproval(req.stepId, 'approve');
-        }
-      });
-    }
-  });
+  const gate = new ApprovalController(
+    (req) => {
+      events.push({ type: 'approval_request', request: req });
+      if (opts.autoApprove) {
+        queueMicrotask(() => {
+          if (req.kind === 'question') {
+            gate.resolveQuestion(req.stepId, {
+              selected: req.options?.[0] ?? 'ok',
+            }, opts.sessionId);
+          } else {
+            gate.resolveApproval(req.stepId, 'approve', opts.sessionId);
+          }
+        });
+      }
+    },
+    { sessionId: opts.sessionId },
+  );
   if (opts.autonomy) gate.setAutonomy(opts.autonomy);
 
   const emit: HostAdapter['emit'] = (event) => {

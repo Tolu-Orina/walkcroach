@@ -1,4 +1,4 @@
-# Chrome Web Store listing copy — v0.6.0
+# Chrome Web Store listing copy — v0.6.1
 
 Rewritten from the v0.1.4 copy, which described the `activeTab`-only model
 ("open WalkCroach from the toolbar; it only reads the page you act on"). That is
@@ -56,13 +56,13 @@ across with you.
 
 **Privacy**
 
-https://walkcroach.conquerorfoundation.com/chrome-privacy.html
+https://walkcroach.rinegansolutions.com/chrome-privacy.html
 Allowed sites, your session, and the privacy policy are all under **Account** in
 the side panel.
 
 **Homepage / support**
 
-https://walkcroach.conquerorfoundation.com
+https://walkcroach.rinegansolutions.com
 
 ## Category
 

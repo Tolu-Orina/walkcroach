@@ -28,6 +28,8 @@ import {
 import { registerConfiguredMcpServers } from './mcp-stdio.js';
 import { SkillsRegistry, defaultSkillRoots } from './skills.js';
 import { TelemetrySink } from './telemetry.js';
+import { attachEnvExporters } from './telemetry-exporters.js';
+import { resolvePermissionMode } from './permission-mode.js';
 import type { ProjectMemoryBridge } from './project-memory.js';
 import type { SharedSkillsBridge } from './shared-skills.js';
 import { cloneMessages, trimSessionMessages, appendUserFollowUp, sanitizeConverseMessages } from './session.js';
@@ -190,6 +192,15 @@ export type RunLoopParams = {
   onSessionMessages?: (messages: Message[]) => void;
   /** P2 checkpoints — id for this turn's mutating edits. Unset → runFullLoop generates one. */
   turnId?: string;
+  /**
+   * Claude-style permission mode (Pre-P6). Aliases autonomy + plan/readOnly.
+   * Hard infra/critical gates still apply under bypassPermissions.
+   */
+  permissionMode?: import('./permission-mode.js').PermissionMode;
+  /** Compaction threshold (message count). Default DEFAULT_COMPACT_THRESHOLD. */
+  compactThreshold?: number;
+  /** Messages kept after compaction. Default DEFAULT_COMPACT_KEEP_RECENT. */
+  compactKeepRecent?: number;
 };
 
 function assertTrusted(host: HostAdapter): void {
@@ -210,10 +221,20 @@ function persistSession(
 }
 
 /** Mid-loop compact (when large) else pair-safe trim. */
-function prepareMessagesInPlace(messages: Message[]): void {
+function prepareMessagesInPlace(
+  messages: Message[],
+  opts?: {
+    threshold?: number;
+    keepRecent?: number;
+    onCompacted?: () => void;
+  },
+): void {
   const cleaned = sanitizeConverseMessages(messages);
-  const { messages: compacted, compacted: didCompact } =
-    compactSessionMessages(cleaned);
+  const { messages: compacted, compacted: didCompact } = compactSessionMessages(
+    cleaned,
+    { threshold: opts?.threshold, keepRecent: opts?.keepRecent },
+  );
+  if (didCompact) opts?.onCompacted?.();
   const next = didCompact ? compacted : trimSessionMessages(cleaned);
   messages.length = 0;
   messages.push(...next);
@@ -258,10 +279,22 @@ async function runPing(params: RunLoopParams): Promise<void> {
  * Abortable gather → act → verify agent loop (Phase A + B).
  */
 export async function runAgentLoop(params: RunLoopParams): Promise<void> {
+  const resolved = resolvePermissionMode(
+    params.permissionMode,
+    params.host.getAutonomy?.() ?? 'strict',
+  );
+  if (params.permissionMode) {
+    params.host.setAutonomy(resolved.autonomy);
+  }
+
   const { host, prompt, signal } = params;
   const mode =
     params.mode ??
-    (prompt.trim().toLowerCase() === 'ping' ? 'ping' : 'full');
+    (resolved.readOnly
+      ? 'plan'
+      : prompt.trim().toLowerCase() === 'ping'
+        ? 'ping'
+        : 'full');
 
   assertTrusted(host);
   if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
@@ -272,7 +305,7 @@ export async function runAgentLoop(params: RunLoopParams): Promise<void> {
       return;
     }
 
-    if (mode === 'plan') {
+    if (mode === 'plan' || resolved.readOnly) {
       await runFullLoop({
         ...params,
         readOnly: true,
@@ -334,6 +367,7 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
   host.emit({ type: 'phase', phase: 'gather' });
 
   const telemetry = new TelemetrySink();
+  attachEnvExporters(telemetry);
   const skills = new SkillsRegistry();
   await skills.init(defaultSkillRoots(host.getWorkspaceRoot()), {
     sharedSkills: params.sharedSkills ?? undefined,
@@ -501,6 +535,8 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
     'run_terminal',
     'terminal_session',
     'update_walkcroach_md',
+    'enter_worktree',
+    'exit_worktree',
   ]);
   let didMutatingWork = false;
   let actNudgeUsed = false;
@@ -511,7 +547,17 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
   let stopHookNudgesUsed = 0;
 
   async function streamOneTurn(): Promise<ConverseTurnResult> {
-    prepareMessagesInPlace(messages);
+    prepareMessagesInPlace(messages, {
+      threshold: params.compactThreshold,
+      keepRecent: params.compactKeepRecent,
+      onCompacted: () => {
+        telemetry.emit('walkcroach.context.compacted', {
+          threshold: params.compactThreshold ?? 36,
+          keep_recent: params.compactKeepRecent ?? 16,
+          message_count: messages.length,
+        });
+      },
+    });
     const gen = streamConverseTurn({
       system,
       messages,
@@ -1081,7 +1127,8 @@ function wrapHost(
     showDiffPreview: (p, b, a, m) => host.showDiffPreview(p, b, a, m),
     confirmCommand: (c, m) => host.confirmCommand(c, m),
     askUser: (p) => host.askUser(p),
-    resolveApproval: (id, d) => host.resolveApproval(id, d),
+    resolveApproval: (id, d, sessionId) =>
+      host.resolveApproval(id, d, sessionId),
     resolveQuestion: (id, a) => host.resolveQuestion(id, a),
     getAutonomy: () => host.getAutonomy(),
     setAutonomy: (l) => host.setAutonomy(l),

@@ -12,7 +12,7 @@ origin: walkcroach:web-modules
 
 ## Tiers (Web)
 
-| Tier | Text (Nova 2 Lite) | Nova Pro orchestration | Images (Canvas) | Video (Reel 30s) | Connectors |
+| Tier | Text (Nova 2 Lite + thinking) | Creative briefs (Lite) | Images (Canvas) | Video (Reel 30s) | Connectors |
 |---|---|---|---|---|---|
 | **Free** | Yes (monthly credit grant) | No | No | No | Read-only if connected; writes gated |
 | **Paid (~$20/mo)** | Yes | Yes | **Max 3 per rolling 24h** | **Max 1 per rolling 72h**, ≤30s | Full propose→confirm |

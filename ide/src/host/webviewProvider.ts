@@ -655,7 +655,7 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
   private async withBedrockRunOptions(): Promise<{
     modelId?: string;
     region?: string;
-    reasoningEffort?: 'off' | 'low' | 'medium' | 'high';
+    reasoningEffort?: 'low' | 'medium' | 'high';
   }> {
     const modelOverride = this.getBedrockModelIdOverride();
     const regionOverride = this.getBedrockRegionOverride();
@@ -681,18 +681,13 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
     return typeof raw === 'string' ? raw.trim() : '';
   }
 
-  /** Empty means "use the engine default" (medium). */
-  private getReasoningEffortOverride():
-    | ''
-    | 'off'
-    | 'low'
-    | 'medium'
-    | 'high' {
+  /** Empty means "use the engine default" (medium). Legacy `off` is ignored. */
+  private getReasoningEffortOverride(): '' | 'low' | 'medium' | 'high' {
     const raw = vscode.workspace
       .getConfiguration('walkcroach.ide')
       .get<string>('reasoningEffort');
     const v = typeof raw === 'string' ? raw.trim() : '';
-    if (v === 'off' || v === 'low' || v === 'medium' || v === 'high') return v;
+    if (v === 'low' || v === 'medium' || v === 'high') return v;
     return '';
   }
 
@@ -740,7 +735,8 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
           );
       }
 
-      if (msg.reasoningEffort === null) {
+      if (msg.reasoningEffort === null || msg.reasoningEffort === 'off') {
+        // Extended thinking is always on — clear override (including legacy "off").
         await vscode.workspace
           .getConfiguration('walkcroach.ide')
           .update('reasoningEffort', '', vscode.ConfigurationTarget.Global);

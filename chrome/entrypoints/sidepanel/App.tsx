@@ -56,6 +56,7 @@ import {
   base64FromDataUrl,
   type CapturedScreenshot,
 } from '../../lib/screenshot';
+import { ProjectMemoryPanel } from './components/ProjectMemoryPanel';
 import {
   matchSiteProfile,
   type SiteProfile,
@@ -1510,6 +1511,13 @@ export function App() {
                       <p className="wc-note">
                         Also available in “{linkedProjectName}”.
                       </p>
+                    )}
+                    {activeLinkedProjectId && (
+                      <ProjectMemoryPanel
+                        projectId={activeLinkedProjectId}
+                        projectName={linkedProjectName}
+                        enabled={session.source === 'cognito'}
+                      />
                     )}
                     {!webProjects.length && (
                       <p className="wc-muted wc-small">

@@ -17,6 +17,7 @@
     "dev:ide": "npm run dev -w @walkcroach/ide-api",
     "typecheck": "npm run build:packages && npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
+    "check:openapi": "npm run check:openapi -w @walkcroach/ide-api",
     "smoke:memory": "npm run smoke:memory -w @walkcroach/agent-harness",
     "smoke:loop": "npm run smoke:loop -w @walkcroach/agent-harness",
     "local:demo": "npm run local:demo -w @walkcroach/agent-harness",

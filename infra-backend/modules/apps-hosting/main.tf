@@ -8,7 +8,7 @@ variable "environment" {
 
 variable "hosted_zone_name" {
   type        = string
-  description = "Route53 parent zone (e.g. conquerorfoundation.com)"
+  description = "Route53 parent zone (e.g. rinegansolutions.com)"
   default     = ""
 }
 
@@ -106,7 +106,7 @@ resource "aws_cloudfront_origin_access_control" "apps" {
 resource "aws_cloudfront_function" "apps_router" {
   name    = "${var.name_prefix}-apps-router-${var.environment}"
   runtime = "cloudfront-js-2.0"
-  comment = "Route {slug}.walkcroach.conquerorfoundation.com to S3 /{slug}/live/"
+  comment = "Route {slug}.walkcroach.rinegansolutions.com to S3 /{slug}/live/"
   publish = true
   code    = <<-EOF
 function handler(event) {

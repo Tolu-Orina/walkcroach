@@ -32,7 +32,7 @@ export type RunnerOptions = {
 };
 
 export function createAgentRunner(opts: RunnerOptions): AgentRunner {
-  return async ({ files, workspaceRoot, prompt, context }) => {
+  return async ({ files, workspaceRoot, prompt, context, answers }) => {
     const fs = new MemoryFileSystem({ files });
 
     const result = await runProgrammatic({
@@ -45,6 +45,7 @@ export function createAgentRunner(opts: RunnerOptions): AgentRunner {
       maxIterations: opts.maxIterations ?? 24,
       signal: opts.signal,
       onEvent: opts.onEvent,
+      answers,
     });
 
     return {
@@ -53,6 +54,7 @@ export function createAgentRunner(opts: RunnerOptions): AgentRunner {
       filesWritten: result.filesWritten,
       snapshot: fs.snapshot(),
       refusals: result.refusals,
+      ...(result.inputRequired ? { inputRequired: result.inputRequired } : {}),
       ...(result.error ? { error: result.error } : {}),
     };
   };

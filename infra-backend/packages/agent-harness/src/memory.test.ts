@@ -87,7 +87,10 @@ describe('writeMemoryEntryDetailed — supersede lifecycle', () => {
 
   it('retires the nearest entry when the new one restates it', async () => {
     const { db, calls } = fakeDb([
-      [/SELECT id, kind, embedding <=>/, { rows: [{ id: 'old-1', kind: 'preference', distance: '0.04' }] }],
+      [
+        /SELECT id, kind, erased_at, embedding <=>/,
+        { rows: [{ id: 'old-1', kind: 'preference', distance: '0.04', erased_at: null }] },
+      ],
       [/INSERT INTO memory_entries/, { rows: [{ id: 'new-1' }] }],
     ]);
 
@@ -102,7 +105,10 @@ describe('writeMemoryEntryDetailed — supersede lifecycle', () => {
 
   it('leaves a merely-related entry alone when it is beyond the threshold', async () => {
     const { db, calls } = fakeDb([
-      [/SELECT id, kind, embedding <=>/, { rows: [{ id: 'old-1', kind: 'preference', distance: '0.42' }] }],
+      [
+        /SELECT id, kind, erased_at, embedding <=>/,
+        { rows: [{ id: 'old-1', kind: 'preference', distance: '0.42', erased_at: null }] },
+      ],
       [/INSERT INTO memory_entries/, { rows: [{ id: 'new-1' }] }],
     ]);
 
@@ -114,13 +120,15 @@ describe('writeMemoryEntryDetailed — supersede lifecycle', () => {
 
   it('reads the neighbour BEFORE inserting, so the new row cannot supersede itself', async () => {
     const { db, calls } = fakeDb([
-      [/SELECT id, kind, embedding <=>/, { rows: [] }],
+      [/SELECT id, kind, erased_at, embedding <=>/, { rows: [] }],
       [/INSERT INTO memory_entries/, { rows: [{ id: 'new-1' }] }],
     ]);
 
     await writeMemoryEntryDetailed({ db, ...base });
 
-    const selectAt = calls.findIndex((c) => /SELECT id, kind, embedding <=>/.test(c.sql));
+    const selectAt = calls.findIndex((c) =>
+      /SELECT id, kind, erased_at, embedding <=>/.test(c.sql),
+    );
     const insertAt = calls.findIndex((c) => /INSERT INTO memory_entries/.test(c.sql));
     expect(selectAt).toBeGreaterThanOrEqual(0);
     expect(selectAt).toBeLessThan(insertAt);
@@ -131,28 +139,31 @@ describe('writeMemoryEntryDetailed — supersede lifecycle', () => {
     // not pin it, so it cannot be one. Putting it in the WHERE clause would
     // make CockroachDB refuse the index for this query (migrations 031/032).
     const { db, calls } = fakeDb([
-      [/SELECT id, kind, embedding <=>/, { rows: [] }],
+      [/SELECT id, kind, erased_at, embedding <=>/, { rows: [] }],
       [/INSERT INTO memory_entries/, { rows: [{ id: 'new-1' }] }],
     ]);
 
     await writeMemoryEntryDetailed({ db, ...base });
 
-    const select = calls.find((c) => /SELECT id, kind, embedding <=>/.test(c.sql));
+    const select = calls.find((c) =>
+      /SELECT id, kind, erased_at, embedding <=>/.test(c.sql),
+    );
     expect(select?.sql).toMatch(/project_id = \$1::uuid/);
     expect(select?.sql).toMatch(/superseded_by IS NULL/);
     expect(select?.sql).not.toMatch(/kind = /);
+    expect(select?.sql).not.toMatch(/erased_at IS NULL/);
     expect(select?.params?.[0]).toBe(base.projectId);
   });
 
   it('supersedes only a same-kind neighbour, even when a nearer one differs', async () => {
     const { db, calls } = fakeDb([
       [
-        /SELECT id, kind, embedding <=>/,
+        /SELECT id, kind, erased_at, embedding <=>/,
         {
           rows: [
             // Nearest overall, but the wrong kind — must be skipped.
-            { id: 'other', kind: 'decision', distance: '0.01' },
-            { id: 'old-1', kind: 'preference', distance: '0.05' },
+            { id: 'other', kind: 'decision', distance: '0.01', erased_at: null },
+            { id: 'old-1', kind: 'preference', distance: '0.05', erased_at: null },
           ],
         },
       ],
@@ -166,6 +177,32 @@ describe('writeMemoryEntryDetailed — supersede lifecycle', () => {
       'old-1',
       'new-1',
     ]);
+  });
+
+  it('skips erased neighbours even when they are nearest same-kind', async () => {
+    const { db, calls } = fakeDb([
+      [
+        /SELECT id, kind, erased_at, embedding <=>/,
+        {
+          rows: [
+            {
+              id: 'gone',
+              kind: 'preference',
+              distance: '0.01',
+              erased_at: new Date().toISOString(),
+            },
+            { id: 'old-1', kind: 'preference', distance: '0.05', erased_at: null },
+          ],
+        },
+      ],
+      [/INSERT INTO memory_entries/, { rows: [{ id: 'new-1' }] }],
+    ]);
+
+    const result = await writeMemoryEntryDetailed({ db, ...base });
+    expect(result.supersededId).toBe('old-1');
+    expect(calls.find((c) => /UPDATE memory_entries/.test(c.sql))?.params?.[0]).toBe(
+      'old-1',
+    );
   });
 
   it('skips the neighbour lookup entirely when superseding is disabled', async () => {

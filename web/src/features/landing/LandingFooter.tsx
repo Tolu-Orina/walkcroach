@@ -1,46 +1,74 @@
 import { Link } from 'react-router-dom';
 
+const FOOTER_LINKS = [
+  { href: '/app/chat', label: 'Chat' },
+  { href: '/app/apps', label: 'Apps' },
+  { href: '/app/developer', label: 'Developer' },
+  { href: '/signin', label: 'Sign in' },
+  { href: '/privacy.html', label: 'Privacy', external: true },
+] as const;
+
 export function LandingFooter() {
   const year = new Date().getFullYear();
 
   return (
-    <footer className="mt-auto w-full border-t border-line/80">
-      <div className="flex w-full flex-col gap-8 px-4 py-10 sm:px-5 sm:flex-row sm:items-start sm:justify-between">
+    <footer className="w-full border-t border-white/10 bg-[var(--lp-footer)] text-[var(--lp-ink)]">
+      <div className="grid gap-10 px-3 py-14 sm:px-4 lg:grid-cols-[1.4fr_1fr] lg:px-5 lg:py-16">
         <div>
-          <p className="font-display text-lg font-extrabold tracking-tight text-paper">
-            WalkCroach
-          </p>
-          <p className="mt-2 max-w-sm text-sm leading-relaxed text-mist">
-            Memory-first AI web builder. Continuity across Chat, Projects, and
-            App Builder.
+          <div className="flex items-center gap-1">
+            <img
+              src="/walkcroach-icon.png"
+              alt=""
+              width={32}
+              height={32}
+              className="h-8 w-8 rounded-[var(--lp-radius-control)] object-cover"
+            />
+            <span className="font-display text-lg font-extrabold tracking-tight text-white">
+              WalkCroach
+            </span>
+          </div>
+          <p className="mt-4 max-w-md text-sm leading-relaxed text-[var(--lp-footer-muted)]">
+            Agentic Workspace with one memory layer across Web, Browser
+            Extension, IDE Extension, CLI, Desktop IDE, and SDK.
           </p>
         </div>
 
-        <nav
-          className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-mist"
-          aria-label="Footer"
-        >
-          <Link to="/app/chat" className="interactive hover:text-paper">
-            Chat
-          </Link>
-          <Link to="/signin" className="interactive hover:text-paper">
-            Sign in
-          </Link>
-          <a
-            href="https://walkcroach.conquerorfoundation.com"
-            className="interactive hover:text-paper"
-            target="_blank"
-            rel="noreferrer"
+        <div>
+          <p className="text-xs font-bold uppercase tracking-[0.16em] text-[var(--lp-footer-muted)]">
+            Product
+          </p>
+          <nav
+            className="mt-4 flex flex-wrap gap-x-6 gap-y-3 text-sm font-semibold"
+            aria-label="Footer"
           >
-            Live product
-          </a>
-        </nav>
+            {FOOTER_LINKS.map((link) =>
+              'external' in link && link.external ? (
+                <a
+                  key={link.href}
+                  href={link.href}
+                  className="interactive text-white/90 hover:text-white"
+                >
+                  {link.label}
+                </a>
+              ) : (
+                <Link
+                  key={link.href}
+                  to={link.href}
+                  className="interactive text-white/90 hover:text-white"
+                >
+                  {link.label}
+                </Link>
+              ),
+            )}
+          </nav>
+        </div>
       </div>
 
-      <div className="w-full border-t border-line/60 px-4 py-4 sm:px-5">
-        <p className="text-[11px] text-mist/75">
-          © {year} WalkCroach · walkcroach.conquerorfoundation.com
-        </p>
+      <div className="border-t border-white/10 px-3 py-5 sm:px-4 lg:px-5">
+        <div className="flex flex-col gap-2 text-xs text-[var(--lp-footer-muted)] sm:flex-row sm:items-center sm:justify-between">
+          <p>© {year} WalkCroach</p>
+          <p>Built by Rinegan Solutions Limited</p>
+        </div>
       </div>
     </footer>
   );

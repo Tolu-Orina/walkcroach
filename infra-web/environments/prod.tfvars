@@ -1,5 +1,5 @@
 environment      = "prod"
 aws_region       = "eu-west-2"
 project_name     = "walkcroach"
-domain_name      = "walkcroach.conquerorfoundation.com"
-hosted_zone_name = "conquerorfoundation.com"
+domain_name      = "walkcroach.rinegansolutions.com"
+hosted_zone_name = "rinegansolutions.com"

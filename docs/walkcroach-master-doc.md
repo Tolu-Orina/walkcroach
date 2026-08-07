@@ -22,7 +22,7 @@ Maturity differs sharply and the table in §0.1 is the authority. Four surfaces 
 | **Shared agent-engine** | **Most mature module** | gather→act→verify, hard verify, adversarial review, checkpoints, hooks, tool-loop-guard. Has dedicated `loop.test.ts`. |
 | **agent-harness** | **Mature, creative-heavy** | Web/Chrome Lambda loop (~2.9k lines `loop.ts`); creatives, connectors, guardrails, EMF metrics. **`loop.test.ts` landed 2026-08-01** — 45 mutation-verified tests. |
 | **SDK** | **Built 2026-08-04/05; memory half proven, agent half unrun** | `@walkcroach/sdk` (memory, `asOf`/`diff`, export/import), `@walkcroach/sdk-mcp` (MCP **2026-07-28**), `@walkcroach/sdk-host` (programmatic `HostAdapter`). Async run model — submit → worker Lambda → poll. Memory paths verified against the live cluster; **the agent path has never executed**. See [`walkcroach-sdk-implementation-plan.md`](./walkcroach-sdk-implementation-plan.md) §0.5. |
-| **Desktop IDE** | **Active build — not shippable** | Code OSS fork pinned `1.129.0`; phases marked "structural" mean scaffolding verifies, not that the fork compiles. Going **native via the VS Code Agent Host (shipped upstream 1.130)** rather than a bespoke runtime. Plan: [`walkcroach-desktop-implementation-plan.md`](./walkcroach-desktop-implementation-plan.md). Do not describe as shipped. |
+| **Desktop IDE** | **Preview-capable; not signed production** | Code OSS fork pinned **`1.131.0`**; native Agent Host path + Path B fleet UI implemented. CRDB panels mostly demo. Unsigned Windows portable tooling ready; first Release is operator-side. Truth: [`walkcroach-desktop.md`](./walkcroach-desktop.md). |
 | **Backend infra** | **Real; expanded Jul 30–31, hardened Aug 1** | **32** CockroachDB migrations; Terraform modules include creative Lambda, video SFN (optional), guardrails, creative budget/dashboard. DB client now verifies TLS and retries 40001. Soft spots remain (empty video worker ARN, pipeline IAM asymmetry, likely-orphaned `agent_locks`). |
 
 ### 0.2 What changed since the 2026-07-29 audit
@@ -134,20 +134,15 @@ Same engine; TUI / pipe / `--json`; approvals; BYOK; doctor. **Auth:** browser l
 
 ---
 
-## 4. Desktop IDE (active build, native agent)
+## 4. Desktop IDE (preview-capable, native agent)
 
-Sibling `walkcroach-desktop/` — a Code OSS **fork**, not an Electron shell around the extension. Revived 2026-08-05 with a native-agent architecture. Full plan: [`walkcroach-desktop-implementation-plan.md`](./walkcroach-desktop-implementation-plan.md).
+Sibling `walkcroach-desktop/` — a Code OSS **fork**, not an Electron shell around the extension. Living truth: [`walkcroach-desktop.md`](./walkcroach-desktop.md) and `walkcroach-desktop/docs/{ARCHITECTURE,STATUS,SHIPPING}.md`.
 
-**The architectural fact that drives it:** VS Code shipped an **Agent Host** in **1.130 (2026-07-22)** — a dedicated process running agent harnesses, spoken to over the open **Agent Host Protocol (AHP)**, with upstream adapters for Copilot, Claude and Codex. The fork is pinned to **1.129.0**, one release before it. So the native runtime Phase B set out to build now exists upstream as an extension point, and WalkCroach ships an **AHP adapter** instead.
+**Architecture:** VS Code **Agent Host** (AHP) hosts `WalkCroachAgent`; `@walkcroach/desktop-agent` adapts `agent-engine`. Pin is **`1.131.0`** (Agent Host era). Path B Agents Window is WalkCroach fleet UI — Microsoft Agents Window stays off.
 
-What that buys over the VSIX, precisely:
-- Agent runs in its own process, so a busy extension host cannot stall it — the real performance win, since VS Code's IPC itself is fast and rarely the bottleneck.
-- Direct workbench services: `ITextModelService` (unsaved buffers), `ISearchService` (the editor's ripgrep index), `ITerminalService`, `IEditorService`.
-- Sessions survive the window closing; multiple windows share one session; remote execution comes free.
+**Deliberately not:** a second agent loop, a Marketplace proxy (Open VSX only), or loading the WalkCroach VSIX inside Desktop.
 
-**Deliberately not:** a second agent loop (`agent-engine` remains the loop), a Marketplace proxy (Open VSX only), or loading the WalkCroach VSIX inside Desktop — two agents would mean two auth sessions and two memory writers racing on `source_surface`.
-
-**State, honestly:** the fork has never been compiled end-to-end here. Phases marked "✅ Structural" mean `phase*-verify.mjs` passes on scaffolding. `packages/desktop-agent/desktopHostAdapter.ts` exists as a fourth `HostAdapter` implementation. Nothing is shippable yet.
+**State, honestly (2026-08-07):** native agent + fleet + settings + online memory path are implemented in code. CRDB panels are mostly demo. Secrets mirror is plaintext. Unsigned Windows portable **tooling** exists; first public Release is still an operator step. Do not market as signed production.
 
 ---
 
@@ -207,7 +202,7 @@ Seventeen `walkcroach-*` skill directories + `NOTICE.md` (Apache vs proprietary)
 
 | # | Gap | Why it matters |
 |---|---|---|
-| 1 | **Desktop is an active build, not a shipped surface.** The fork has never fully compiled here and the pin (1.129.0) predates the Agent Host it now depends on | Six surfaces exist; only four are shipped. Don't market Desktop |
+| 1 | **Desktop is preview-capable, not signed production.** Agent Host path works in-repo; CRDB panes demo; unsigned Windows zip tooling ready; hardening debt in Desktop `STATUS.md` | Don't market as signed/notarized; see [`walkcroach-desktop.md`](./walkcroach-desktop.md) |
 | 1b | **SDK agent path has never executed.** Memory paths are proven live; the loop, GitHub PR, and Bedrock embed paths are covered only by mocks | The `AGENTS.md` bug — 24 green tests over a feature that was dead in production — is what unrun seams look like |
 | ~~2~~ | ~~`agent-harness` `loop.ts` lacks dedicated unit tests~~ | ✅ Closed 2026-08-01 — `loop.test.ts`, 45 tests, verified against 4 deliberate mutations |
 | 3 | Lambda BFF handler tests still thin vs client/engine; no Lambda error/latency alarms | Money, merge, deploy, video + ops |

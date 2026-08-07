@@ -38,7 +38,7 @@ function ProjectCard({
   onDelete: (id: string) => void;
 }) {
   return (
-    <div className="interactive rounded-[var(--radius-surface)] border border-line bg-panel/60 p-5 transition hover:border-signal/35 hover:bg-raised/80">
+    <div className="surface interactive p-5 transition hover:border-signal/35">
       <div className="flex items-start justify-between gap-3">
         <Link
           to={`/app/projects/${project.id}`}

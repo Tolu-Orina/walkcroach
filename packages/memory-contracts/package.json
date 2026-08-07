@@ -1,0 +1,31 @@
+{
+  "name": "@walkcroach/memory-contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared memory kinds, export envelope, and supersede shapes for dual-loop coexistence (Phase 4)",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "src", "fixtures", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepare": "npm run build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "check:drift": "node scripts/check-memory-contracts-drift.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

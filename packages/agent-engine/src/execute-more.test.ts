@@ -210,7 +210,7 @@ describe('executeTool — edit_file ambiguity', () => {
       },
     });
     expect(result.status).toBe('error');
-    expect(result.content).toContain('non-empty old_str');
+    expect(result.content).toContain("non-empty 'old_str'");
   });
 
   it('rejects edit_file when old_str is not found', async () => {
@@ -490,7 +490,7 @@ describe('executeTool — semantic_search', () => {
       tool: { toolUseId: 's2', name: 'semantic_search', input: { query: '  ' } },
     });
     expect(result.status).toBe('error');
-    expect(result.content).toContain('non-empty query');
+    expect(result.content).toContain("non-empty 'query'");
     expect(mockEmbedText).not.toHaveBeenCalled();
   });
 
@@ -652,7 +652,7 @@ describe('executeTool — mirror_project_memory', () => {
       projectMemory: mockBridge,
     });
     expect(result.status).toBe('error');
-    expect(result.content).toContain('required');
+    expect(result.content).toContain('requires');
   });
 });
 
@@ -742,7 +742,7 @@ describe('executeTool — mirror_skill', () => {
       sharedSkills: mockBridge,
     });
     expect(result.status).toBe('error');
-    expect(result.content).toContain('required');
+    expect(result.content).toContain('requires');
   });
 });
 

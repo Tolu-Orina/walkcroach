@@ -9,7 +9,7 @@
 | [SCREENSHOTS.md](./SCREENSHOTS.md) | Capture runbook |
 | [POST_SUBMIT_MONITORING.md](./POST_SUBMIT_MONITORING.md) | CloudWatch / trust proxy |
 
-**Live privacy policy:** https://walkcroach.conquerorfoundation.com/chrome-privacy.html  
+**Live privacy policy:** https://walkcroach.rinegansolutions.com/chrome-privacy.html  
 **Source:** `../../web/public/chrome-privacy.html` (redeploy Web after edits)
 
 **Prod zip:** from `chrome/`, run `npm run zip:prod`

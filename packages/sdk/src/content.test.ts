@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { RunFailedError, WalkCroach } from './index.js';
+import { RunFailedError, RunInterruptedError, WalkCroach } from './index.js';
 import { ValidationError } from './errors.js';
 
 const KEY = `wc_live_${'a'.repeat(10)}_${'b'.repeat(32)}`;
@@ -153,6 +153,7 @@ describe('RunHandle.wait', () => {
 
   const snap = (over: Record<string, unknown>) => ({
     runId: 'run-1',
+    threadId: 'run-1',
     kind: 'content.publish',
     attempts: 1,
     events: [],
@@ -160,6 +161,7 @@ describe('RunHandle.wait', () => {
     pollAfterMs: 0,
     result: null,
     error: null,
+    interrupt: null,
     ...over,
   });
 
@@ -198,6 +200,47 @@ describe('RunHandle.wait', () => {
     const res = await (await wc.content.publish(valid)).wait();
     expect(res.signals[0]!.pattern).toBe('instruction-override');
     expect(res.flags[0]!.rule).toBe('inline-script');
+  });
+
+  it('throws RunInterruptedError when the run pauses for human input', async () => {
+    const interrupt = {
+      id: 'int-1',
+      kind: 'ask_user',
+      payload: { question: 'Which layout?', options: ['grid', 'list'] },
+      createdAt: '2026-08-07T00:00:00.000Z',
+    };
+    const { wc } = polling([
+      snap({ status: 'interrupted', interrupt }),
+    ]);
+    const run = await wc.content.publish(valid);
+    await expect(run.wait()).rejects.toMatchObject({
+      name: 'RunInterruptedError',
+      runId: 'run-1',
+      interrupt,
+    });
+    expect(run.threadId).toBe('run-1');
+  });
+
+  it('resumes with interruptId + value', async () => {
+    const bodies: unknown[] = [];
+    const fetchImpl = (async (url: string, init?: RequestInit) => {
+      if (String(url).includes('/resume')) {
+        bodies.push(JSON.parse(String(init?.body ?? '{}')));
+        return new Response(JSON.stringify({ runId: 'run-1', status: 'queued' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(
+        JSON.stringify({ runId: 'run-1', status: 'queued', createdAt: 'x' }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }) as unknown as typeof globalThis.fetch;
+    const wc = new WalkCroach({ apiKey: KEY, baseUrl: 'https://api.test', fetch: fetchImpl });
+    const run = await wc.content.publish(valid);
+    await run.resume({ interruptId: 'int-1', value: 'grid' });
+    expect(run.status).toBe('queued');
+    expect(bodies[0]).toEqual({ interruptId: 'int-1', value: 'grid' });
   });
 
   it('throws RunFailedError carrying the reason', async () => {

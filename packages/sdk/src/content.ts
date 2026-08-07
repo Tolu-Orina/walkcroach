@@ -1,5 +1,6 @@
 import { ValidationError, WalkCroachError } from './errors.js';
 import type { Transport } from './http.js';
+import type { RunInterrupt } from './interrupt.js';
 import type {
   PublishResult,
   PublishSource,
@@ -45,23 +46,9 @@ export class ContentApi {
    * Turn a document into a page in the target repository, and open a pull
    * request for it.
    *
-   * The agent reads the repository's own conventions first — `AGENTS.md` if
-   * present, then tsconfig aliases, class-name helper, UI kit, router shape —
-   * and applies anything this project has previously confirmed to memory. What
-   * it learns is written back, so the fiftieth post matches the first.
-   *
-   * **Returns as soon as the run is accepted**, not when it finishes. A publish
-   * takes minutes and no HTTP request survives that. Await the handle to wait
-   * for the result:
-   *
-   * ```ts
-   * const run = await wc.content.publish({ … });
-   * const result = await run.wait({ onProgress: (e) => console.log(e.type) });
-   * ```
-   *
-   * Pass `idempotencyKey` and a retried submit returns the same run instead of
-   * starting a second — without it, a flaky network turns one post into two
-   * pull requests.
+   * **Returns as soon as the run is accepted**, not when it finishes.
+   * If the run pauses for human input, `wait` throws {@link RunInterruptedError};
+   * call {@link RunHandle.resume} then `wait` again.
    */
   async publish(opts: PublishOptions): Promise<RunHandle> {
     if (!opts.projectId || !UUID_RE.test(opts.projectId)) {
@@ -79,7 +66,6 @@ export class ContentApi {
         field: 'source.content',
       });
     }
-    // No default: choosing this is the caller's decision, not ours.
     if (!opts.writeScope?.mode) {
       throw new ValidationError(
         'writeScope is required — use { mode: "additive" } to guarantee no existing file is modified',
@@ -127,8 +113,7 @@ const TERMINAL: readonly RunStatus[] = ['succeeded', 'failed', 'cancelled'];
 /**
  * A submitted run.
  *
- * Holds no state beyond the id, so it survives being serialised, stored, and
- * resumed from a different process — which is the point of an async model.
+ * `threadId` is a LangGraph-style alias for `runId` (content runs).
  */
 export class RunHandle {
   constructor(
@@ -137,7 +122,11 @@ export class RunHandle {
     public status: RunStatus,
   ) {}
 
-  /** One poll. Pass `afterSeq` to receive only events you have not seen. */
+  /** LangGraph-style thread id — equals runId for content runs. */
+  get threadId(): string {
+    return this.runId;
+  }
+
   async poll(afterSeq = 0): Promise<RunSnapshot> {
     const snap = await this.transport.request<RunSnapshot>(
       'GET',
@@ -150,11 +139,7 @@ export class RunHandle {
 
   /**
    * Wait for the run to finish.
-   *
-   * Backoff comes from the server (`pollAfterMs`) rather than being guessed
-   * here, so it can be tuned without shipping a new client. `timeoutMs` bounds
-   * the wait, not the run: timing out here leaves the run going, and the handle
-   * can be awaited again.
+   * Throws {@link RunInterruptedError} when paused for human input.
    */
   async wait(opts: {
     onProgress?: (event: RunEvent) => void;
@@ -173,13 +158,23 @@ export class RunHandle {
         opts.onProgress?.(event);
       }
 
+      if (snap.status === 'interrupted') {
+        if (!snap.interrupt) {
+          throw new WalkCroachError(
+            `run ${this.runId} is interrupted but no interrupt payload was returned`,
+            0,
+            null,
+          );
+        }
+        throw new RunInterruptedError(this.runId, snap.interrupt);
+      }
+
       if (TERMINAL.includes(snap.status)) {
         if (snap.status === 'succeeded' && snap.result) return snap.result;
         throw new RunFailedError(this.runId, snap.status, snap.error ?? 'run did not succeed');
       }
 
       if (Date.now() > deadline) {
-        // The run is still going; only this wait gave up.
         throw new WalkCroachError(
           `run ${this.runId} did not finish within the wait timeout; it is still ${snap.status}. ` +
             `Poll again with wc.content.run("${this.runId}").`,
@@ -192,7 +187,25 @@ export class RunHandle {
     }
   }
 
-  /** Ask the worker to stop. Already-finished runs report 409. */
+  /** Continue after an interrupt; call {@link wait} again for the terminal result. */
+  async resume(opts: { interruptId: string; value: unknown }): Promise<void> {
+    if (!opts.interruptId?.trim()) {
+      throw new ValidationError('interruptId is required', 400, null, {
+        field: 'interruptId',
+      });
+    }
+    if (opts.value === undefined) {
+      throw new ValidationError('value is required', 400, null, { field: 'value' });
+    }
+    await this.transport.request('POST', `/v1/runs/${encodeURIComponent(this.runId)}/resume`, {
+      body: {
+        interruptId: opts.interruptId.trim(),
+        value: opts.value,
+      },
+    });
+    this.status = 'queued';
+  }
+
   async cancel(): Promise<void> {
     await this.transport.request('DELETE', `/v1/runs/${encodeURIComponent(this.runId)}`);
     this.status = 'cancelled';
@@ -207,5 +220,24 @@ export class RunFailedError extends WalkCroachError {
   ) {
     super(message, 0, null);
     this.name = 'RunFailedError';
+  }
+}
+
+/** Thrown by {@link RunHandle.wait} when the run pauses for human input. */
+export class RunInterruptedError extends WalkCroachError {
+  constructor(
+    readonly runId: string,
+    readonly interrupt: RunInterrupt,
+  ) {
+    super(
+      `run ${runId} interrupted (${interrupt.kind}); resume with interruptId=${interrupt.id}`,
+      0,
+      null,
+    );
+    this.name = 'RunInterruptedError';
+  }
+
+  get threadId(): string {
+    return this.runId;
   }
 }

@@ -22,11 +22,19 @@ phases:
     commands:
       - |
         set -eu
-        # Both private packages are file: deps bundled into the CLI,
+        # Private packages are file: deps bundled into the CLI,
         # and must be built before it can typecheck or bundle against them.
         # A stale dist here ships stale code with no error anywhere.
         # --include=dev: CodeBuild NODE_ENV=production would skip typescript.
-        cd packages/agent-engine
+        cd packages/memory-contracts
+        npm ci --include=dev
+        npm run build
+
+        cd ../sdk
+        npm ci --include=dev
+        npm run build
+
+        cd ../agent-engine
         npm ci --include=dev
         npm run build
 
@@ -41,10 +49,14 @@ phases:
         npm test
         npm run build
 
-        # Fail closed: a published CLI must never carry a localhost default.
-        # Same class of check as chrome's zip:prod localhost scan.
-        if grep -n "localhost:3003" dist/bin.js; then
-          echo "dist/bin.js contains a localhost default" >&2
+        # Fail closed: the *default* must not be localhost. Help text may
+        # mention localhost:3003 as an explicit local-dev example — that is fine.
+        if grep -nE 'apiBaseUrl:[[:space:]]*"http://localhost:3003"' dist/bin.js; then
+          echo "dist/bin.js hard-codes a localhost apiBaseUrl default" >&2
+          exit 1
+        fi
+        if ! grep -q 'https://api.walkcroach.rinegansolutions.com/v1' dist/bin.js; then
+          echo "dist/bin.js missing production API default" >&2
           exit 1
         fi
 
@@ -69,3 +81,5 @@ cache:
   paths:
     - cli/node_modules/**/*
     - packages/agent-engine/node_modules/**/*
+    - packages/sdk/node_modules/**/*
+    - packages/memory-contracts/node_modules/**/*

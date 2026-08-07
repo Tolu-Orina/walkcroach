@@ -44,7 +44,7 @@ export async function resolveWebAppUrl(): Promise<string> {
     // Local development: the Vite dev server, not the BFF port.
     return 'http://localhost:5173';
   }
-  return 'https://walkcroach.conquerorfoundation.com';
+  return 'https://walkcroach.rinegansolutions.com';
 }
 
 export function buildAuthorizeUrl(params: {

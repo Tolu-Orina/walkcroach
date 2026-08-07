@@ -8,6 +8,8 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "test:unit": "vitest run src/handlers/sdk.path.test.ts",
+    "check:openapi": "npm run check:openapi --prefix ../../../../packages/sdk",
     "dev": "node --import tsx --watch src/local-server.ts"
   },
   "dependencies": {
@@ -15,6 +17,7 @@
     "@aws-sdk/client-secrets-manager": "^3.800.0",
     "@walkcroach/agent-harness": "*",
     "@walkcroach/db": "*",
+    "@walkcroach/ledger": "*",
     "@walkcroach/sdk-host": "file:../../../../packages/sdk-host",
     "aws-jwt-verify": "^5.0.0"
   },

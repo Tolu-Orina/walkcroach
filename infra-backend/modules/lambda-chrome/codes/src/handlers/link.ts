@@ -1,5 +1,6 @@
 import {
   formatVector,
+  writeMemoryEntryDetailed,
   type MemoryKind,
 } from '@walkcroach/agent-harness';
 import { createDbClient } from '@walkcroach/db';
@@ -184,6 +185,8 @@ export async function mirrorCaptureToProjectMemory(params: {
   extractedText: string;
   embedding: number[] | string;
   captureType?: string;
+  /** Tenant principal when known (Chrome Cognito link). */
+  actorOwnerId?: string | null;
 }): Promise<string | null> {
   const marker = `[chrome-capture:${params.captureId}]`;
   const existing = await params.db.query(
@@ -191,22 +194,24 @@ export async function mirrorCaptureToProjectMemory(params: {
      WHERE project_id = $1::uuid
        AND text LIKE $2
        AND superseded_by IS NULL
+       AND erased_at IS NULL
      LIMIT 1`,
     [params.projectId, `${marker}%`],
   );
   if (existing.rows[0]) return null;
 
+  // Phase P2.3: same write path as SDK/IDE (supersede + provenance), not a raw INSERT.
   const kind: MemoryKind = 'capture';
-  const text = captureMemoryText(params);
-  const vec = toVec(params.embedding);
-
-  const { rows } = await params.db.query<{ id: string }>(
-    `INSERT INTO memory_entries (project_id, source_surface, kind, text, embedding)
-     VALUES ($1::uuid, 'chrome', $2, $3, $4::vector)
-     RETURNING id`,
-    [params.projectId, kind, text, vec],
-  );
-  return rows[0]?.id ?? null;
+  const body = captureMemoryText(params);
+  const { id } = await writeMemoryEntryDetailed({
+    db: params.db,
+    projectId: params.projectId,
+    sourceSurface: 'chrome',
+    kind,
+    text: body,
+    actorOwnerId: params.actorOwnerId ?? null,
+  });
+  return id;
 }
 
 /** Refresh mirrored memory after a price-track append / capture edit. */

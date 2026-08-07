@@ -17,19 +17,47 @@ export function BuilderMemoryStrip({
 }: BuilderMemoryStripProps) {
   const [entries, setEntries] = useState<ProjectMemoryEntry[]>([]);
   const [open, setOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
 
   const load = useCallback(async () => {
     try {
       const mem = await listProjectMemory(projectId);
       setEntries((mem.entries ?? []).slice(0, 8));
-    } catch {
-      /* ignore — strip is best-effort */
+      setError(null);
+    } catch (err) {
+      setEntries([]);
+      setError(err instanceof Error ? err.message : 'Memory unavailable');
+    } finally {
+      setLoaded(true);
     }
   }, [projectId]);
 
   useEffect(() => {
+    setLoaded(false);
     void load();
   }, [load, refreshKey]);
+
+  if (!loaded) return null;
+
+  if (error) {
+    return (
+      <div className="border-b border-line px-4 py-1.5">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[10px] uppercase tracking-wider text-ember">
+            Project memory unavailable
+          </span>
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="btn-ghost text-[10px]"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (entries.length === 0) return null;
 

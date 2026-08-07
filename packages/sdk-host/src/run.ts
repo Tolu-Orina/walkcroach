@@ -24,6 +24,11 @@ export type RunRequest = {
   onEvent?: (event: AgentEvent) => void;
   maxIterations?: number;
   signal?: AbortSignal;
+  /**
+   * Wall-clock budget for the whole run (P3.8). Combined with `signal` via
+   * AbortSignal.any when both are set. Content publishes must not hang forever.
+   */
+  timeoutMs?: number;
   answers?: Record<string, string>;
   mode?: 'full' | 'plan';
 };
@@ -84,6 +89,15 @@ export async function runProgrammatic(req: RunRequest): Promise<RunResult> {
   let error: string | undefined;
   let inputRequired: RunResult['inputRequired'];
 
+  const timeoutSignal =
+    typeof req.timeoutMs === 'number' && req.timeoutMs > 0
+      ? AbortSignal.timeout(req.timeoutMs)
+      : undefined;
+  const signal =
+    req.signal && timeoutSignal
+      ? AbortSignal.any([req.signal, timeoutSignal])
+      : (req.signal ?? timeoutSignal);
+
   try {
     await runAgentLoop({
       host,
@@ -97,7 +111,7 @@ export async function runProgrammatic(req: RunRequest): Promise<RunResult> {
       // is the only thing bounding cost. Deliberately lower than the IDE's.
       maxIterations: req.maxIterations ?? 24,
       projectMemory: req.memory ?? null,
-      signal: req.signal,
+      signal,
       // Sub-agents are allowed: they keep exploratory noise out of the main
       // context window, which matters more without a human to steer.
       subagentsEnabled: true,
@@ -111,6 +125,14 @@ export async function runProgrammatic(req: RunRequest): Promise<RunResult> {
       inputRequired = { question: err.question, options: err.options };
       reason = 'input_required';
       error = err.message;
+    } else if (
+      (err instanceof Error && err.name === 'AbortError') ||
+      (err instanceof DOMException && err.name === 'AbortError') ||
+      timeoutSignal?.aborted
+    ) {
+      reason = timeoutSignal?.aborted && !req.signal?.aborted ? 'timeout' : 'cancelled';
+      error = err instanceof Error ? err.message : String(err);
+      capture({ type: 'error', message: error, fatal: true });
     } else {
       reason = 'error';
       error = err instanceof Error ? err.message : String(err);

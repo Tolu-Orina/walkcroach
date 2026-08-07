@@ -39,7 +39,7 @@ export function DeployPanel({
       <p className="mt-0.5 text-[10px] text-mist/80">
         Publishes to{' '}
         <span className="font-mono text-mist">
-          {'{slug}'}.walkcroach.conquerorfoundation.com
+          {'{slug}'}.walkcroach.rinegansolutions.com
         </span>
       </p>
       {latest?.url && (

@@ -6,13 +6,22 @@ phases:
       nodejs: 20
   pre_build:
     commands:
-      - echo "Web + Chrome + IDE unit / typecheck"
+      - echo "Web + Chrome + IDE + CLI unit / typecheck"
   build:
     commands:
       - |
         set -eu
-        # Shared by web + CLI — dist/ is gitignored
-        cd packages/templates
+        # file: deps — dist/ is gitignored. Build shared packages before any consumer.
+        # --include=dev: CodeBuild NODE_ENV=production would skip typescript.
+        cd packages/memory-contracts
+        npm ci --include=dev
+        npm run build
+
+        cd ../sdk
+        npm ci --include=dev
+        npm run build
+
+        cd ../templates
         npm ci --include=dev
         npm run build
         npm test

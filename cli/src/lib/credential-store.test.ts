@@ -14,12 +14,14 @@ import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  allowPlaintextSecrets,
   credentialBackend,
   keychainAvailable,
   keychainDelete,
   keychainDisabled,
   keychainGet,
   keychainSet,
+  PlaintextSecretsRefusedError,
   resetKeyringCache,
 } from './credential-store.js';
 import { deleteSecret, getSecret, secretsPath, setSecret } from './config.js';
@@ -159,5 +161,36 @@ describe('environment precedence', () => {
     } finally {
       delete process.env.WALKCROACH_WALKCROACH_TEST_CREDENTIAL;
     }
+  });
+});
+
+describe('production plaintext refuse (P3.7)', () => {
+  it('allowPlaintextSecrets is false for production profile', () => {
+    expect(
+      allowPlaintextSecrets({
+        WALKCROACH_PROFILE: 'production',
+      } as NodeJS.ProcessEnv),
+    ).toBe(false);
+    expect(
+      allowPlaintextSecrets({
+        WALKCROACH_ENV: 'prod',
+      } as NodeJS.ProcessEnv),
+    ).toBe(false);
+  });
+
+  it('allowPlaintextSecrets stays true for CI / explicit escape hatches', () => {
+    expect(
+      allowPlaintextSecrets({
+        WALKCROACH_PROFILE: 'production',
+        WALKCROACH_ALLOW_PLAINTEXT_SECRETS: '1',
+      } as NodeJS.ProcessEnv),
+    ).toBe(true);
+    expect(
+      allowPlaintextSecrets({
+        WALKCROACH_PROFILE: 'production',
+        WALKCROACH_NO_KEYCHAIN: '1',
+      } as NodeJS.ProcessEnv),
+    ).toBe(true);
+    expect(PlaintextSecretsRefusedError).toBeDefined();
   });
 });

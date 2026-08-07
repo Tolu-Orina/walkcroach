@@ -1,11 +1,28 @@
-/** Kinds accepted by the memory layer. Mirrors the server-side `MemoryKind`. */
-export type MemoryKind =
-  | 'decision'
-  | 'preference'
-  | 'convention'
-  | 'summary'
-  | 'capture'
-  | 'qa';
+/**
+ * SDK public types. Memory kinds / export / remember shapes come from
+ * `@walkcroach/memory-contracts` (Phase 4) — do not redefine them here.
+ */
+export {
+  MEMORY_KINDS,
+  EXPORT_FORMAT,
+  EXPORT_VERSION,
+  EMBEDDING_DIMENSIONS,
+  type MemoryKind,
+  type MemoryEntry,
+  type RecallHit,
+  type RememberResult,
+  type SupersedeWriteResult,
+  type MemoryDiff,
+  type ExportedEntry,
+  type MemoryExport,
+  type ImportResult,
+  type MemorySurface,
+  type SharedMemoryUiEvent,
+  normalizeMemoryKind,
+  isMemoryKind,
+  validateExport,
+  ImportFormatError,
+} from '@walkcroach/memory-contracts';
 
 export type WalkCroachConfig = {
   /** Service-account key (`wc_live_…`). Server-side only. */
@@ -22,91 +39,6 @@ export type WalkCroachConfig = {
    * anything served to end users.
    */
   allowBrowserApiKey?: boolean;
-};
-
-export type MemoryEntry = {
-  id: string;
-  kind: MemoryKind;
-  text: string;
-  surface: string;
-  createdAt: string;
-};
-
-export type RecallHit = {
-  id: string;
-  kind: MemoryKind;
-  text: string;
-  surface: string;
-  /**
-   * 0–1, higher is closer. Deliberately not the raw cosine distance: that is an
-   * index implementation detail and the opclass has already had to change once
-   * (migrations 028/029). Treat it as ordinal, not as a calibrated probability.
-   */
-  relevance: number | null;
-};
-
-export type RememberResult = {
-  id: string;
-  /**
-   * Set when this write retired a near-duplicate of the same kind.
-   *
-   * Surface it to your user — "noted, this replaces your earlier note about X".
-   * The supersede threshold is a judgement call rather than an eval-backed
-   * constant, so a visible supersede is correctable and a silent one is not.
-   */
-  supersededId: string | null;
-  projectId: string;
-  kind: MemoryKind;
-  surface: string;
-};
-
-export type MemoryDiff = {
-  from: string;
-  to: string;
-  added: MemoryEntry[];
-  /** Live at `from`, not live at `to`. */
-  retired: MemoryEntry[];
-  unchanged: number;
-};
-
-/** One entry in a portable bundle. Mirrors the on-disk format exactly. */
-export type ExportedEntry = {
-  id: string;
-  kind: MemoryKind;
-  text: string;
-  sourceSurface: string;
-  createdAt: string;
-  /** The entry that replaced this one, or null if current. */
-  supersededBy: string | null;
-  embedding?: number[];
-};
-
-/**
- * `walkcroach-memory-export/1.0`.
- *
- * A documented, self-describing envelope. `embeddingModel` records what produced
- * the vectors so a destination on a different model knows it must re-embed
- * rather than silently mixing incompatible vector spaces.
- */
-export type MemoryExport = {
-  format: 'walkcroach-memory-export';
-  version: string;
-  exportedAt: string;
-  projectId: string;
-  embeddingModel: string | null;
-  embeddingDimensions: number | null;
-  entryCount: number;
-  entries: ExportedEntry[];
-};
-
-export type ImportResult = {
-  imported: number;
-  /** Already present, matched on (kind, text). Import is idempotent. */
-  skipped: number;
-  /** Needed a fresh inference call because the source model differed. */
-  reEmbedded: number;
-  /** Supersede links whose target was not in the bundle. */
-  danglingSupersedes: number;
 };
 
 /**
@@ -146,7 +78,15 @@ export type PublishResult = {
   error?: string;
 };
 
-export type RunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+export type RunStatus =
+  | 'queued'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled'
+  | 'interrupted';
+
+export type { InterruptKind, RunInterrupt, ResumeRequest } from './interrupt.js';
 
 export type RunEvent = {
   seq: number;
@@ -157,6 +97,8 @@ export type RunEvent = {
 
 export type RunSnapshot = {
   runId: string;
+  /** LangGraph-style alias — equals runId for content runs. */
+  threadId: string;
   status: RunStatus;
   kind: string;
   attempts: number;
@@ -165,6 +107,8 @@ export type RunSnapshot = {
   finishedAt: string | null;
   result: PublishResult | null;
   error: string | null;
+  /** Present when status === 'interrupted'. */
+  interrupt: import('./interrupt.js').RunInterrupt | null;
   events: RunEvent[];
   lastSeq: number;
   /** Server-chosen backoff, so clients need not invent one. */

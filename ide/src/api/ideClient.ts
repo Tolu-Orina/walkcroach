@@ -2,6 +2,7 @@ import type {
   ProjectMemoryBridge,
   SharedSkillsBridge,
 } from '@walkcroach/agent-engine';
+import { createHostMemoryBridge } from '@walkcroach/sdk';
 import { getIdeApiBaseUrl } from '../auth/session.js';
 
 export type IdeProject = {
@@ -178,54 +179,13 @@ export function createProjectMemoryBridge(params: {
   projectName?: string;
 }): ProjectMemoryBridge {
   const { getToken, projectId, projectName } = params;
-
-  async function requireToken(): Promise<string> {
-    const token = await getToken();
-    if (!token) {
-      throw new Error('Not signed in — project memory requires a Cognito token.');
-    }
-    return token;
-  }
-
-  return {
+  return createHostMemoryBridge({
+    getAccessToken: getToken,
     projectId,
     projectName,
-    async recall({ query, limit, sourceSurfaces }) {
-      const token = await requireToken();
-      const res = await ideFetch('/ide/v1/memory/recall', {
-        method: 'POST',
-        token,
-        body: { projectId, query, limit, sourceSurfaces },
-      });
-      const data = await readJson<{
-        hits: Array<{
-          id: string;
-          kind: string;
-          text: string;
-          distance?: number;
-          sourceSurface?: string;
-        }>;
-      }>(res);
-      return data.hits ?? [];
-    },
-    async mirror({ text, kind }) {
-      const token = await requireToken();
-      const res = await ideFetch('/ide/v1/memory/mirror', {
-        method: 'POST',
-        token,
-        body: { projectId, text, kind: kind ?? 'decision' },
-      });
-      const data = await readJson<{ id: string }>(res);
-      return { id: data.id };
-    },
-    async listEntries({ limit, sourceSurfaces } = {}) {
-      const token = await requireToken();
-      return listMemoryEntries(token, projectId, {
-        limit,
-        sourceSurface: sourceSurfaces?.[0],
-      });
-    },
-  };
+    surface: 'ide',
+    getBaseUrl: () => getIdeApiBaseUrl(),
+  }) as ProjectMemoryBridge;
 }
 
 export type SharedSkillEntry = {

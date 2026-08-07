@@ -23,7 +23,8 @@
   },
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.800.0",
-    "@modelcontextprotocol/sdk": "^1.29.0"
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@walkcroach/memory-contracts": "file:../memory-contracts"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",

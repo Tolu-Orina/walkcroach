@@ -65,9 +65,17 @@ phases:
         . "$CODEBUILD_SRC_DIR/e2e.env"
         export WALKCROACH_WEB_URL WALKCROACH_API_URL
 
+        echo "== Build shared packages (file: deps; dist/ gitignored) =="
+        cd "$CODEBUILD_SRC_DIR/packages/memory-contracts"
+        npm ci --include=dev
+        npm run build
+        cd "$CODEBUILD_SRC_DIR/packages/sdk"
+        npm ci --include=dev
+        npm run build
+
         echo "== Build Chrome extension (unpacked) for Playwright =="
         cd "$CODEBUILD_SRC_DIR/chrome"
-        npm ci
+        npm ci --include=dev
         if [ -n "${WALKCROACH_API_URL:-}" ] && [ "$WALKCROACH_API_URL" != "None" ]; then
           export WALKCROACH_API_BASE="$WALKCROACH_API_URL"
           export WALKCROACH_PRIVACY_URL="${WALKCROACH_WEB_URL}/chrome-privacy.html"

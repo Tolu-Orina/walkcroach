@@ -37,7 +37,6 @@ const REGION_OPTIONS = [
 
 const REASONING_OPTIONS: Array<{ value: string; label: string }> = [
   { value: '', label: 'Default (medium)' },
-  { value: 'off', label: 'Off' },
   { value: 'low', label: 'Low' },
   { value: 'medium', label: 'Medium' },
   { value: 'high', label: 'High' },
@@ -311,9 +310,9 @@ export function SettingsView({
           Extended thinking
         </label>
         <p className="settings-hint">
-          Nova reasoning tier for the agent loop. Medium is the default — same
-          tier as WalkCroach Web App Builder. High disables the output-token
-          cap and is slower.
+          Nova 2 Lite extended thinking is always on. Choose the effort tier —
+          medium is the default (same as WalkCroach Web). High disables the
+          output-token cap and is slower.
         </p>
         <select
           id="reasoning-effort"

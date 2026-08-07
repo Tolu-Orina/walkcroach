@@ -1,10 +1,12 @@
 /**
- * Thin IDE BFF client for CLI (same routes as the extension).
+ * Thin IDE BFF client for CLI (same auth/link routes as the extension).
+ * Project memory uses `@walkcroach/sdk` → `/v1/memory/*` (Phase P2).
  */
 import type {
   ProjectMemoryBridge,
   SharedSkillsBridge,
 } from '@walkcroach/agent-engine';
+import { createHostMemoryBridge } from '@walkcroach/sdk';
 import { resolveApiBaseUrl } from './config.js';
 import { ApiError, NetworkError } from './exit-codes.js';
 
@@ -170,52 +172,14 @@ export function createProjectMemoryBridge(params: {
   projectName?: string;
 }): ProjectMemoryBridge {
   const { getToken, projectId, projectName } = params;
-
-  async function requireToken(): Promise<string> {
-    const token = await getToken();
-    if (!token) {
-      throw new Error('Not signed in — project memory requires a Cognito token.');
-    }
-    return token;
-  }
-
-  return {
+  return createHostMemoryBridge({
+    getAccessToken: getToken,
     projectId,
     projectName,
-    async recall({ query, limit, sourceSurfaces }) {
-      const token = await requireToken();
-      const res = await ideFetch('/ide/v1/memory/recall', {
-        method: 'POST',
-        token,
-        body: { projectId, query, limit, sourceSurfaces },
-      });
-      const data = await readJson<{
-        hits: Array<{
-          id: string;
-          kind: string;
-          text: string;
-          distance?: number;
-          sourceSurface?: string;
-        }>;
-      }>(res);
-      return data.hits ?? [];
-    },
-    async mirror({ text, kind }) {
-      const token = await requireToken();
-      const res = await ideFetch('/ide/v1/memory/mirror', {
-        method: 'POST',
-        token,
-        body: {
-          projectId,
-          text,
-          kind: kind ?? 'decision',
-          sourceSurface: 'desktop',
-        },
-      });
-      const data = await readJson<{ id: string }>(res);
-      return { id: data.id };
-    },
-  };
+    // Phase P2: was incorrectly tagged `desktop` — CLI is its own surface.
+    surface: 'cli',
+    getBaseUrl: () => baseUrl(),
+  }) as ProjectMemoryBridge;
 }
 
 export type SharedSkillEntry = {
@@ -237,13 +201,13 @@ export async function listSharedSkills(
 
 /**
  * Account-scoped shared skills (same BFF as the extension).
- * CLI labels mirrors as `desktop` so they don't look like IDE-originated.
+ * CLI labels skill mirrors as `cli` by default.
  */
 export function createSharedSkillsBridge(params: {
   getToken: () => Promise<string | undefined>;
   sourceSurface?: string;
 }): SharedSkillsBridge {
-  const { getToken, sourceSurface = 'desktop' } = params;
+  const { getToken, sourceSurface = 'cli' } = params;
 
   async function requireToken(): Promise<string> {
     const token = await getToken();

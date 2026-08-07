@@ -1,4 +1,4 @@
-# Chrome Web Store submission checklist — v0.6.0
+# Chrome Web Store submission checklist — v0.6.1
 
 Supersedes the v0.1.4 checklist, which described a CORS hotfix and predates the
 permission model, the redesign, and connectors.
@@ -7,10 +7,10 @@ Production endpoints (never substitute localhost):
 
 | Item | Value |
 |------|-------|
-| API | `https://awbcf4clij.execute-api.eu-west-2.amazonaws.com/v1` |
-| Privacy | `https://walkcroach.conquerorfoundation.com/chrome-privacy.html` |
-| Product | `https://walkcroach.conquerorfoundation.com` |
-| Extension version | `0.6.0` |
+| API | `https://api.walkcroach.rinegansolutions.com/v1` |
+| Privacy | `https://walkcroach.rinegansolutions.com/chrome-privacy.html` |
+| Product | `https://walkcroach.rinegansolutions.com` |
+| Extension version | `0.6.1` |
 | Extension ID | _already assigned — the listing has been live since 0.1.5. Read it from the dashboard URL and store it as the `EXTENSION_ID` secret in the `cws-publish` environment._ |
 
 ---

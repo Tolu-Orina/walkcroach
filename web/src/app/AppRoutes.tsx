@@ -32,6 +32,12 @@ import { ProtectedRoute } from './ProtectedRoute';
 import { SettingsPage } from './SettingsPage';
 import { ConnectionsPage } from './ConnectionsPage';
 import { ConnectionsCallbackPage } from './ConnectionsCallbackPage';
+import { DeveloperLayout } from './developer/DeveloperLayout';
+import { DeveloperOverviewPage } from './developer/DeveloperOverviewPage';
+import { DeveloperKeysPage } from './developer/DeveloperKeysPage';
+import { DeveloperOpsPage } from './developer/DeveloperOpsPage';
+import { DeveloperDocsPage } from './developer/DeveloperDocsPage';
+import { DeveloperGovernancePage } from './developer/DeveloperGovernancePage';
 import { WelcomePage } from './WelcomePage';
 
 function LegacyProjectRedirect() {
@@ -209,6 +215,13 @@ export function AppRoutes() {
           path="settings/connections/callback"
           element={<ConnectionsCallbackPage />}
         />
+        <Route path="developer" element={<DeveloperLayout />}>
+          <Route index element={<DeveloperOverviewPage />} />
+          <Route path="keys" element={<DeveloperKeysPage />} />
+          <Route path="ops" element={<DeveloperOpsPage />} />
+          <Route path="governance" element={<DeveloperGovernancePage />} />
+          <Route path="docs" element={<DeveloperDocsPage />} />
+        </Route>
       </Route>
 
       {/* Legacy redirects */}

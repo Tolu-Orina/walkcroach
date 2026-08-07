@@ -24,3 +24,16 @@ output "api_url" {
   # Public API Gateway URL — must be readable in terraform output -json for web CI
   value = nonsensitive(data.aws_ssm_parameter.backend_api_url.value)
 }
+
+output "desktop_releases_bucket" {
+  value = module.desktop_releases.bucket_id
+}
+
+output "desktop_releases_distribution_id" {
+  value = module.desktop_releases.distribution_id
+}
+
+output "desktop_download_url" {
+  description = "Stable CloudFront URL for Desktop IDE Setup.exe"
+  value       = module.desktop_releases.download_url
+}

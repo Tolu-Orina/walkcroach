@@ -17,11 +17,10 @@ import {
 } from './ideClient.js';
 
 function jsonResponse(data: unknown, status = 200) {
-  return {
-    ok: status >= 200 && status < 300,
+  return new Response(JSON.stringify(data), {
     status,
-    text: () => Promise.resolve(JSON.stringify(data)),
-  };
+    headers: { 'content-type': 'application/json' },
+  });
 }
 
 beforeEach(() => {
@@ -121,36 +120,58 @@ describe('updateMemoryEntry', () => {
 });
 
 describe('createProjectMemoryBridge', () => {
-  it('creates a bridge that can recall and mirror', async () => {
+  const PROJECT = '11111111-2222-3333-4444-555555555555';
+
+  it('creates a bridge that recalls/mirrors via /v1 (public SDK contract)', async () => {
     const bridge = createProjectMemoryBridge({
       getToken: async () => 'tok-1',
-      projectId: 'p1',
+      projectId: PROJECT,
       projectName: 'Test',
     });
 
-    expect(bridge.projectId).toBe('p1');
+    expect(bridge.projectId).toBe(PROJECT);
     expect(bridge.projectName).toBe('Test');
 
     fetchMock.mockResolvedValueOnce(
       jsonResponse({
-        hits: [{ id: 'h1', kind: 'decision', text: 'Use CRDB' }],
+        hits: [
+          {
+            id: 'h1',
+            kind: 'decision',
+            text: 'Use CRDB',
+            surface: 'ide',
+            relevance: 0.9,
+          },
+        ],
       }),
     );
     const hits = await bridge.recall({ query: 'database' });
     expect(hits).toHaveLength(1);
+    expect(hits[0]!.sourceSurface).toBe('ide');
+    expect(String(fetchMock.mock.calls[0]![0])).toContain('/v1/memory/recall');
 
-    fetchMock.mockResolvedValueOnce(jsonResponse({ id: 'new-1' }));
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        id: 'new-1',
+        supersededId: null,
+        projectId: PROJECT,
+        kind: 'decision',
+        surface: 'ide',
+      }),
+    );
     const mirrored = await bridge.mirror({ text: 'Prefer UUID PKs' });
     expect(mirrored.id).toBe('new-1');
+    const mirrorUrl = String(fetchMock.mock.calls[1]![0]);
+    expect(mirrorUrl).toContain('/v1/memory/entries');
+    expect(fetchMock.mock.calls[1]![1]?.body).toContain('"surface":"ide"');
   });
 
   it('throws when not signed in', async () => {
     const bridge = createProjectMemoryBridge({
       getToken: async () => undefined,
-      projectId: 'p1',
+      projectId: PROJECT,
     });
 
-    fetchMock.mockResolvedValueOnce(jsonResponse({}));
     await expect(bridge.recall({ query: 'test' })).rejects.toThrow(
       /Not signed in/,
     );

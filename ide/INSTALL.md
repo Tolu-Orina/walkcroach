@@ -42,8 +42,8 @@ You can also use AWS credentials / `AWS_BEARER_TOKEN_BEDROCK` in the environment
 
 | Setting | Default |
 |---------|---------|
-| `walkcroach.ide.apiBaseUrl` | `https://awbcf4clij.execute-api.eu-west-2.amazonaws.com/v1` |
-| `walkcroach.ide.webAppUrl` | `https://walkcroach.conquerorfoundation.com` |
+| `walkcroach.ide.apiBaseUrl` | `https://api.walkcroach.rinegansolutions.com/v1` |
+| `walkcroach.ide.webAppUrl` | `https://walkcroach.rinegansolutions.com` |
 | `walkcroach.ide.cognitoClientId` | Web SPA client (shared Cognito) |
 | `walkcroach.ide.cognitoUserPoolId` | `eu-west-2_iKk1NYkcQ` |
 | `walkcroach.ide.cognitoRegion` | `eu-west-2` |

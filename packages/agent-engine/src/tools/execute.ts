@@ -31,6 +31,8 @@ import {
   buildStdinPayload,
   MAX_STDIN_REPLIES,
 } from '../stream-shell.js';
+import { enterGitWorktree, exitGitWorktree } from '../worktree.js';
+import { dispatchTool } from './dispatch.js';
 
 export type ToolExecResult = {
   toolUseId: string;
@@ -84,7 +86,17 @@ function assertPathAllowed(
   }
 }
 
+/**
+ * Public tool entry — always validate → execute → observe (P3.1).
+ * Callers must not invoke `executeToolBody` directly.
+ */
 export async function executeTool(
+  opts: ExecuteToolOptions,
+): Promise<ToolExecResult> {
+  return dispatchTool(opts, executeToolBody);
+}
+
+async function executeToolBody(
   opts: ExecuteToolOptions,
 ): Promise<ToolExecResult> {
   const { host, tool, signal } = opts;
@@ -586,6 +598,71 @@ export async function executeTool(
           });
         }
         content = `Patched ${path} (${edits.length} edit${edits.length === 1 ? '' : 's'})`;
+        break;
+      }
+      case 'enter_worktree': {
+        const branchName = str(input.branch_name).trim();
+        const baseRef = str(input.base_ref || '').trim() || undefined;
+        if (!branchName) throw new Error('enter_worktree requires branch_name');
+        if (!host.setToolRoot || !host.setActiveWorktree) {
+          throw new Error('Host does not support worktree scoping');
+        }
+        const trueRoot = host.getRepoRoot?.() ?? host.getWorkspaceRoot();
+        if (!trueRoot) throw new Error('No workspace folder open');
+        host.emit({
+          type: 'tool_card',
+          id,
+          name,
+          status: 'running',
+          detail: branchName,
+        });
+        const wt = await enterGitWorktree(trueRoot, branchName, baseRef, signal);
+        host.setToolRoot(wt.path);
+        host.setActiveWorktree({
+          path: wt.path,
+          branch: wt.branch,
+          repoRoot: wt.repoRoot,
+        });
+        content = [
+          `Entered worktree`,
+          `path: ${wt.path}`,
+          `branch: ${wt.branch}`,
+          `repo_root: ${wt.repoRoot}`,
+          'Subsequent read/write/search/terminal tools are scoped to this path until exit_worktree.',
+        ].join('\n');
+        break;
+      }
+      case 'exit_worktree': {
+        const actionRaw = str(input.action).trim().toLowerCase();
+        if (actionRaw !== 'apply' && actionRaw !== 'discard') {
+          throw new Error("exit_worktree requires action 'apply' or 'discard'");
+        }
+        const meta = host.getActiveWorktree?.();
+        if (!meta) {
+          throw new Error('No active worktree — call enter_worktree first');
+        }
+        host.emit({
+          type: 'tool_card',
+          id,
+          name,
+          status: 'running',
+          detail: `${actionRaw} ${meta.branch}`,
+        });
+        const result = await exitGitWorktree(
+          meta.repoRoot,
+          meta.path,
+          meta.branch,
+          actionRaw,
+          signal,
+        );
+        host.setToolRoot?.(undefined);
+        host.setActiveWorktree?.(undefined);
+        content = [
+          `Exited worktree (${result.action})`,
+          `path: ${result.path}`,
+          result.merged ? 'merged: yes' : 'merged: no',
+          'Tool cwd restored to workspace root.',
+        ].join('\n');
         break;
       }
       case 'run_terminal': {

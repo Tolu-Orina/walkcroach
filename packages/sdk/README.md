@@ -100,8 +100,10 @@ Embeddings ride along by default, with `embeddingModel` naming what produced the
 | `memory.diff({ projectId, from, to? })` | What changed between two instants |
 | `memory.export({ projectId, embeddings?, superseded? })` | Portable bundle |
 | `memory.import({ projectId, bundle })` | Idempotent |
+| `memory.erase({ projectId, reason, entryIds?, exportFirst? })` | Tombstone erase (audited) |
+| `memory.audit({ projectId })` | Control-plane audit events |
 | `keys.create / list / revoke` | Requires a **user** token, not an API key |
-| `health()` | Liveness + capabilities |
+| `createHostMemoryBridge({…})` | First-party IDE/CLI/Desktop adapter onto `/v1` |
 
 ### `projectId` is required on every call
 

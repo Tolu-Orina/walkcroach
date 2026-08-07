@@ -1,5 +1,5 @@
 /**
- * The worker: executes one submitted run to completion.
+ * The worker: executes one submitted run to completion (or interrupt).
  *
  * Takes only a run id and reads everything else from the database, so it
  * behaves identically whether it was invoked across the network or called
@@ -10,6 +10,7 @@ import {
   claimRun,
   completeRun,
   heartbeatRun,
+  interruptRun,
   publishContent,
   recallProjectMemory,
   writeMemoryEntry,
@@ -19,6 +20,7 @@ import { createDbClient, type DbClient } from '@walkcroach/db';
 import type { WriteScope } from '@walkcroach/sdk-host';
 import { createAgentRunner } from './agent-runner.js';
 import { metricLog } from './util.js';
+import { randomUUID } from 'node:crypto';
 
 /**
  * Heartbeat interval.
@@ -66,7 +68,10 @@ export async function runWorker(runId: string): Promise<void> {
       writeScope: WriteScope;
       installationId: number;
       dryRun?: boolean;
+      resume?: { interruptId: string; value: unknown; resumedAt?: string };
     };
+
+    const answers = resumeAnswers(req.resume);
 
     const result = await publishContent({
       db,
@@ -77,6 +82,7 @@ export async function runWorker(runId: string): Promise<void> {
       source: req.source,
       instructions: req.instructions,
       dryRun: req.dryRun,
+      answers,
       runAgent: createAgentRunner({
         writeScope: req.writeScope,
         memory: memoryBridge(db, run.projectId),
@@ -92,6 +98,41 @@ export async function runWorker(runId: string): Promise<void> {
         },
       }),
     });
+
+    if (result.inputRequired || result.reason === 'input_required') {
+      const interrupt = {
+        id: randomUUID(),
+        kind: 'ask_user',
+        payload: {
+          question: result.inputRequired?.question ?? result.error ?? 'input required',
+          options: result.inputRequired?.options ?? [],
+        },
+        createdAt: new Date().toISOString(),
+      };
+      await appendRunEvent({
+        db,
+        runId,
+        type: 'interrupt',
+        payload: { interrupt },
+      });
+      await interruptRun({
+        db,
+        runId,
+        interrupt,
+        result: {
+          ok: false,
+          filesWritten: result.filesWritten,
+          signals: result.signals,
+          flags: result.flags,
+          refusals: result.refusals,
+          learned: result.learned,
+          reason: 'interrupted',
+          ...(result.error ? { error: result.error } : {}),
+        },
+      });
+      metricLog('sdk.run.interrupted', { kind: interrupt.kind });
+      return;
+    }
 
     await appendRunEvent({
       db,
@@ -120,6 +161,31 @@ export async function runWorker(runId: string): Promise<void> {
     if (heartbeat) clearInterval(heartbeat);
     await db.close();
   }
+}
+
+/**
+ * Map a resume value onto ask_user answers.
+ * String → answer for the pending question; object with `answer` / question keys preferred.
+ */
+function resumeAnswers(
+  resume: { value: unknown } | undefined,
+): Record<string, string> | undefined {
+  if (!resume) return undefined;
+  const value = resume.value;
+  if (typeof value === 'string') {
+    return { '*': value };
+  }
+  if (value && typeof value === 'object') {
+    const obj = value as Record<string, unknown>;
+    const out: Record<string, string> = {};
+    if (typeof obj.answer === 'string') out['*'] = obj.answer;
+    for (const [k, v] of Object.entries(obj)) {
+      if (k === 'answer') continue;
+      if (typeof v === 'string') out[k] = v;
+    }
+    return Object.keys(out).length ? out : undefined;
+  }
+  return undefined;
 }
 
 function memoryBridge(db: DbClient, projectId: string) {

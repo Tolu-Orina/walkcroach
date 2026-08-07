@@ -105,22 +105,32 @@ export function formatBedrockErrorForUser(err: unknown): string {
   return message;
 }
 
-export type NovaReasoningEffort = 'low' | 'medium' | 'high' | 'off';
+export type NovaReasoningEffort = 'low' | 'medium' | 'high';
 
 /**
- * Nova 2 Lite extended thinking. Default medium for App Builder multi-step
- * coding. Set BEDROCK_NOVA_REASONING=off|low|medium|high to override.
+ * Nova 2 Lite extended thinking — **always on**.
+ * Tier via `BEDROCK_NOVA_REASONING=low|medium|high` (default medium).
+ * Legacy `off` / `disabled` values are coerced to medium (product policy:
+ * do not run without thinking; do not use Nova 1 Pro).
  * @see https://docs.aws.amazon.com/nova/latest/nova2-userguide/extended-thinking.html
+ * @see docs/nova-2-lite.md
  */
 export function getNovaReasoningEffort(): NovaReasoningEffort {
   const raw = (process.env.BEDROCK_NOVA_REASONING ?? 'medium')
     .trim()
     .toLowerCase();
-  if (raw === 'off' || raw === 'disabled' || raw === '0' || raw === 'false') {
-    return 'off';
-  }
   if (raw === 'low' || raw === 'medium' || raw === 'high') return raw;
   return 'medium';
+}
+
+/** Resolve per-call override; `'off'` is ignored (thinking stays on). */
+export function resolveNovaReasoningEffort(
+  override?: NovaReasoningEffort | 'off' | null,
+): NovaReasoningEffort {
+  if (override === 'low' || override === 'medium' || override === 'high') {
+    return override;
+  }
+  return getNovaReasoningEffort();
 }
 
 export function getTitanEmbedModelId(): string {
@@ -256,21 +266,15 @@ export async function* streamConverseTurn(params: {
   const reasoningEffort = getNovaReasoningEffort();
   // Medium is the AWS-recommended tier for multi-file coding / tool loops.
   // High forbids temperature/topP/maxTokens — keep those unset only then.
-  const additionalModelRequestFields =
-    reasoningEffort === 'off'
-      ? undefined
-      : {
-          reasoningConfig: {
-            type: 'enabled',
-            maxReasoningEffort: reasoningEffort,
-          },
-        };
+  // Extended thinking is always enabled (never omit reasoningConfig).
+  const additionalModelRequestFields = {
+    reasoningConfig: {
+      type: 'enabled' as const,
+      maxReasoningEffort: reasoningEffort,
+    },
+  };
   const inferenceConfig =
-    reasoningEffort === 'high'
-      ? undefined
-      : reasoningEffort === 'off'
-        ? { maxTokens: 8192 }
-        : { maxTokens: 30_000 };
+    reasoningEffort === 'high' ? undefined : { maxTokens: 30_000 };
 
   const command = new ConverseStreamCommand({
     modelId: getNovaModelId(),

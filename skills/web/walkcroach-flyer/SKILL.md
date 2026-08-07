@@ -1,7 +1,7 @@
 ---
 name: walkcroach-flyer
 description: >-
-  Creates single-page marketing flyers (PDF/PNG) via Nova Pro, Nova Canvas, and
+  Creates single-page marketing flyers (PDF/PNG) via Nova 2 Lite, Nova Canvas, and
   headless HTML-to-PDF, then runs check_flyer_pdf + pdf_to_images for
   deterministic QA. Use for flyers, posters, one-pagers. Paid-only.
 license: WalkCroach original
@@ -15,7 +15,7 @@ origin: walkcroach:web-modules
 ```
 load walkcroach-creative-philosophy
  → propose → confirm
- → Nova Pro field map + Canvas hero
+ → Nova 2 Lite field map + Canvas hero
  → render_flyer (HTML → PDF)
  → python ../walkcroach-pdf/scripts/pdf_to_images.py out.pdf /tmp/pages
  → python scripts/check_flyer_pdf.py out.pdf --max-pages 1

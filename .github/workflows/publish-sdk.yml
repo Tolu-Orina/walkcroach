@@ -1,0 +1,95 @@
+name: Publish SDK packages
+
+# Manual / tag-gated publish for @walkcroach/sdk and @walkcroach/sdk-mcp (P5.6).
+# Mirrors publish-cli.yml (OIDC trusted publishing — no long-lived npm token).
+#
+# npm trusted publisher (each package):
+#   Organization/user: Tolu-Orina
+#   Repository:        walkcroach
+#   Workflow:          publish-sdk.yml
+#   Environment:       npm-publish
+#
+# Tags: sdk-vX.Y.Z → sdk only; sdk-mcp-vX.Y.Z → sdk-mcp only.
+# workflow_dispatch with dry_run=true packs without publishing.
+
+on:
+  push:
+    tags:
+      - 'sdk-v*'
+      - 'sdk-mcp-v*'
+  workflow_dispatch:
+    inputs:
+      package:
+        description: 'Which package to exercise'
+        type: choice
+        options: [sdk, sdk-mcp, both]
+        default: both
+      dry_run:
+        description: 'Dry-run publish (no registry write)'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Use npm >= 11.5.1
+        run: npm install -g npm@^11
+
+      - name: Build memory-contracts
+        working-directory: packages/memory-contracts
+        run: |
+          npm ci || npm install
+          npm run build
+          npm test
+          npm run check:drift
+
+      - name: Build & test sdk
+        working-directory: packages/sdk
+        run: |
+          npm ci || npm install
+          npm run build
+          npm test
+          npm run check:openapi
+          npm run check:memory-contracts
+
+      - name: Build & test sdk-mcp
+        working-directory: packages/sdk-mcp
+        run: |
+          npm ci || npm install
+          npm run build
+          npm test
+
+      - name: Publish sdk
+        if: >
+          (startsWith(github.ref, 'refs/tags/sdk-v') && !startsWith(github.ref, 'refs/tags/sdk-mcp-v'))
+          || (github.event_name == 'workflow_dispatch' && inputs.dry_run != true && (inputs.package == 'sdk' || inputs.package == 'both'))
+        working-directory: packages/sdk
+        run: npm publish --access public
+
+      - name: Publish sdk-mcp
+        if: >
+          startsWith(github.ref, 'refs/tags/sdk-mcp-v')
+          || (github.event_name == 'workflow_dispatch' && inputs.dry_run != true && (inputs.package == 'sdk-mcp' || inputs.package == 'both'))
+        working-directory: packages/sdk-mcp
+        run: npm publish --access public
+
+      - name: Dry run
+        if: github.event_name == 'workflow_dispatch' && inputs.dry_run == true
+        run: |
+          (cd packages/sdk && npm publish --dry-run)
+          (cd packages/sdk-mcp && npm publish --dry-run)

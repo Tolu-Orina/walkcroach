@@ -1,7 +1,7 @@
 ---
 name: walkcroach-video-studio
 description: >-
-  Produces up to 30-second marketing videos with Nova Pro as orchestrator,
+  Produces up to 30-second marketing videos with Nova 2 Lite as orchestrator,
   one Nova Reel MULTI_SHOT_AUTOMATED invoke (durationSeconds=30), Polly
   voiceover, and ffmpeg compose. Paid-only; max one video per rolling 72 hours.
 license: WalkCroach original
@@ -14,7 +14,7 @@ origin: walkcroach:web-modules
 
 - **Max duration 30 seconds** (DB check: `duration_sec <= 30`)
 - **Max 1 video per owner per rolling 72 hours**
-- **Paid only**; Nova Pro orchestrates
+- **Paid only**; Nova 2 Lite orchestrates
 - Cost ~$2.40 Reel + Polly/compose → **270 credits**
 - **One async job** — `MULTI_SHOT_AUTOMATED` with `durationSeconds: 30` (not five separate 6s `TEXT_VIDEO` / MANUAL shots)
 

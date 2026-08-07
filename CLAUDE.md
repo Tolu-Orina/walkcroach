@@ -92,7 +92,7 @@ The `cli` module (`cli/src`) consumes the same `@walkcroach/agent-engine` packag
 
 ## Architecture: backend (`infra-backend`)
 
-npm workspaces rooted here: `packages/db`, `packages/agent-harness`, and the three Lambda code bundles under `modules/lambda-{agent,chrome,ide}/codes`. `agent-harness` is the Lambda-side counterpart to `packages/agent-engine` — same Bedrock/Nova model family, separate implementation, own extended-thinking defaults (see `infra-backend/packages/agent-harness/src/bedrock.ts`).
+npm workspaces rooted here: `packages/db`, `packages/agent-harness`, and the three Lambda code bundles under `modules/lambda-{agent,chrome,ide}/codes`. `agent-harness` is the Lambda-side counterpart to `packages/agent-engine` — same Bedrock/Nova **2 Lite** model family (extended thinking always on), separate implementation (see `infra-backend/packages/agent-harness/src/bedrock.ts` and `docs/nova-2-lite.md`).
 
 CockroachDB is the system of record for all four surfaces: sessions/messages, project/stack config, memory entries with vector embeddings (C-SPANN index, `VECTOR(1024)` via Titan Embeddings V2), build events, checkpoints, tool invocations, and per-surface auth/link tables (GitHub app, Chrome/IDE auth codes and workspace links). Migrations live in `infra-backend/packages/db/migrations`, applied in order — read `docs/walkcroach-master-doc.md` §5 (schema) before adding new tables so new memory writes land in the right shape.
 

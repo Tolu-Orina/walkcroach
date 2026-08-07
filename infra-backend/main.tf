@@ -69,7 +69,6 @@ module "lambda_agent" {
   bedrock_region             = var.bedrock_region
   nova_model_id              = var.nova_model_id
   nova_canvas_model_id       = var.nova_canvas_model_id
-  nova_pro_model_id          = var.nova_pro_model_id
   titan_embed_model_id       = var.titan_embed_model_id
   bedrock_guardrail_id       = module.bedrock_guardrails.guardrail_id
   bedrock_guardrail_version  = module.bedrock_guardrails.guardrail_version
@@ -191,6 +190,8 @@ module "apigw" {
   cognito_user_pool_arn       = module.cognito.user_pool_arn
   enable_cognito_authorizer   = var.enable_apigw_cognito_authorizer
   cors_allow_origin           = var.web_app_url != "" ? var.web_app_url : "*"
+  api_custom_domain_name      = var.api_custom_domain_name
+  hosted_zone_name            = var.hosted_zone_name
   tags                        = local.tags
 }
 
@@ -199,7 +200,7 @@ module "ssm" {
 
   name_prefix          = local.name_prefix
   environment          = var.environment
-  api_url              = module.apigw.invoke_url
+  api_url              = module.apigw.public_api_url
   cognito_user_pool_id = module.cognito.user_pool_id
   cognito_client_id    = module.cognito.client_id
   cognito_region       = module.cognito.region

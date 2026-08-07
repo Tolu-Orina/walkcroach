@@ -184,6 +184,43 @@ export const PHASE_A_TOOLS: ToolDef[] = [
     },
   },
   {
+    name: 'enter_worktree',
+    description:
+      'Create (or reuse) an isolated git worktree under `.walkcroach/worktrees/` and scope subsequent file/terminal tools to that directory for the rest of this session. Use for parallel agent work that must not touch the main checkout. Pass a short branch_name; optional base_ref (default HEAD).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        branch_name: {
+          type: 'string',
+          description: 'Branch to create or check out in the new worktree',
+        },
+        base_ref: {
+          type: 'string',
+          description:
+            'Git ref to branch from when creating a new branch (default: HEAD)',
+        },
+      },
+      required: ['branch_name'],
+    },
+  },
+  {
+    name: 'exit_worktree',
+    description:
+      "Leave the active worktree. action=apply merges the worktree branch into the repo's current branch then removes the worktree; action=discard removes the worktree and deletes the branch without merging. Restores tool cwd to the main workspace root.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['apply', 'discard'],
+          description:
+            'apply = merge then remove; discard = remove without merge',
+        },
+      },
+      required: ['action'],
+    },
+  },
+  {
     name: 'await_terminal',
     description:
       'Poll a background terminal started with run_terminal mode=background. Returns status, exit code if finished, and a log tail.',

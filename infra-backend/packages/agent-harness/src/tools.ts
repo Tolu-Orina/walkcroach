@@ -226,7 +226,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: 'generate_creative_brief',
     description:
-      'Paid-only. Draft a structured slide deck brief with Nova Pro (title, slides, bullets). Emits a ConfirmCard for the user before render_pptx. Call load_skill("walkcroach-pptx") first.',
+      'Paid-only. Draft a structured slide deck brief with Nova 2 Lite (title, slides, bullets). Emits a ConfirmCard for the user before render_pptx. Call load_skill("walkcroach-pptx") first.',
     kind: 'server',
     profiles: ['chat', 'project_chat'],
     inputSchema: {
@@ -274,7 +274,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: 'generate_flyer_brief',
     description:
-      'Paid-only. Draft a one-page flyer brief with Nova Pro, including a short visual philosophy (walkcroach-creative-philosophy). Emits a ConfirmCard before render_flyer. Call load_skill("walkcroach-flyer") first.',
+      'Paid-only. Draft a one-page flyer brief with Nova 2 Lite, including a short visual philosophy (walkcroach-creative-philosophy). Emits a ConfirmCard before render_flyer. Call load_skill("walkcroach-flyer") first.',
     kind: 'server',
     profiles: ['chat', 'project_chat'],
     inputSchema: {

@@ -7,17 +7,62 @@ import { getCreativeQuota, type CreativeQuota } from '../../api/client';
  */
 export function ImageQuotaPill() {
   const [quota, setQuota] = useState<CreativeQuota | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const load = () => {
       void getCreativeQuota()
-        .then(setQuota)
-        .catch(() => setQuota(null));
+        .then((q) => {
+          setQuota(q);
+          setError(null);
+        })
+        .catch((err: unknown) => {
+          setQuota(null);
+          setError(err instanceof Error ? err.message : 'Quota unavailable');
+        })
+        .finally(() => setLoading(false));
     };
     load();
     const timer = window.setInterval(load, 30_000);
     return () => window.clearInterval(timer);
   }, []);
+
+  if (loading && !quota && !error) {
+    return (
+      <div
+        className="rounded-full border border-line/60 px-2.5 py-1 font-mono text-[11px] text-mist/70"
+        aria-busy="true"
+      >
+        quota…
+      </div>
+    );
+  }
+
+  if (error && !quota) {
+    return (
+      <button
+        type="button"
+        className="interactive rounded-full border border-ember/35 bg-ember/10 px-2.5 py-1 font-mono text-[11px] text-ember"
+        title={error}
+        onClick={() => {
+          setLoading(true);
+          setError(null);
+          void getCreativeQuota()
+            .then((q) => {
+              setQuota(q);
+              setError(null);
+            })
+            .catch((err: unknown) => {
+              setError(err instanceof Error ? err.message : 'Quota unavailable');
+            })
+            .finally(() => setLoading(false));
+        }}
+      >
+        quota unavailable · retry
+      </button>
+    );
+  }
 
   if (!quota) return null;
 

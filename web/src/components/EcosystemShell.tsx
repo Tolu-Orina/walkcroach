@@ -132,12 +132,27 @@ function IconBuilder() {
   );
 }
 
+function IconDeveloper() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-[1.15rem] w-[1.15rem]" fill="none" aria-hidden>
+      <path
+        d="M8 8.5 4.5 12 8 15.5M16 8.5 19.5 12 16 15.5M13.2 6l-2.4 12"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 const NAV_ITEMS: RailItem[] = [
   { to: '/app/chat', label: 'Chat', end: true, icon: <IconChat /> },
   { to: '/app/projects', label: 'Projects', icon: <IconFolder /> },
   { to: '/app/builder', label: 'Builder', icon: <IconBuilder /> },
   { to: '/app/code', label: 'Code', icon: <IconCode /> },
   { to: '/app/apps', label: 'Apps', icon: <IconApps /> },
+  { to: '/app/developer', label: 'Developer', icon: <IconDeveloper /> },
 ];
 
 function RailNavLink({
@@ -152,6 +167,9 @@ function RailNavLink({
     item.to === '/app/builder' &&
     (location.pathname === '/app/builder' ||
       location.pathname.includes('/builder'));
+  const developerActive =
+    item.to === '/app/developer' &&
+    location.pathname.startsWith('/app/developer');
 
   return (
     <NavLink
@@ -160,7 +178,12 @@ function RailNavLink({
       title={item.label}
       aria-label={item.label}
       className={({ isActive }) => {
-        const active = builderActive || (item.to !== '/app/builder' && isActive);
+        const active =
+          builderActive ||
+          developerActive ||
+          (item.to !== '/app/builder' &&
+            item.to !== '/app/developer' &&
+            isActive);
         return `interactive flex items-center gap-3 rounded-[var(--radius-control)] transition duration-150 ${
           expanded ? 'h-10 px-2.5' : 'h-10 w-10 justify-center'
         } ${
@@ -239,7 +262,7 @@ function EcosystemRail() {
       )}
 
       <aside
-        className={`relative z-40 flex h-full shrink-0 flex-col border-r border-line/80 bg-ink/90 py-3 backdrop-blur-md transition-[width] duration-200 ease-out ${
+        className={`relative z-40 flex h-full shrink-0 flex-col border-r border-line/80 bg-ink/55 py-3 backdrop-blur-xl transition-[width] duration-200 ease-out ${
           expanded
             ? 'fixed inset-y-0 left-0 w-[17rem] md:static md:w-[17rem]'
             : 'w-[4.25rem]'
@@ -421,12 +444,13 @@ function EcosystemShellInner({ children }: { children?: ReactNode }) {
     location.pathname.includes('/builder') ||
     location.pathname.startsWith('/project/');
 
+  // Builder owns the viewport (its own AppShell) — no ecosystem rail.
   if (focusBuilder) {
     return <>{children ?? <Outlet />}</>;
   }
 
   return (
-    <div className="flex h-full min-h-0 bg-transparent text-paper">
+    <div className="flex h-full min-h-0 text-paper">
       <EcosystemRail />
       <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
         {children ?? <Outlet />}

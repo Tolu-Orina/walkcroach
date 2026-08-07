@@ -77,7 +77,7 @@ export async function webExtract(url: string): Promise<{
   const res = await fetch(url, {
     headers: {
       Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8',
-      'User-Agent': 'WalkCroachBot/1.0 (+https://walkcroach.conquerorfoundation.com)',
+      'User-Agent': 'WalkCroachBot/1.0 (+https://walkcroach.rinegansolutions.com)',
     },
     signal: AbortSignal.timeout(15_000),
     redirect: 'follow',

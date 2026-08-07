@@ -28,6 +28,11 @@ export type UserQuestionAnswer = {
 
 export type ApprovalRequest = {
   stepId: string;
+  /**
+   * Fleet / multi-session binding (P3.2). When set, UI resolve must echo the
+   * same sessionId so another fleet tab cannot approve this step.
+   */
+  sessionId?: string;
   kind: 'diff' | 'command' | 'question';
   toolName: string;
   path?: string;
@@ -205,6 +210,27 @@ export interface HostAdapter {
   } | null>;
   clearAgentSession?(): Promise<void>;
   /**
+   * D5.2 — scope subsequent tool paths to a git worktree directory (absolute).
+   * Pass `undefined` to restore the workspace root.
+   */
+  setToolRoot?(absPath: string | undefined): void;
+  /** Current tool root when inside a worktree; otherwise undefined. */
+  getToolRoot?(): string | undefined;
+  /**
+   * True repository / workspace root, ignoring any {@link setToolRoot} override.
+   * Used by enter_worktree so nested worktrees are not created inside a worktree.
+   */
+  getRepoRoot?(): string | undefined;
+  /** Remember the active worktree metadata for exit_worktree. */
+  setActiveWorktree?(
+    meta:
+      | { path: string; branch: string; repoRoot: string }
+      | undefined,
+  ): void;
+  getActiveWorktree?():
+    | { path: string; branch: string; repoRoot: string }
+    | undefined;
+  /**
    * Request user approval for a file diff. Emits approval_request via emit.
    * Low-friction may short-circuit to approve for eligible edits.
    */
@@ -231,12 +257,20 @@ export interface HostAdapter {
     allowFreeText?: boolean;
     stepId?: string;
   }): Promise<UserQuestionAnswer>;
-  /** Resolve a pending approval from the UI (APPROVE_STEP / REJECT_STEP). */
-  resolveApproval(stepId: string, decision: ApprovalDecision): void;
+  /**
+   * Resolve a pending approval from the UI (APPROVE_STEP / REJECT_STEP).
+   * Optional sessionId binds the decision to a fleet member (P3.2).
+   */
+  resolveApproval(
+    stepId: string,
+    decision: ApprovalDecision,
+    sessionId?: string,
+  ): void;
   /** Resolve a pending ask_user question. */
   resolveQuestion(
     stepId: string,
     answer: UserQuestionAnswer | 'reject',
+    sessionId?: string,
   ): void;
   getAutonomy(): AutonomyLevel;
   setAutonomy(level: AutonomyLevel): void;

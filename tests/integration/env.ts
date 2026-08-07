@@ -80,7 +80,7 @@ export function resolveSurfaceEnv(): SurfaceEnv | null {
     webFromEnv ||
     readSsm(`/walkcroach/${environment}/web/web_url`) ||
     (environment === 'prod'
-      ? 'https://walkcroach.conquerorfoundation.com'
+      ? 'https://walkcroach.rinegansolutions.com'
       : '');
 
   return {

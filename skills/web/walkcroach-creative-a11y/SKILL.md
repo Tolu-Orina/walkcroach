@@ -25,4 +25,4 @@ Exit `0` = pass, `1` = findings (fail closed for render).
 2. Every flyer `<img>` must have a meaningful non-empty `alt`.
 3. If `estimatedImages > 0`, brief must include `altText`.
 
-Nova Pro briefs should invent short alt text when stills are planned.
+Nova 2 Lite briefs should invent short alt text when stills are planned.

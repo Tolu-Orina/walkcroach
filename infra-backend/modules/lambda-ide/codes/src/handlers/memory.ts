@@ -1,8 +1,11 @@
 import {
   listProjectMemoryEntries,
   recallProjectMemory,
+  recallProjectMemoryAsOf,
+  diffProjectMemory,
   updateMemoryEntryText,
-  writeMemoryEntry,
+  writeMemoryEntryDetailed,
+  RetentionWindowError,
   type MemoryKind,
 } from '@walkcroach/agent-harness';
 import { createDbClient } from '@walkcroach/db';
@@ -87,17 +90,20 @@ export async function handleMemoryMirror(
 
   const db = createDbClient();
   try {
-    const id = await writeMemoryEntry({
+    const { id, supersededId } = await writeMemoryEntryDetailed({
       db,
       projectId: project.projectId,
       sourceSurface: surfaceRaw,
       kind: kindRaw,
       text,
+      actorOwnerId: auth.ownerId,
+      actorKeyId: auth.keyId ?? null,
     });
     metricLog('ide.memory.mirror', { ok: true, sourceSurface: surfaceRaw });
     return jsonResponse(200, {
       ok: true,
       id,
+      supersededId,
       projectId: project.projectId,
       sourceSurface: surfaceRaw,
       kind: kindRaw,
@@ -109,7 +115,8 @@ export async function handleMemoryMirror(
 
 /**
  * POST /ide/v1/memory/recall
- * Body: { projectId, query, limit?, sourceSurfaces? }
+ * Body: { projectId, query, limit?, sourceSurfaces?, asOf? }
+ * `asOf` is an ISO timestamp — same harness as SDK `wc.memory.asOf`.
  */
 export async function handleMemoryRecall(
   auth: AuthContext,
@@ -120,6 +127,7 @@ export async function handleMemoryRecall(
     query?: string;
     limit?: number;
     sourceSurfaces?: string[];
+    asOf?: string;
   }>(rawBody);
   if (!parsed.ok) {
     return jsonResponse(400, { error: parsed.error });
@@ -143,24 +151,105 @@ export async function handleMemoryRecall(
 
   const db = createDbClient();
   try {
-    const hits = await recallProjectMemory({
-      db,
-      projectId: project.projectId,
-      query,
-      limit,
-      sourceSurfaces: surfaces,
-    });
-    metricLog('ide.memory.recall', { count: hits.length });
+    const hits = body.asOf
+      ? await recallProjectMemoryAsOf({
+          db,
+          projectId: project.projectId,
+          query,
+          at: body.asOf,
+          limit,
+          sourceSurfaces: surfaces,
+        })
+      : await recallProjectMemory({
+          db,
+          projectId: project.projectId,
+          query,
+          limit,
+          sourceSurfaces: surfaces,
+        });
+    metricLog('ide.memory.recall', { count: hits.length, asOf: Boolean(body.asOf) });
     return jsonResponse(200, {
       projectId: project.projectId,
+      asOf: body.asOf ?? null,
       hits: hits.map((h) => ({
         id: h.id,
         kind: h.kind,
         text: h.text,
         distance: h.distance,
         sourceSurface: h.sourceSurface,
+        createdAt: h.createdAt,
       })),
     });
+  } catch (err) {
+    if (err instanceof RetentionWindowError) {
+      return jsonResponse(400, { error: err.message, code: err.code });
+    }
+    throw err;
+  } finally {
+    await db.close();
+  }
+}
+
+/**
+ * POST /ide/v1/memory/diff
+ * Body: { projectId, from, to? } — same contract as SDK `wc.memory.diff`.
+ */
+export async function handleMemoryDiff(
+  auth: AuthContext,
+  rawBody: string | undefined,
+): Promise<ReturnType<typeof jsonResponse>> {
+  const parsed = parseJsonBody<{ projectId?: string; from?: string; to?: string }>(rawBody);
+  if (!parsed.ok) {
+    return jsonResponse(400, { error: parsed.error });
+  }
+  const body = parsed.data;
+
+  const project = await resolveLinkedProject(auth, body.projectId);
+  if (!project.ok) {
+    return jsonResponse(project.status, { error: project.error });
+  }
+  if (!body.from) {
+    return jsonResponse(400, { error: 'from (ISO timestamp) is required' });
+  }
+
+  const db = createDbClient();
+  try {
+    const diff = await diffProjectMemory({
+      db,
+      projectId: project.projectId,
+      from: body.from,
+      to: body.to ?? 'now',
+    });
+    metricLog('ide.memory.diff', {
+      added: diff.added.length,
+      retired: diff.retired.length,
+    });
+    return jsonResponse(200, {
+      projectId: project.projectId,
+      from: diff.from,
+      to: diff.to,
+      unchanged: diff.unchanged,
+      added: diff.added.map((e) => ({
+        id: e.id,
+        kind: e.kind,
+        text: e.text,
+        sourceSurface: e.sourceSurface,
+      })),
+      retired: diff.retired.map((e) => ({
+        id: e.id,
+        kind: e.kind,
+        text: e.text,
+        sourceSurface: e.sourceSurface,
+      })),
+    });
+  } catch (err) {
+    if (err instanceof RetentionWindowError) {
+      return jsonResponse(400, { error: err.message, code: err.code });
+    }
+    if (err instanceof TypeError || err instanceof RangeError) {
+      return jsonResponse(400, { error: err.message });
+    }
+    throw err;
   } finally {
     await db.close();
   }

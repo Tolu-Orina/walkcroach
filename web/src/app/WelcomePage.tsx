@@ -85,7 +85,7 @@ export function WelcomePage() {
           You're in. Memory first, Builder when you need it.
         </h1>
 
-        <div className="mt-8 rounded-sm border border-line bg-panel/50 p-6">
+        <div className="glass-strong glass-hairline mt-8 p-6">
           <p className="text-[10px] uppercase tracking-wider text-signal">
             Step {step + 1} of {STEPS.length}
           </p>

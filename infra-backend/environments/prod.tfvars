@@ -1,9 +1,10 @@
 environment                     = "prod"
 aws_region                      = "eu-west-2"
 project_name                    = "walkcroach"
-hosted_zone_name                = "conquerorfoundation.com"
-apps_wildcard_domain            = "walkcroach.conquerorfoundation.com"
-web_app_url                     = "https://walkcroach.conquerorfoundation.com"
+hosted_zone_name                = "rinegansolutions.com"
+apps_wildcard_domain            = "walkcroach.rinegansolutions.com"
+api_custom_domain_name          = "api.walkcroach.rinegansolutions.com"
+web_app_url                     = "https://walkcroach.rinegansolutions.com"
 allow_dev_auth                  = false
 allow_github_pat                = false
 enable_apigw_cognito_authorizer = true

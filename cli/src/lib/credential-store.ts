@@ -49,11 +49,45 @@ let cached: KeyringModule | null | undefined;
  * file they can inspect and copy; and this repo's own test suite, which must
  * not write to the developer's real credential store — a temp `$WALKCROACH_HOME`
  * isolates the file backend, but nothing isolates the machine keychain.
+ *
+ * ## Production refuse (P3.7)
+ *
+ * When `WALKCROACH_PROFILE=production` (or `WALKCROACH_ENV=production`) and the
+ * keychain cannot store the value, writes fail closed unless
+ * `WALKCROACH_ALLOW_PLAINTEXT_SECRETS=1`. CI/tests keep the file fallback via
+ * `WALKCROACH_NO_KEYCHAIN` or Vitest's NODE_ENV=test.
  */
 export function keychainDisabled(env: NodeJS.ProcessEnv = process.env): boolean {
   const raw = env.WALKCROACH_NO_KEYCHAIN;
   return raw !== undefined && raw !== '' && raw !== '0';
 }
+
+/** True when plaintext `secrets.json` writes are permitted. */
+export function allowPlaintextSecrets(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (env.WALKCROACH_ALLOW_PLAINTEXT_SECRETS === '1') return true;
+  if (keychainDisabled(env)) return true;
+  if (env.VITEST || env.NODE_ENV === 'test') return true;
+  const profile = (
+    env.WALKCROACH_PROFILE ||
+    env.WALKCROACH_ENV ||
+    ''
+  ).toLowerCase();
+  if (profile === 'production' || profile === 'prod') return false;
+  return true;
+}
+
+export class PlaintextSecretsRefusedError extends Error {
+  readonly code = 'PLAINTEXT_SECRETS_REFUSED';
+  constructor() {
+    super(
+      'Plaintext secret file is refused in production profile. Enable the OS keychain, or set WALKCROACH_ALLOW_PLAINTEXT_SECRETS=1 if you intentionally accept file-backed secrets.',
+    );
+    this.name = 'PlaintextSecretsRefusedError';
+  }
+}
+
 
 /**
  * Load the native keychain binding, once, without letting its absence throw.

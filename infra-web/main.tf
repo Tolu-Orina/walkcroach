@@ -39,6 +39,14 @@ module "cloudfront" {
   tags                           = local.tags
 }
 
+module "desktop_releases" {
+  source      = "./modules/desktop-releases"
+  name_prefix = local.name_prefix
+  environment = var.environment
+  price_class = var.price_class
+  tags        = local.tags
+}
+
 module "dns" {
   count  = local.use_custom_domain ? 1 : 0
   source = "./modules/dns"

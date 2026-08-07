@@ -51,12 +51,12 @@ export function AppShell({
     location.pathname === '/try';
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="relative z-0 flex h-full min-h-0 flex-col">
       <header
         className={`shrink-0 ${
           marketing
-            ? 'border-b border-white/10 bg-ink/40 backdrop-blur-xl'
-            : 'border-b border-line/80 bg-ink/75 backdrop-blur-md'
+            ? 'border-b border-white/10 bg-ink/35 backdrop-blur-xl'
+            : 'border-b border-line/80 bg-ink/55 backdrop-blur-xl'
         }`}
       >
         <div
@@ -64,7 +64,7 @@ export function AppShell({
             marketing ? 'px-4 sm:px-5' : 'px-5 sm:px-6'
           } ${wide || marketing ? '' : 'mx-auto max-w-6xl'}`}
         >
-          <BrandLogo to="/" />
+          <BrandLogo to="/" showWordmark={!marketing} />
 
           {!minimal && (
             <nav
@@ -87,7 +87,7 @@ export function AppShell({
 
               {status === 'authenticated' ? (
                 <div className="ml-2 flex items-center gap-2 border-l border-line pl-3">
-                  <ThemeToggle />
+                  {!marketing && <ThemeToggle />}
                   <span className="hidden max-w-[10rem] truncate text-sm text-mist sm:inline">
                     {user?.displayName}
                   </span>
@@ -101,18 +101,33 @@ export function AppShell({
                 </div>
               ) : status !== 'loading' ? (
                 <div className="ml-2 flex items-center gap-2">
-                  <ThemeToggle />
+                  {!marketing && <ThemeToggle />}
                   {cognitoEnabled ? (
                     <>
-                      <Link to="/signup" className="btn-secondary text-xs">
+                      <Link
+                        to="/signup"
+                        className={
+                          marketing ? 'btn-ghost text-xs' : 'btn-secondary text-xs'
+                        }
+                      >
                         Sign up
                       </Link>
-                      <Link to="/signin" className="btn-primary text-xs">
+                      <Link
+                        to="/signin"
+                        className={
+                          marketing ? 'btn-ghost text-xs' : 'btn-primary text-xs'
+                        }
+                      >
                         Sign in
                       </Link>
                     </>
                   ) : (
-                    <Link to="/signin" className="btn-primary text-xs">
+                    <Link
+                      to="/signin"
+                      className={
+                        marketing ? 'btn-ghost text-xs' : 'btn-primary text-xs'
+                      }
+                    >
                       Get started
                     </Link>
                   )}

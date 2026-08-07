@@ -26,6 +26,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@walkcroach/connectors": "*",
     "@walkcroach/db": "*",
+    "@walkcroach/memory-contracts": "file:../../../packages/memory-contracts",
     "e2b": "^2.35.3"
   },
   "devDependencies": {

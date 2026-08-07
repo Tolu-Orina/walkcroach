@@ -13,10 +13,13 @@
  *   * scopes are enforced. See `requireScope`.
  */
 import {
+  appendMemoryAudit,
   diffProjectMemory,
+  eraseMemoryEntries,
   exportProjectMemory,
   importProjectMemory,
   ImportFormatError,
+  listMemoryAudit,
   listProjectMemoryEntries,
   recallProjectMemory,
   recallProjectMemoryAsOf,
@@ -25,6 +28,7 @@ import {
   type MemoryKind,
 } from '@walkcroach/agent-harness';
 import { createDbClient } from '@walkcroach/db';
+import { debitCredits } from '@walkcroach/ledger';
 import type { AuthContext } from '../auth.js';
 import { hasScope, type ApiKeyScope } from '../api-keys.js';
 import { jsonResponse } from '../http.js';
@@ -43,19 +47,8 @@ const ALLOWED_KINDS = new Set<MemoryKind>([
 /** Free-form, but bounded — this lands in an indexed column and in metrics. */
 const SURFACE_RE = /^[a-z0-9][a-z0-9._-]{0,62}$/i;
 
-/**
- * Cosine distance → a 0–1 similarity score.
- *
- * The raw `<=>` distance is deliberately not exposed. It is an index
- * implementation detail, and migrations 028/029 already had to change the
- * opclass once — publishing the distance would make that a breaking API change
- * next time. `<=>` yields 0–2 for cosine, so `1 - d/2` maps exact match to 1
- * and opposite to 0.
- *
- * `undefined` distance only occurs on the exact-scan fallback for a row with no
- * embedding; recall already filters those out, so this returns null rather than
- * inventing a score.
- */
+const QUOTA_RETRY_AFTER_SECONDS = 3600;
+
 function toRelevance(distance: number | undefined): number | null {
   if (distance === undefined || !Number.isFinite(distance)) return null;
   const clamped = Math.min(Math.max(distance, 0), 2);
@@ -80,15 +73,41 @@ async function resolveProject(
     return { ok: false, status: 400, error: 'projectId (uuid) is required' };
   }
   const owned = await assertOwnsProject(auth.ownerId, projectId);
-  // assertOwnsProject returns 404 rather than 403 for a project owned by someone
-  // else, so a caller cannot probe for the existence of other tenants' projects.
   if (!owned.ok) return owned;
   return { ok: true, projectId };
 }
 
+function requestIdFrom(auth: AuthContext, bodyEventId?: string): string | null {
+  if (bodyEventId && bodyEventId.length <= 128) return bodyEventId;
+  return null;
+}
+
+async function chargeOr429(
+  db: ReturnType<typeof createDbClient>,
+  auth: AuthContext,
+  action: 'memory_remember' | 'memory_recall' | 'memory_import',
+  projectId: string,
+): Promise<ReturnType<typeof jsonResponse> | null> {
+  const result = await debitCredits(db, auth.ownerId, action, projectId, {
+    keyId: auth.keyId ?? null,
+    source: auth.source,
+  });
+  if (result.ok) return null;
+  return jsonResponse(
+    429,
+    {
+      error: 'quota exceeded',
+      code: 'QUOTA_EXCEEDED',
+      remaining: result.remaining,
+      action,
+    },
+    { 'retry-after': String(QUOTA_RETRY_AFTER_SECONDS) },
+  );
+}
+
 /**
  * POST /v1/memory/entries
- * Body: { projectId, text, kind?, surface? }
+ * Body: { projectId, text, kind?, surface?, sourceEventId? }
  */
 export async function handleSdkRemember(
   auth: AuthContext,
@@ -102,6 +121,7 @@ export async function handleSdkRemember(
     text?: string;
     kind?: string;
     surface?: string;
+    sourceEventId?: string;
   }>(rawBody);
   if (!parsed.ok) return jsonResponse(400, { error: parsed.error });
   const body = parsed.data;
@@ -129,19 +149,48 @@ export async function handleSdkRemember(
     });
   }
 
+  const sourceEventId = requestIdFrom(auth, body.sourceEventId);
+
   const db = createDbClient();
   try {
+    const quota = await chargeOr429(db, auth, 'memory_remember', project.projectId);
+    if (quota) return quota;
+
     const { id, supersededId } = await writeMemoryEntryDetailed({
       db,
       projectId: project.projectId,
       sourceSurface: surface,
       kind,
       text,
+      actorOwnerId: auth.ownerId,
+      actorKeyId: auth.keyId ?? null,
+      sourceEventId,
     });
+
+    await appendMemoryAudit({
+      db,
+      projectId: project.projectId,
+      ownerId: auth.ownerId,
+      action: 'remember',
+      actorKeyId: auth.keyId,
+      entryId: id,
+      requestId: sourceEventId,
+      detail: { kind, surface, supersededId },
+    });
+    if (supersededId) {
+      await appendMemoryAudit({
+        db,
+        projectId: project.projectId,
+        ownerId: auth.ownerId,
+        action: 'supersede',
+        actorKeyId: auth.keyId,
+        entryId: supersededId,
+        requestId: sourceEventId,
+        detail: { replacedBy: id },
+      });
+    }
+
     metricLog('sdk.memory.remember', { superseded: supersededId !== null, surface });
-    // supersededId is returned, always. A caller that retires someone's earlier
-    // note should be able to say so — see the plan's §4.5 on why this is a trust
-    // feature rather than an implementation detail.
     return jsonResponse(200, {
       id,
       supersededId,
@@ -193,6 +242,9 @@ export async function handleSdkRecall(
 
   const db = createDbClient();
   try {
+    const quota = await chargeOr429(db, auth, 'memory_recall', project.projectId);
+    if (quota) return quota;
+
     const hits = body.asOf
       ? await recallProjectMemoryAsOf({
           db,
@@ -278,10 +330,6 @@ export async function handleSdkList(
 
 /**
  * GET /v1/memory/export?projectId=&embeddings=false&superseded=false
- *
- * Reading everything you wrote is a read, so `memory:read` is the right scope.
- * Gating export behind a stronger scope than recall would be theatre — a caller
- * who can recall can already reconstruct the corpus one query at a time.
  */
 export async function handleSdkExport(
   auth: AuthContext,
@@ -300,6 +348,14 @@ export async function handleSdkExport(
       projectId: project.projectId,
       includeEmbeddings: query.embeddings !== 'false',
       includeSuperseded: query.superseded !== 'false',
+    });
+    await appendMemoryAudit({
+      db,
+      projectId: project.projectId,
+      ownerId: auth.ownerId,
+      action: 'export',
+      actorKeyId: auth.keyId,
+      detail: { entries: bundle.entryCount },
     });
     metricLog('sdk.memory.export', { entries: bundle.entryCount });
     return jsonResponse(200, bundle);
@@ -332,11 +388,22 @@ export async function handleSdkImport(
 
   const db = createDbClient();
   try {
+    const quota = await chargeOr429(db, auth, 'memory_import', project.projectId);
+    if (quota) return quota;
+
     const result = await importProjectMemory({
       db,
       projectId: project.projectId,
       bundle: body.bundle,
       preserveSupersedes: body.preserveSupersedes,
+    });
+    await appendMemoryAudit({
+      db,
+      projectId: project.projectId,
+      ownerId: auth.ownerId,
+      action: 'import',
+      actorKeyId: auth.keyId,
+      detail: result,
     });
     metricLog('sdk.memory.import', {
       imported: result.imported,
@@ -396,6 +463,93 @@ export async function handleSdkDiff(
       return jsonResponse(400, { error: err.message });
     }
     throw err;
+  } finally {
+    await db.close();
+  }
+}
+
+/**
+ * POST /v1/memory/erase — ADR-0002 tombstone erase (memory:write).
+ * Body: { projectId, reason, entryIds?, exportFirst? }
+ */
+export async function handleSdkErase(
+  auth: AuthContext,
+  rawBody: string | undefined,
+): Promise<ReturnType<typeof jsonResponse>> {
+  const denied = requireScope(auth, 'memory:write');
+  if (denied) return jsonResponse(denied.status, { error: denied.error });
+
+  const parsed = parseJsonBody<{
+    projectId?: string;
+    reason?: string;
+    entryIds?: string[];
+    exportFirst?: boolean;
+  }>(rawBody);
+  if (!parsed.ok) return jsonResponse(400, { error: parsed.error });
+  const body = parsed.data;
+
+  const project = await resolveProject(auth, body.projectId);
+  if (!project.ok) return jsonResponse(project.status, { error: project.error });
+
+  const reason = body.reason?.trim();
+  if (!reason) return jsonResponse(400, { error: 'reason is required' });
+
+  if (Array.isArray(body.entryIds)) {
+    for (const id of body.entryIds) {
+      if (!isUuid(id)) {
+        return jsonResponse(400, { error: 'entryIds must be uuids' });
+      }
+    }
+  }
+
+  const db = createDbClient();
+  try {
+    const result = await eraseMemoryEntries({
+      db,
+      projectId: project.projectId,
+      ownerId: auth.ownerId,
+      reason,
+      entryIds: body.entryIds,
+      actorKeyId: auth.keyId,
+      exportFirst: body.exportFirst === true,
+    });
+    metricLog('sdk.memory.erase', { erased: result.erased });
+    return jsonResponse(200, {
+      projectId: project.projectId,
+      erased: result.erased,
+      entryIds: result.entryIds,
+      export: result.exportBundle,
+    });
+  } catch (err) {
+    if (err instanceof TypeError) {
+      return jsonResponse(400, { error: err.message });
+    }
+    throw err;
+  } finally {
+    await db.close();
+  }
+}
+
+/** GET /v1/memory/audit?projectId=&limit= */
+export async function handleSdkAuditList(
+  auth: AuthContext,
+  query: Record<string, string | undefined>,
+): Promise<ReturnType<typeof jsonResponse>> {
+  const denied = requireScope(auth, 'memory:read');
+  if (denied) return jsonResponse(denied.status, { error: denied.error });
+
+  const project = await resolveProject(auth, query.projectId);
+  if (!project.ok) return jsonResponse(project.status, { error: project.error });
+
+  const limit = Math.min(Math.max(Number(query.limit) || 50, 1), 200);
+  const db = createDbClient();
+  try {
+    const events = await listMemoryAudit({
+      db,
+      projectId: project.projectId,
+      limit,
+    });
+    return jsonResponse(200, { projectId: project.projectId, events });
   } finally {
     await db.close();
   }

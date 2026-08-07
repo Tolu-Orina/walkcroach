@@ -12,7 +12,7 @@ origin: walkcroach:web-modules
 
 ## v1 scope
 
-- Nova Pro → structured sheet spec → `openpyxl` / formula-aware render
+- Nova 2 Lite → structured sheet spec → `openpyxl` / formula-aware render
 - Sanity script: open workbook, assert sheets exist, spot-check formulas
 
 ## Scripts

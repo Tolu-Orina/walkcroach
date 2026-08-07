@@ -218,3 +218,14 @@ html[data-theme='light'] .eyebrow {
 .wc-enter-delay {
   animation: wc-fade-up 0.5s ease-out 0.08s both;
 }
+
+/* ── Glass reduced-transparency fallbacks ─────────────────────────── */
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .glass,
+  .glass-strong {
+    background: var(--color-panel);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+

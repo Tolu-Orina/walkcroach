@@ -15,26 +15,27 @@ const ECOSYSTEM = [
     id: 'chrome',
     name: 'Chrome',
     blurb:
-      'MV3 extension — build a store zip with `cd chrome && npm run zip:prod`, then sideload until CWS is live.',
-    href: null,
-    cta: 'Sideload via zip',
-    available: false,
+      'MV3 extension — connect your signed-in Web account, then sideload a store zip until CWS is live.',
+    href: '/connect/chrome',
+    cta: 'Connect Chrome',
+    available: true,
   },
   {
     id: 'desktop',
     name: 'Desktop',
-    blurb: 'Native shell for long-running builder sessions.',
+    blurb: 'Native shell for long-running builder sessions (preview builds).',
     href: null,
-    cta: 'Coming soon',
+    cta: 'Preview builds',
     available: false,
   },
   {
     id: 'cli',
     name: 'CLI',
-    blurb: 'Terminal workflow for prompts and deploys (`cli/` in the repo).',
-    href: null,
-    cta: 'Coming soon',
-    available: false,
+    blurb:
+      'Terminal workflow — sign in via Web, then prompt and deploy from the shell.',
+    href: '/connect/cli',
+    cta: 'Connect CLI',
+    available: true,
   },
 ] as const;
 
@@ -73,7 +74,7 @@ export function AppsHubPage() {
   }, []);
 
   return (
-    <div className="mx-auto max-w-5xl px-5 py-10 sm:px-8">
+    <div className="mx-auto max-w-5xl overflow-y-auto px-5 py-10 sm:px-8">
       <p className="eyebrow">Ecosystem</p>
       <h1 className="mt-3 font-display text-3xl font-extrabold tracking-tight text-paper">
         Apps
@@ -100,13 +101,16 @@ export function AppsHubPage() {
             <p className="mt-2 text-sm text-mist">
               Deploy from App Builder → Ship when a preview looks right.
             </p>
-            <Link to="/app/projects" className="btn-secondary mt-4 inline-flex text-xs">
+            <Link
+              to="/app/projects"
+              className="btn-secondary mt-4 inline-flex text-xs"
+            >
               Open Projects
             </Link>
           </div>
         )}
         {!loading && apps.length > 0 && (
-          <ul className="mt-4 divide-y divide-line overflow-hidden rounded-[var(--radius-surface)] border border-line bg-panel/60">
+          <ul className="mt-4 divide-y divide-line overflow-hidden rounded-[var(--radius-surface)] border border-line bg-panel/40 backdrop-blur-md">
             {apps.map((app) => (
               <li
                 key={app.id}
@@ -160,25 +164,27 @@ export function AppsHubPage() {
         </h2>
         <ul className="mt-4 grid gap-3 sm:grid-cols-2">
           {ECOSYSTEM.map((item) => (
-            <li
-              key={item.id}
-              className="rounded-[var(--radius-surface)] border border-line bg-panel/60 p-4"
-            >
-              <p className="font-display text-lg font-bold text-paper">
-                {item.name}
-              </p>
-              <p className="mt-1.5 text-sm leading-relaxed text-mist">
-                {item.blurb}
-              </p>
-              {item.available && item.href ? (
-                <Link to={item.href} className="btn-secondary mt-4 inline-flex text-xs">
-                  {item.cta}
-                </Link>
-              ) : (
-                <span className="mt-4 inline-flex text-[11px] font-semibold uppercase tracking-wider text-mist/70">
-                  {item.cta}
-                </span>
-              )}
+            <li key={item.id}>
+              <div className="surface h-full p-4">
+                <p className="font-display text-lg font-bold text-paper">
+                  {item.name}
+                </p>
+                <p className="mt-1.5 text-sm leading-relaxed text-mist">
+                  {item.blurb}
+                </p>
+                {item.available && item.href ? (
+                  <Link
+                    to={item.href}
+                    className="btn-secondary mt-4 inline-flex text-xs"
+                  >
+                    {item.cta}
+                  </Link>
+                ) : (
+                  <span className="mt-4 inline-flex text-[11px] font-semibold uppercase tracking-wider text-mist/70">
+                    {item.cta}
+                  </span>
+                )}
+              </div>
             </li>
           ))}
         </ul>

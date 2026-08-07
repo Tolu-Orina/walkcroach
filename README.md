@@ -7,7 +7,7 @@ a web builder, a browser copilot, an IDE extension, a CLI, an SDK, and a native 
 |---|---|
 | Web · Chrome · IDE extension · CLI | Shipped |
 | **SDK** (`@walkcroach/sdk`, `sdk-mcp`, `sdk-host`) | Built; agent path not yet run end-to-end |
-| **Desktop IDE** (Code OSS fork, native agent) | In build — see [plan](./docs/walkcroach-desktop-implementation-plan.md) |
+| **Desktop IDE** (Code OSS fork, native agent) | Preview-capable (unsigned Windows) — see [docs/walkcroach-desktop.md](./docs/walkcroach-desktop.md) |
 
 Built for the **CockroachDB × AWS Hackathon — Build with Agentic Memory**.
 

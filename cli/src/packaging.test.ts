@@ -40,16 +40,26 @@ describe('package manifest', () => {
   });
 
   it('keeps every private package as a bundled devDependency', () => {
-    // Both are inlined by the build, so neither may reach an installer.
+    // All are inlined by the build, so none may reach an installer.
     expect(pkg.devDependencies['@walkcroach/agent-engine']).toMatch(/^file:/);
+    expect(pkg.devDependencies['@walkcroach/sdk']).toMatch(/^file:/);
     expect(pkg.devDependencies['@walkcroach/templates']).toMatch(/^file:/);
   });
 
   it('declares the engine runtime imports it no longer inherits', () => {
-    // Bundling the engine makes its imports ours. Leaving them undeclared
-    // would install cleanly and crash on first run.
+    // Bundling the engine makes its *published* imports ours. Leaving them
+    // undeclared would install cleanly and crash on first run.
+    // Private `@walkcroach/*` deps (e.g. memory-contracts) are inlined with
+    // the engine and must not appear in CLI runtime dependencies.
     const engine = readJson('../packages/agent-engine/package.json');
     for (const dep of Object.keys(engine.dependencies ?? {})) {
+      if (dep.startsWith('@walkcroach/')) {
+        expect(
+          pkg.dependencies?.[dep],
+          `${dep} is private and must be bundled, not declared`,
+        ).toBeUndefined();
+        continue;
+      }
       expect(pkg.dependencies[dep], `${dep} is imported by the bundled engine`).toBeTruthy();
     }
   });
@@ -112,7 +122,10 @@ describe('release wiring', () => {
   it('runs the packaged-artifact gate in CI, not just locally', () => {
     const buildspec = readFileSync(join(root, 'buildspec.yml'), 'utf8');
     expect(buildspec).toContain('npm run test:packaged');
-    expect(buildspec).toContain('localhost:3003');
+    // Gate targets a hard-coded default assignment, not help prose that may
+    // mention localhost:3003 as an explicit local-dev example.
+    expect(buildspec).toContain('apiBaseUrl:[[:space:]]*"http://localhost:3003"');
+    expect(buildspec).toContain('https://api.walkcroach.rinegansolutions.com/v1');
   });
 
   it('builds every bundled private package before the CLI, in both CI paths', () => {

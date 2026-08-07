@@ -55,5 +55,5 @@ Open WalkCroach from the **toolbar**. Sign in opens WalkCroach Web `/connect/chr
 
 ## Privacy
 
-Live: https://walkcroach.conquerorfoundation.com/chrome-privacy.html  
+Live: https://walkcroach.rinegansolutions.com/chrome-privacy.html  
 Source: `../web/public/chrome-privacy.html` (redeploy Web after edits).

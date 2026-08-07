@@ -1,3 +1,7 @@
+import type { MemoryKind } from '@walkcroach/memory-contracts';
+
+export type { MemoryKind } from '@walkcroach/memory-contracts';
+
 export type AgentEvent =
   | { type: 'token'; text: string }
   | {
@@ -138,18 +142,12 @@ export type ToolResultInput = {
   cancelRemaining?: boolean;
 };
 
-export type MemoryKind =
-  | 'decision'
-  | 'preference'
-  | 'capture'
-  | 'qa'
-  | 'convention'
-  | 'summary';
-
 export type MemoryHit = {
   id: string;
   kind: MemoryKind;
   text: string;
   distance?: number;
   sourceSurface?: string;
+  /** ISO timestamp when the entry was written (D4 provenance chips). */
+  createdAt?: string;
 };

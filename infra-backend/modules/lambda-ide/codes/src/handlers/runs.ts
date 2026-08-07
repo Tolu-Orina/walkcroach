@@ -1,22 +1,31 @@
 /**
- * `/v1/runs/:id` — read and cancel asynchronous runs.
+ * `/v1/runs/:id` — read, resume, and cancel asynchronous runs.
  *
  * Polling with `afterSeq` returns only events the caller has not seen, so a
  * client gets streaming-like progress without holding a connection open for
  * minutes — and unlike a stream, closing the laptop loses nothing.
+ *
+ * Resume uses LangGraph-style interrupt vocabulary: POST with interruptId +
+ * value re-queues an `interrupted` run.
  */
 import {
+  appendRunEvent,
   cancelRun,
   getRun,
   isTerminal,
   listRunEvents,
   reapExpiredRuns,
+  resumeRun,
 } from '@walkcroach/agent-harness';
 import { createDbClient } from '@walkcroach/db';
 import type { AuthContext } from '../auth.js';
+import { resolveDispatcher } from '../dispatch.js';
 import { jsonResponse } from '../http.js';
 import { isUuid, metricLog } from '../util.js';
+import { runWorker } from '../worker.js';
 import { requireScope } from './sdk-memory.js';
+
+const dispatchRun = resolveDispatcher(runWorker);
 
 /**
  * How long a client should wait before polling again.
@@ -27,7 +36,17 @@ import { requireScope } from './sdk-memory.js';
  */
 function pollAfterMs(status: string): number {
   if (isTerminal(status as never)) return 0;
+  if (status === 'interrupted') return 0;
   return status === 'queued' ? 1_000 : 2_000;
+}
+
+function interruptFromResult(
+  result: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  if (!result || typeof result !== 'object') return null;
+  const interrupt = result.interrupt;
+  if (!interrupt || typeof interrupt !== 'object') return null;
+  return interrupt as Record<string, unknown>;
 }
 
 /** GET /v1/runs/:id?afterSeq=12&events=false */
@@ -64,8 +83,13 @@ export async function handleGetRun(
         })
       : [];
 
+    const interrupt =
+      run.status === 'interrupted' ? interruptFromResult(run.result) : null;
+
     return jsonResponse(200, {
       runId: run.id,
+      /** LangGraph-style alias — same as runId for content runs. */
+      threadId: run.id,
       status: run.status,
       kind: run.kind,
       attempts: run.attempts,
@@ -74,10 +98,72 @@ export async function handleGetRun(
       finishedAt: run.finishedAt,
       result: run.result,
       error: run.error,
+      interrupt,
       events,
       // Where to resume from next poll, so the caller never has to track it.
       lastSeq: events.length > 0 ? events[events.length - 1]!.seq : afterSeq || 0,
       pollAfterMs: pollAfterMs(run.status),
+    });
+  } finally {
+    await db.close();
+  }
+}
+
+/** POST /v1/runs/:id/resume — continue after interrupt */
+export async function handleResumeRun(
+  auth: AuthContext,
+  runId: string,
+  body: unknown,
+): Promise<ReturnType<typeof jsonResponse>> {
+  const deniedContent = requireScope(auth, 'content:run');
+  const deniedWrite = requireScope(auth, 'memory:write');
+  if (deniedContent && deniedWrite) {
+    return jsonResponse(deniedContent.status, { error: deniedContent.error });
+  }
+
+  if (!isUuid(runId)) return jsonResponse(400, { error: 'invalid run id' });
+
+  const payload = (body ?? {}) as { interruptId?: unknown; value?: unknown };
+  if (typeof payload.interruptId !== 'string' || !payload.interruptId.trim()) {
+    return jsonResponse(400, { error: 'interruptId is required' });
+  }
+  if (payload.value === undefined) {
+    return jsonResponse(400, { error: 'value is required' });
+  }
+
+  const db = createDbClient();
+  try {
+    const outcome = await resumeRun({
+      db,
+      runId,
+      ownerId: auth.ownerId,
+      interruptId: payload.interruptId.trim(),
+      value: payload.value,
+    });
+    if (!outcome.ok) {
+      if (outcome.error === 'run not found') {
+        return jsonResponse(404, { error: outcome.error });
+      }
+      return jsonResponse(409, {
+        error: outcome.error,
+        status: outcome.status,
+      });
+    }
+
+    await appendRunEvent({
+      db,
+      runId,
+      type: 'resume',
+      payload: { interruptId: payload.interruptId.trim() },
+    }).catch(() => {});
+
+    await dispatchRun(runId);
+
+    metricLog('sdk.run.resumed', { ok: true });
+    return jsonResponse(200, {
+      runId,
+      threadId: runId,
+      status: 'queued',
     });
   } finally {
     await db.close();

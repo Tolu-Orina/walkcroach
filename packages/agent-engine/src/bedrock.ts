@@ -57,24 +57,31 @@ export const DEFAULT_MAX_REASONING_OUTPUT_TOKENS = 30_000;
 /** Auto-continue rounds when stopReason is max_tokens (industry continuation pattern). */
 export const DEFAULT_MAX_OUTPUT_CONTINUATIONS = 2;
 
-export type NovaReasoningEffort = 'low' | 'medium' | 'high' | 'off';
+export type NovaReasoningEffort = 'low' | 'medium' | 'high';
 
 /**
- * Nova 2 Lite extended thinking. Default medium — same tier as Web App
- * Builder for multi-step coding / tool loops. Set
- * BEDROCK_NOVA_REASONING=off|low|medium|high to override, or pass
- * `reasoningEffort` explicitly to streamConverseTurn (IDE settings do this).
+ * Nova 2 Lite extended thinking — **always on**.
+ * Tier via `BEDROCK_NOVA_REASONING=low|medium|high` (default medium), or pass
+ * `reasoningEffort` to streamConverseTurn. Legacy `'off'` is coerced to medium.
  * @see https://docs.aws.amazon.com/nova/latest/nova2-userguide/extended-thinking.html
+ * @see docs/nova-2-lite.md
  */
 export function getNovaReasoningEffort(): NovaReasoningEffort {
   const raw = (process.env.BEDROCK_NOVA_REASONING ?? 'medium')
     .trim()
     .toLowerCase();
-  if (raw === 'off' || raw === 'disabled' || raw === '0' || raw === 'false') {
-    return 'off';
-  }
   if (raw === 'low' || raw === 'medium' || raw === 'high') return raw;
   return 'medium';
+}
+
+/** Resolve per-call override; `'off'` is ignored (thinking stays on). */
+export function resolveNovaReasoningEffort(
+  override?: NovaReasoningEffort | 'off' | null,
+): NovaReasoningEffort {
+  if (override === 'low' || override === 'medium' || override === 'high') {
+    return override;
+  }
+  return getNovaReasoningEffort();
 }
 
 /**
@@ -186,8 +193,8 @@ export async function* streamConverseTurn(params: {
   signal?: AbortSignal;
   /** Override default output token budget. */
   maxTokens?: number;
-  /** Override extended-thinking tier (default: getNovaReasoningEffort()). */
-  reasoningEffort?: NovaReasoningEffort;
+  /** Override extended-thinking tier (default: getNovaReasoningEffort()). `'off'` is ignored. */
+  reasoningEffort?: NovaReasoningEffort | 'off';
 }): AsyncGenerator<StreamDelta, ConverseTurnResult> {
   if (params.signal?.aborted) {
     throw new DOMException('Aborted', 'AbortError');
@@ -195,25 +202,18 @@ export async function* streamConverseTurn(params: {
 
   const client = params.client ?? createBedrockClient();
   const modelId = params.modelId ?? getNovaModelId();
-  const reasoningEffort = params.reasoningEffort ?? getNovaReasoningEffort();
+  const reasoningEffort = resolveNovaReasoningEffort(params.reasoningEffort);
 
-  const additionalModelRequestFields =
-    reasoningEffort === 'off'
-      ? undefined
-      : {
-          reasoningConfig: {
-            type: 'enabled',
-            maxReasoningEffort: reasoningEffort,
-          },
-        };
+  const additionalModelRequestFields = {
+    reasoningConfig: {
+      type: 'enabled' as const,
+      maxReasoningEffort: reasoningEffort,
+    },
+  };
 
   // Nova's "high" reasoning tier forbids temperature/topP/maxTokens entirely —
   // leave inferenceConfig unset only in that case.
-  const maxTokens =
-    params.maxTokens ??
-    (reasoningEffort === 'off'
-      ? DEFAULT_MAX_OUTPUT_TOKENS
-      : DEFAULT_MAX_REASONING_OUTPUT_TOKENS);
+  const maxTokens = params.maxTokens ?? DEFAULT_MAX_REASONING_OUTPUT_TOKENS;
 
   const command = new ConverseStreamCommand({
     modelId,
@@ -223,7 +223,7 @@ export async function* streamConverseTurn(params: {
       ? { tools: params.tools }
       : undefined,
     ...(reasoningEffort === 'high' ? {} : { inferenceConfig: { maxTokens } }),
-    ...(additionalModelRequestFields ? { additionalModelRequestFields } : {}),
+    additionalModelRequestFields,
   });
 
   const response = await client.send(command, {

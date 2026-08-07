@@ -48,9 +48,12 @@ describeLive('cross-surface memory (web project ↔ IDE)', () => {
         projectId: project.id,
         kind: 'preference',
         text: `Use Syne display font for ${token}`,
+        sourceSurface: 'ide',
       }),
     });
     expect(mirror.status).toBe(200);
+    const mirrored = (await mirror.json()) as { sourceSurface?: string };
+    expect(mirrored.sourceSurface).toBe('ide');
 
     const recall = await fetch(`${surfaces.apiBaseUrl}/ide/v1/memory/recall`, {
       method: 'POST',
@@ -59,7 +62,7 @@ describeLive('cross-surface memory (web project ↔ IDE)', () => {
         projectId: project.id,
         query: `font ${token}`,
         limit: 8,
-        sourceSurfaces: ['ide'],
+        sourceSurfaces: ['ide', 'desktop', 'chrome', 'web'],
       }),
     });
     expect(recall.status).toBe(200);
@@ -69,5 +72,59 @@ describeLive('cross-surface memory (web project ↔ IDE)', () => {
     const hits = body.hits ?? [];
     expect(hits.length).toBeGreaterThan(0);
     expect(hits.some((h) => h.text.includes(token))).toBe(true);
+    expect(hits.some((h) => h.sourceSurface === 'ide')).toBe(true);
+  });
+
+  it('mirrors desktop surface and recalls with sourceSurface=desktop', async () => {
+    const create = await fetch(`${surfaces.apiBaseUrl}/projects`, {
+      method: 'POST',
+      headers: auth,
+      body: JSON.stringify({
+        name: `Desktop surface ${randomUUID().slice(0, 8)}`,
+        templateId: 'blank',
+      }),
+    });
+    expect(create.status).toBe(201);
+    const project = (await create.json()) as { id: string };
+    createdProjectIds.push(project.id);
+
+    const marker = `desktop-decision-${randomUUID().slice(0, 8)}`;
+    const mirror = await fetch(`${surfaces.apiBaseUrl}/ide/v1/memory/mirror`, {
+      method: 'POST',
+      headers: auth,
+      body: JSON.stringify({
+        projectId: project.id,
+        kind: 'decision',
+        text: `Prefer UUID primary keys (${marker})`,
+        sourceSurface: 'desktop',
+      }),
+    });
+    expect(mirror.status).toBe(200);
+    const mirrored = (await mirror.json()) as {
+      ok?: boolean;
+      sourceSurface?: string;
+      supersededId?: string | null;
+    };
+    expect(mirrored.ok).toBe(true);
+    expect(mirrored.sourceSurface).toBe('desktop');
+
+    const recall = await fetch(`${surfaces.apiBaseUrl}/ide/v1/memory/recall`, {
+      method: 'POST',
+      headers: auth,
+      body: JSON.stringify({
+        projectId: project.id,
+        query: marker,
+        limit: 8,
+        sourceSurfaces: ['web', 'chrome', 'ide', 'desktop'],
+      }),
+    });
+    expect(recall.status).toBe(200);
+    const body = (await recall.json()) as {
+      hits?: Array<{ text: string; sourceSurface?: string; createdAt?: string }>;
+    };
+    const hits = body.hits ?? [];
+    expect(hits.some((h) => h.text.includes(marker) && h.sourceSurface === 'desktop')).toBe(
+      true,
+    );
   });
 });

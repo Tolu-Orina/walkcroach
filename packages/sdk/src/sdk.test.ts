@@ -71,6 +71,28 @@ describe('construction', () => {
   });
 });
 
+describe('health', () => {
+  it('GET /v1/sdk-health (APIGW-safe, not agent /health)', async () => {
+    const { wc, calls } = client(() =>
+      json({
+        ok: true,
+        surface: 'sdk',
+        version: 'v1',
+        capabilities: ['memory:read'],
+        retention: {
+          asOfSeconds: 90_000,
+          asOfHuman: '25h',
+          mechanism: 'cockroachdb_mvcc_gc_ttl',
+          note: 'x',
+        },
+      }),
+    );
+    const body = await wc.health();
+    expect(calls[0]!.url).toBe('https://api.test/v1/sdk-health');
+    expect(body.retention?.asOfSeconds).toBe(90_000);
+  });
+});
+
 describe('project scoping', () => {
   // The C-SPANN index is prefixed on (project_id, superseded_by). CockroachDB
   // only uses a vector index when every prefix column is pinned, so an unscoped

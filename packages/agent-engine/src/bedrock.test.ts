@@ -109,10 +109,10 @@ describe('getNovaReasoningEffort', () => {
     expect(getNovaReasoningEffort()).toBe('low');
   });
 
-  it('treats off/disabled/0/false as off', () => {
+  it('coerces off/disabled/0/false to medium (thinking always on)', () => {
     for (const v of ['off', 'disabled', '0', 'false']) {
       process.env.BEDROCK_NOVA_REASONING = v;
-      expect(getNovaReasoningEffort()).toBe('off');
+      expect(getNovaReasoningEffort()).toBe('medium');
     }
   });
 
@@ -291,7 +291,7 @@ describe('streamConverseTurn', () => {
     });
   });
 
-  it('drops reasoningConfig and uses the plain output budget when off', async () => {
+  it('keeps reasoningConfig when override is off (thinking always on)', async () => {
     setMockStream(makeStreamEvents({ text: 'hi', stopReason: 'end_turn' }));
 
     const gen = streamConverseTurn({
@@ -303,8 +303,10 @@ describe('streamConverseTurn', () => {
     while (!result.done) result = await gen.next();
 
     const input = mockSend.mock.calls[0]![0].input as Record<string, unknown>;
-    expect(input.additionalModelRequestFields).toBeUndefined();
-    expect(input.inferenceConfig).toEqual({ maxTokens: 4096 });
+    expect(input.additionalModelRequestFields).toEqual({
+      reasoningConfig: { type: 'enabled', maxReasoningEffort: 'medium' },
+    });
+    expect(input.inferenceConfig).toEqual({ maxTokens: 30_000 });
   });
 
   it('lets an explicit maxTokens override the reasoning-tier default', async () => {

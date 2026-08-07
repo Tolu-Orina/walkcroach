@@ -1,7 +1,8 @@
 import { errorFromResponse, TransientError, WalkCroachError } from './errors.js';
 import type { WalkCroachConfig } from './types.js';
+import { PRODUCTION_API_ORIGIN } from './defaults.js';
 
-const DEFAULT_BASE_URL = 'https://api.walkcroach.dev';
+const DEFAULT_BASE_URL = PRODUCTION_API_ORIGIN;
 const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_ATTEMPTS = 3;
 
