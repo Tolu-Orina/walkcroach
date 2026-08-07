@@ -1396,10 +1396,7 @@ Resources:
                     - chrome/**
                     - ide/**
                     - cli/**
-                    - packages/agent-engine/**
-                    - packages/sdk/**
-                    - packages/templates/**
-                    - packages/memory-contracts/**
+                    - packages/**
                     - ci-cd/infra-web-pipeline.yaml
       ArtifactStore:
         Type: S3
@@ -1686,10 +1683,7 @@ Resources:
                     - chrome/**
                     - ide/**
                     - cli/**
-                    - packages/agent-engine/**
-                    - packages/sdk/**
-                    - packages/templates/**
-                    - packages/memory-contracts/**
+                    - packages/**
                     - ci-cd/infra-web-pipeline.yaml
       ArtifactStore:
         Type: S3

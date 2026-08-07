@@ -93,7 +93,7 @@ aws cloudformation deploy \
 | Pipeline | Paths |
 |----------|-------|
 | Backend | `infra-backend/**`, `ci-cd/infra-backend-pipeline.yaml` |
-| Web | `infra-web/**`, `web/**`, `chrome/**`, `ide/**`, `cli/**`, `packages/agent-engine/**`, `packages/sdk/**`, `packages/templates/**`, `packages/memory-contracts/**`, `ci-cd/infra-web-pipeline.yaml` |
+| Web | `infra-web/**`, `web/**`, `chrome/**`, `ide/**`, `cli/**`, `packages/**`, `ci-cd/infra-web-pipeline.yaml` (≤8 CodePipeline file-path includes; package globs collapsed) |
 | Chrome extension | Unit/typecheck/build in the web pipeline Test stage (`web/buildspec-test.yml`). Dedicated store zip gates live in `chrome/buildspec.yml` (not wired as a CodeBuild project yet — run locally or as a future release job with `WALKCROACH_API_BASE` + `WALKCROACH_PRIVACY_URL`). |
 | IDE extension | Unit/typecheck/build/`check:bundle` in `web/buildspec-test.yml`. VSIX gates live in `ide/buildspec.yml` (not wired yet — `cd ide && npm run package:vsix`). |
 | CLI | Unit/typecheck in `web/buildspec-test.yml`. Packaged-artifact + `npm pack` gates live in `cli/buildspec.yml` (not wired yet). npm publish is `.github/workflows/publish-cli.yml` (OIDC). |
