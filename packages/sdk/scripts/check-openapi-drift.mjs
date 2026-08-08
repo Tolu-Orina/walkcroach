@@ -86,6 +86,15 @@ if (!retentionMatch || !openapiRetention) {
   }
 }
 
+if (!openapi.includes('/content/ensure-project:')) {
+  console.error('OpenAPI missing /content/ensure-project');
+  failed = true;
+}
+if (!openapi.includes('PublishContentRequest')) {
+  console.error('OpenAPI missing PublishContentRequest schema');
+  failed = true;
+}
+
 if (failed) {
   console.error('OpenAPI ↔ sdk-contract drift check FAILED');
   process.exit(1);

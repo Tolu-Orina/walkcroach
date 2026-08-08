@@ -698,6 +698,24 @@ export async function openBillingPortal(): Promise<{ url: string }> {
   return parseJson(res);
 }
 
+/** Apply Checkout session entitlements immediately after Stripe redirect. */
+export async function confirmBillingCheckout(sessionId: string): Promise<{
+  ok: boolean;
+  plan: PlanId;
+  planName: string;
+  monthlyCredits: number;
+}> {
+  const res = await fetch(`${API_URL}/billing/confirm`, {
+    method: 'POST',
+    headers: {
+      ...authHeaders(),
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ sessionId }),
+  });
+  return parseJson(res);
+}
+
 export type AccountEraseSummary = {
   projects: number;
   apiKeysActive: number;

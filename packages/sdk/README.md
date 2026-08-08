@@ -28,6 +28,19 @@ const hits = await wc.memory.recall({
 });
 ```
 
+Inject into a system prompt with a budget (how many hits / characters to keep):
+
+```ts
+import { formatHitsForPrompt, clampRecallLimit } from '@walkcroach/sdk';
+
+const hits = await wc.memory.recall({
+  projectId,
+  query: '…',
+  limit: clampRecallLimit(requested),
+});
+const memoryBlock = formatHitsForPrompt(hits, { budget: { maxHits: 5, maxChars: 2000 } });
+```
+
 Get a key from the WalkCroach web app, or mint one with a signed-in session:
 
 ```ts
@@ -112,6 +125,10 @@ Not ergonomics — correctness. The C-SPANN vector index is prefixed on `(projec
 ### Relevance, not distance
 
 `recall()` returns `relevance` in `0..1`, not the raw cosine distance. The distance is an index implementation detail — the opclass has already had to change once — and publishing it would make the next such change a breaking API change. Treat `relevance` as ordinal, not as a calibrated probability.
+
+### Writes are synchronous on purpose
+
+`memory.remember` awaits the durable write (and supersede) before returning. There is no fire-and-forget server flag: async memory on the hot path is how contradictory preferences leak. If p95 hurts UX, buffer client-side and flush through an outbox you own — do not drop the await without one.
 
 ## Errors
 

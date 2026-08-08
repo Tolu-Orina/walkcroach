@@ -1,17 +1,20 @@
 import { ContentApi } from './content.js';
 import { createTransport, type Transport } from './http.js';
 import { MemoryApi } from './memory.js';
+import { ProjectsApi } from './projects.js';
 import type { ApiKeySummary, WalkCroachConfig } from './types.js';
 
 export class WalkCroach {
   readonly memory: MemoryApi;
   readonly content: ContentApi;
+  readonly projects: ProjectsApi;
   private readonly transport: Transport;
 
   constructor(config: WalkCroachConfig) {
     this.transport = createTransport(config);
     this.memory = new MemoryApi(this.transport);
     this.content = new ContentApi(this.transport);
+    this.projects = new ProjectsApi(this.transport);
   }
 
   /**
@@ -68,8 +71,17 @@ export {
   PRODUCTION_API_HOST,
   PRODUCTION_API_ORIGIN,
   PRODUCTION_API_BASE_URL,
+  SDK_PACKAGE_VERSION,
 } from './defaults.js';
 export { MemoryApi, type MemoryReader, type RecallOptions } from './memory.js';
+export {
+  RECALL_LIMIT_DEFAULT,
+  RECALL_LIMIT_MAX,
+  clampRecallLimit,
+  selectHitsForPrompt,
+  formatHitsForPrompt,
+  type PromptHitBudget,
+} from './retrieval.js';
 export {
   ContentApi,
   RunHandle,
@@ -77,6 +89,7 @@ export {
   RunInterruptedError,
   type PublishOptions,
 } from './content.js';
+export { ProjectsApi, type EnsuredProject } from './projects.js';
 export {
   createAskUserInterrupt,
   HARNESS_PAUSE_TO_INTERRUPT,

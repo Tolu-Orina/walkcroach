@@ -77,6 +77,11 @@ export type PublishResult = {
   ok: boolean;
   pullRequest?: PullRequestResult;
   filesWritten: string[];
+  /**
+   * Generated file bodies. Always populated on success so dry-run / no-target
+   * callers can apply the result locally without a pull request.
+   */
+  files?: Array<{ path: string; content: string }>;
   /** Injection heuristics that matched the source document. */
   signals: InjectionSignal[];
   /** Red flags in what the agent generated. */
@@ -104,9 +109,10 @@ export function deriveTitle(source: PublishSource): string {
 export async function publishContent(params: {
   db: DbClient;
   projectId: string;
-  /** GitHub App installation for the target repo. */
-  installationId: number;
-  repo: string;
+  /** GitHub App installation for the target repo. Required unless noTarget. */
+  installationId?: number;
+  /** `owner/name`. Required unless noTarget. */
+  repo?: string;
   /** Where posts live; inferred from the repo when omitted. */
   targetDir?: string;
   source: PublishSource;
@@ -115,10 +121,16 @@ export async function publishContent(params: {
   runAgent: AgentRunner;
   /** Skip the PR and return the files instead. */
   dryRun?: boolean;
+  /**
+   * Dry-run without a GitHub target — memory + skill defaults only.
+   * Used so an API key alone can exercise content.publish.
+   */
+  noTarget?: boolean;
   /** Resume answers from a prior interrupt (ask_user question → answer). */
   answers?: Record<string, string>;
 }): Promise<PublishResult> {
   const title = deriveTitle(params.source);
+  const noTarget = Boolean(params.noTarget || (params.dryRun && !params.repo));
 
   // ── 1. Fence the document before it is anywhere near the instructions ────
   const fenced = fenceUntrusted({
@@ -129,13 +141,29 @@ export async function publishContent(params: {
       'meaning; you are formatting and laying out, not rewriting.',
   });
 
-  // ── 2. Read the target repository ───────────────────────────────────────
-  const token = await getInstallationToken(params.installationId);
-  const repoContext = await readRepoContext({
-    token,
-    repo: params.repo,
-    pathHints: params.targetDir ? [params.targetDir] : undefined,
-  });
+  // ── 2. Read the target repository (skipped for no-target dry-run) ────────
+  let repoFiles: RepoFile[] = [];
+  if (!noTarget) {
+    if (params.installationId == null || !params.repo) {
+      return {
+        ok: false,
+        filesWritten: [],
+        signals: fenced.signals,
+        flags: [],
+        refusals: [],
+        learned: [],
+        reason: 'github_required',
+        error: 'repo and installationId are required unless dryRun with no target',
+      };
+    }
+    const token = await getInstallationToken(params.installationId);
+    const repoContext = await readRepoContext({
+      token,
+      repo: params.repo,
+      pathHints: params.targetDir ? [params.targetDir] : undefined,
+    });
+    repoFiles = repoContext.files;
+  }
 
   // ── 3. Discover house style ─────────────────────────────────────────────
   const memoryEntries = await listProjectMemoryEntries({
@@ -148,12 +176,12 @@ export async function publishContent(params: {
   const targetDir =
     params.targetDir ??
     // The repo's own answer beats ours; only guess when it has not said.
-    inferTargetDir(repoContext.files) ??
+    inferTargetDir(repoFiles) ??
     'src/content/blog';
 
   const style = discoverHouseStyle({
     memoryRules,
-    repoFiles: repoContext.files,
+    repoFiles,
     targetPath: `${targetDir}/placeholder.tsx`,
   });
 
@@ -161,11 +189,13 @@ export async function publishContent(params: {
     style.agentsInstructions,
     renderHouseStyle(style),
     `\n## Where this goes\nWrite the new page under \`${targetDir}\`.`,
-    `\n## Existing files (for conventions — do not modify them)\n` +
-      repoContext.files
-        .slice(0, 25)
-        .map((f) => `--- ${f.path} ---\n${f.content.slice(0, 4_000)}`)
-        .join('\n\n'),
+    repoFiles.length > 0
+      ? `\n## Existing files (for conventions — do not modify them)\n` +
+        repoFiles
+          .slice(0, 25)
+          .map((f) => `--- ${f.path} ---\n${f.content.slice(0, 4_000)}`)
+          .join('\n\n')
+      : `\n## Existing files\nNo repository was supplied (dry-run / no-target). Use WalkCroach design defaults and any project memory conventions.`,
     `\n## Source document\n${fenced.text}`,
   ]
     .filter(Boolean)
@@ -173,7 +203,7 @@ export async function publishContent(params: {
 
   // ── 4. Run ──────────────────────────────────────────────────────────────
   const seed: Record<string, string> = {};
-  for (const f of repoContext.files) seed[`${WORKSPACE}/${f.path}`] = f.content;
+  for (const f of repoFiles) seed[`${WORKSPACE}/${f.path}`] = f.content;
 
   const run = await params.runAgent({
     files: seed,
@@ -181,7 +211,9 @@ export async function publishContent(params: {
     prompt: [
       `Create a blog post page titled "${title}" from the source document below.`,
       params.instructions ?? '',
-      'Match the existing repository conventions exactly. Create only new files.',
+      noTarget
+        ? 'No target repository was provided. Create only new files under the content path using sensible React/TSX blog conventions.'
+        : 'Match the existing repository conventions exactly. Create only new files.',
     ]
       .filter(Boolean)
       .join('\n'),
@@ -242,7 +274,8 @@ export async function publishContent(params: {
 
   // ── 6. Pull request ─────────────────────────────────────────────────────
   let pullRequest: PullRequestResult | undefined;
-  if (!params.dryRun) {
+  if (!params.dryRun && !noTarget && params.installationId != null && params.repo) {
+    const token = await getInstallationToken(params.installationId);
     pullRequest = await openContentPullRequest({
       token,
       repo: params.repo,
@@ -282,6 +315,7 @@ export async function publishContent(params: {
     ok: true,
     ...(pullRequest ? { pullRequest } : {}),
     filesWritten: run.filesWritten,
+    files: produced.map((f) => ({ path: f.path, content: f.content })),
     signals: fenced.signals,
     flags,
     refusals: run.refusals,

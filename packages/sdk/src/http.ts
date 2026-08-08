@@ -1,6 +1,6 @@
 import { errorFromResponse, TransientError, WalkCroachError } from './errors.js';
 import type { WalkCroachConfig } from './types.js';
-import { PRODUCTION_API_ORIGIN } from './defaults.js';
+import { PRODUCTION_API_ORIGIN, SDK_PACKAGE_VERSION } from './defaults.js';
 
 const DEFAULT_BASE_URL = PRODUCTION_API_ORIGIN;
 const DEFAULT_TIMEOUT_MS = 15_000;
@@ -77,7 +77,7 @@ export function createTransport(config: WalkCroachConfig): Transport {
           authorization: `Bearer ${apiKey ?? accessToken}`,
           'content-type': 'application/json',
           accept: 'application/json',
-          'user-agent': `@walkcroach/sdk/0.1.0`,
+          'user-agent': `@walkcroach/sdk/${SDK_PACKAGE_VERSION}`,
         },
         body: body === undefined ? undefined : JSON.stringify(body),
         signal: controller.signal,

@@ -97,8 +97,10 @@ Subscribe at least to: `checkout.session.completed`, `customer.subscription.crea
 
 Checkout success/cancel URLs use `WEB_APP_URL` (Lambda env / TF var), not the secret JSON:
 
-- Success: `{WEB_APP_URL}/app/settings?billing=success`
+- Success: `{WEB_APP_URL}/app/settings?billing=success&session_id={CHECKOUT_SESSION_ID}`
 - Cancel: `{WEB_APP_URL}/app/settings?billing=cancel`
+
+On success, the SPA calls `POST /billing/confirm` with the session id so the plan updates immediately (webhook remains the async source of truth).
 
 ### Example fragment (merge into existing JSON)
 

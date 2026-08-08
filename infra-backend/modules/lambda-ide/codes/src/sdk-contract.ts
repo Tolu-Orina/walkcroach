@@ -30,6 +30,7 @@ export const SDK_CAPABILITIES = [
   'content:publish',
   'content:run',
   'runs:read',
+  'projects:ensure',
 ] as const;
 
 export type SdkCapability = (typeof SDK_CAPABILITIES)[number];

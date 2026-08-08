@@ -23,7 +23,7 @@ import { resolveDispatcher } from '../dispatch.js';
 import { jsonResponse } from '../http.js';
 import { isUuid, metricLog } from '../util.js';
 import { runWorker } from '../worker.js';
-import { requireScope } from './sdk-memory.js';
+import { requireAnyScope, requireScope } from './sdk-memory.js';
 
 const dispatchRun = resolveDispatcher(runWorker);
 
@@ -55,7 +55,8 @@ export async function handleGetRun(
   runId: string,
   query: Record<string, string | undefined>,
 ): Promise<ReturnType<typeof jsonResponse>> {
-  const denied = requireScope(auth, 'memory:read');
+  // content:run keys must be able to poll their own publishes without memory:read.
+  const denied = requireAnyScope(auth, ['memory:read', 'content:run']);
   if (denied) return jsonResponse(denied.status, { error: denied.error });
 
   if (!isUuid(runId)) return jsonResponse(400, { error: 'invalid run id' });
@@ -175,7 +176,8 @@ export async function handleCancelRun(
   auth: AuthContext,
   runId: string,
 ): Promise<ReturnType<typeof jsonResponse>> {
-  const denied = requireScope(auth, 'memory:write');
+  // Same matrix as poll: content:run owns the run lifecycle it started.
+  const denied = requireAnyScope(auth, ['memory:write', 'content:run']);
   if (denied) return jsonResponse(denied.status, { error: denied.error });
 
   if (!isUuid(runId)) return jsonResponse(400, { error: 'invalid run id' });

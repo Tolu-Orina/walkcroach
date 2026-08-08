@@ -14,11 +14,15 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const REPO_RE = /^[\w.-]+\/[\w.-]+$/;
 
 export type PublishOptions = {
-  projectId: string;
+  /**
+   * Optional. When omitted, the API ensures the reserved default SDK project
+   * (`__walkcroach_sdk__`) for this credential.
+   */
+  projectId?: string;
   source: PublishSource;
-  target: {
-    /** `owner/name`. Must have the WalkCroach GitHub App installed. */
-    repo: string;
+  target?: {
+    /** `owner/name`. Required for live publish; optional when `dryRun` is true. */
+    repo?: string;
     /** Where posts live. Inferred from the repository when omitted. */
     path?: string;
   };
@@ -29,7 +33,10 @@ export type PublishOptions = {
   writeScope: WriteScope;
   /** Extra direction, e.g. "engineering blog, technical audience". */
   instructions?: string;
-  /** Produce the files and skip the pull request. */
+  /**
+   * Produce the files and skip the pull request. When true, `target.repo` may
+   * be omitted (no-target dry-run — API key only).
+   */
   dryRun?: boolean;
   /**
    * Makes submission safe to retry. A repeat with the same key returns the
@@ -51,15 +58,26 @@ export class ContentApi {
    * call {@link RunHandle.resume} then `wait` again.
    */
   async publish(opts: PublishOptions): Promise<RunHandle> {
-    if (!opts.projectId || !UUID_RE.test(opts.projectId)) {
+    const dryRun = Boolean(opts.dryRun);
+    const repo = opts.target?.repo?.trim() ?? '';
+
+    if (opts.projectId != null && opts.projectId !== '' && !UUID_RE.test(opts.projectId)) {
       throw new ValidationError('projectId must be a uuid', 400, null, {
         field: 'projectId',
       });
     }
-    if (!REPO_RE.test(opts.target?.repo ?? '')) {
+    if (repo && !REPO_RE.test(repo)) {
       throw new ValidationError('target.repo must be in owner/name form', 400, null, {
         field: 'target.repo',
       });
+    }
+    if (!dryRun && !REPO_RE.test(repo)) {
+      throw new ValidationError(
+        'target.repo must be in owner/name form (omit only when dryRun is true)',
+        400,
+        null,
+        { field: 'target.repo' },
+      );
     }
     if (!opts.source?.content) {
       throw new ValidationError('source.content is required', 400, null, {
@@ -89,12 +107,15 @@ export class ContentApi {
       createdAt: string;
     }>('POST', '/v1/content/publish', {
       body: {
-        projectId: opts.projectId,
+        ...(opts.projectId ? { projectId: opts.projectId } : {}),
         source: opts.source,
-        target: opts.target,
+        target: {
+          ...(repo ? { repo } : {}),
+          ...(opts.target?.path ? { path: opts.target.path } : {}),
+        },
         writeScope: opts.writeScope,
         instructions: opts.instructions,
-        dryRun: opts.dryRun,
+        dryRun,
         idempotencyKey: opts.idempotencyKey,
       },
     });

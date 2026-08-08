@@ -40,6 +40,7 @@ import {
   handleSdkRecall,
   handleSdkRemember,
 } from './sdk-memory.js';
+import { handleEnsureProject } from './sdk-projects.js';
 
 /** Strip any number of leading `/v1` segments, leaving the SDK-relative path. */
 export function normalizeSdkPath(path: string): string {
@@ -119,8 +120,18 @@ export async function handleSdkRest(req: HttpRequest) {
     return handleSdkAuditList(auth, req.queryStringParameters);
   }
   // ── content ─────────────────────────────────────────────────────────────
+  if (method === 'POST' && /^\/content\/ensure-project\/?$/.test(path)) {
+    return handleEnsureProject(auth, req.body);
+  }
   if (method === 'POST' && /^\/content\/publish\/?$/.test(path)) {
     return handleContentPublish(auth, req.body);
+  }
+
+  // Legacy alias — never relied on for APIGW (root `/projects` is the agent
+  // Cognito route). Kept so local ide servers that mount the full SDK router
+  // still accept the older path during the cutover.
+  if (method === 'POST' && /^\/projects\/ensure\/?$/.test(path)) {
+    return handleEnsureProject(auth, req.body);
   }
 
   // ── runs ────────────────────────────────────────────────────────────────

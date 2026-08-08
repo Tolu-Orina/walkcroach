@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   confirmAccountErase,
+  confirmBillingCheckout,
   getBillingStatus,
   getGithubStatus,
   getUsage,
@@ -29,22 +30,46 @@ function planLabel(plan: string | undefined): string {
   return 'Free';
 }
 
+async function refreshBillingState(): Promise<{
+  usage: UsageSummary | null;
+  billing: BillingStatus | null;
+  usageError: string | null;
+}> {
+  const [usageResult, billingResult] = await Promise.allSettled([
+    getUsage(),
+    getBillingStatus(),
+  ]);
+  return {
+    usage: usageResult.status === 'fulfilled' ? usageResult.value : null,
+    billing: billingResult.status === 'fulfilled' ? billingResult.value : null,
+    usageError:
+      usageResult.status === 'rejected'
+        ? usageResult.reason instanceof Error
+          ? usageResult.reason.message
+          : String(usageResult.reason)
+        : null,
+  };
+}
+
 /**
  * Profile / Settings — Phase F (PF-20 / PF-21 / PF-22).
  * Avatar in the ecosystem rail opens this page.
  */
 export function SettingsPage() {
   const { user, signOut } = useAuth();
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [usage, setUsage] = useState<UsageSummary | null>(null);
   const [usageError, setUsageError] = useState<string | null>(null);
   const [billingBusy, setBillingBusy] = useState<string | null>(null);
   const [billingError, setBillingError] = useState<string | null>(null);
   const [billing, setBilling] = useState<BillingStatus | null>(null);
+  const [billingSyncing, setBillingSyncing] = useState(false);
   const [githubRows, setGithubRows] = useState<GhRow[]>([]);
   const [githubLoading, setGithubLoading] = useState(true);
   const [githubError, setGithubError] = useState<string | null>(null);
   const billingFlash = searchParams.get('billing');
+  const checkoutSessionId = searchParams.get('session_id');
 
   const [eraseOpen, setEraseOpen] = useState(false);
   const [eraseProposal, setEraseProposal] =
@@ -55,19 +80,57 @@ export function SettingsPage() {
   const [eraseError, setEraseError] = useState<string | null>(null);
 
   useEffect(() => {
-    void getUsage()
-      .then((u) => {
-        setUsage(u);
-        setUsageError(null);
-      })
-      .catch((err) => {
-        setUsage(null);
-        setUsageError(err instanceof Error ? err.message : String(err));
-      });
-    void getBillingStatus()
-      .then((s) => setBilling(s))
-      .catch(() => setBilling(null));
-  }, [billingFlash]);
+    let cancelled = false;
+
+    const apply = (next: Awaited<ReturnType<typeof refreshBillingState>>) => {
+      if (cancelled) return;
+      setUsage(next.usage);
+      setBilling(next.billing);
+      setUsageError(next.usageError);
+    };
+
+    void (async () => {
+      // After Stripe Checkout, confirm the session so entitlements update
+      // before the webhook arrives.
+      if (billingFlash === 'success' && checkoutSessionId) {
+        setBillingSyncing(true);
+        try {
+          await confirmBillingCheckout(checkoutSessionId);
+        } catch {
+          /* fall through to poll — webhook may still land */
+        }
+      }
+
+      let next = await refreshBillingState();
+      apply(next);
+
+      if (billingFlash === 'success' || billingFlash === 'portal') {
+        setBillingSyncing(true);
+        for (let i = 0; i < 6; i++) {
+          if (billingFlash === 'success') {
+            const plan = next.billing?.plan ?? next.usage?.plan;
+            if (plan && plan !== 'free') break;
+          }
+          await new Promise((r) => setTimeout(r, 800));
+          if (cancelled) return;
+          next = await refreshBillingState();
+          apply(next);
+          if (billingFlash === 'portal') break; // one extra refresh after portal is enough
+        }
+        if (!cancelled) {
+          setBillingSyncing(false);
+          // Drop session_id from the URL once synced (keep ?billing=success flash).
+          if (billingFlash === 'success' && checkoutSessionId) {
+            navigate('/app/settings?billing=success', { replace: true });
+          }
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [billingFlash, checkoutSessionId, navigate]);
 
   useEffect(() => {
     let cancelled = false;
@@ -174,7 +237,14 @@ export function SettingsPage() {
         </h2>
         {billingFlash === 'success' && (
           <p className="rounded-[var(--radius-control)] border border-signal/40 bg-signal/10 px-3 py-2 text-sm text-signal">
-            Subscription updated. Paid features unlock within a minute.
+            {billingSyncing
+              ? 'Subscription updated — syncing your plan…'
+              : `You're on ${planLabel(billing?.plan ?? usage?.plan)}. Paid features are unlocked.`}
+          </p>
+        )}
+        {billingFlash === 'portal' && (
+          <p className="rounded-[var(--radius-control)] border border-signal/40 bg-signal/10 px-3 py-2 text-sm text-signal">
+            Billing portal closed — refreshing your plan.
           </p>
         )}
         {billingFlash === 'cancel' && (
@@ -237,19 +307,38 @@ export function SettingsPage() {
           <p className="text-sm text-ember">{billingError}</p>
         )}
 
+        {billing && !billing.checkoutEnabled && (
+          <p className="rounded-[var(--radius-control)] border border-ember/35 bg-ember/10 px-3 py-2 text-[12px] leading-relaxed text-ember">
+            Checkout is not configured in this environment. Add Stripe{' '}
+            <code className="font-mono text-paper">stripe_secret_key</code>,{' '}
+            <code className="font-mono text-paper">stripe_price_id_starter</code>, and{' '}
+            <code className="font-mono text-paper">stripe_price_id_pro</code> to
+            the runtime secret, then restart the agent Lambda.
+          </p>
+        )}
+
         {billing?.catalog && (
           <div className="grid gap-3 sm:grid-cols-3">
             {billing.catalog.map((tier) => {
-              const current = (billing.plan === tier.id) || (billing.plan === 'pro' && tier.id === 'pro');
+              const current = billing.plan === tier.id;
               const canBuy =
                 tier.paid &&
                 tier.checkoutAvailable &&
                 billing.checkoutEnabled &&
                 !current;
+              const blockedReason = !tier.paid
+                ? null
+                : current
+                  ? null
+                  : !billing.checkoutEnabled
+                    ? 'Billing unavailable'
+                    : !tier.checkoutAvailable
+                      ? 'Price not configured'
+                      : null;
               return (
                 <div
                   key={tier.id}
-                  className={`rounded-[var(--radius-control)] border p-3 ${
+                  className={`flex h-full flex-col rounded-[var(--radius-control)] border p-3 ${
                     current
                       ? 'border-signal/40 bg-signal/5'
                       : 'border-line bg-ink/30'
@@ -267,52 +356,54 @@ export function SettingsPage() {
                       <li key={h}>· {h}</li>
                     ))}
                   </ul>
-                  {current ? (
-                    <p className="mt-3 text-[11px] font-semibold uppercase tracking-wider text-signal">
-                      Current
-                    </p>
-                  ) : canBuy ? (
-                    <button
-                      type="button"
-                      disabled={billingBusy !== null}
-                      className="interactive mt-3 w-full rounded-[var(--radius-control)] bg-signal px-2.5 py-1.5 text-xs font-semibold text-ink disabled:opacity-50"
-                      onClick={() => {
-                        setBillingBusy(tier.id);
-                        setBillingError(null);
-                        void startBillingCheckout(tier.id as 'starter' | 'pro')
-                          .then((result) => {
-                            if (result.url) {
-                              window.location.assign(result.url);
-                              return;
-                            }
-                            if (result.changed) {
-                              window.location.assign(
-                                '/app/settings?billing=success',
+                  <div className="mt-auto pt-3">
+                    {current ? (
+                      <p className="text-[11px] font-semibold uppercase tracking-wider text-signal">
+                        Current
+                      </p>
+                    ) : canBuy ? (
+                      <button
+                        type="button"
+                        disabled={billingBusy !== null}
+                        className="interactive w-full rounded-[var(--radius-control)] bg-signal px-2.5 py-1.5 text-xs font-semibold text-ink disabled:opacity-50"
+                        onClick={() => {
+                          setBillingBusy(tier.id);
+                          setBillingError(null);
+                          void startBillingCheckout(tier.id as 'starter' | 'pro')
+                            .then((result) => {
+                              if (result.url) {
+                                window.location.assign(result.url);
+                                return;
+                              }
+                              if (result.changed) {
+                                window.location.assign(
+                                  '/app/settings?billing=success',
+                                );
+                                return;
+                              }
+                              setBillingError('Checkout did not return a URL.');
+                              setBillingBusy(null);
+                            })
+                            .catch((err) => {
+                              setBillingError(
+                                err instanceof Error
+                                  ? err.message
+                                  : String(err),
                               );
-                              return;
-                            }
-                            setBillingError('Checkout did not return a URL.');
-                            setBillingBusy(null);
-                          })
-                          .catch((err) => {
-                            setBillingError(
-                              err instanceof Error ? err.message : String(err),
-                            );
-                            setBillingBusy(null);
-                          });
-                      }}
-                    >
-                      {billingBusy === tier.id
-                        ? 'Opening…'
-                        : `Choose ${tier.name}`}
-                    </button>
-                  ) : (
-                    <p className="mt-3 text-[11px] text-mist/70">
-                      {tier.paid && !tier.checkoutAvailable
-                        ? 'Price not configured'
-                        : '—'}
-                    </p>
-                  )}
+                              setBillingBusy(null);
+                            });
+                        }}
+                      >
+                        {billingBusy === tier.id
+                          ? 'Opening…'
+                          : `Choose ${tier.name}`}
+                      </button>
+                    ) : blockedReason ? (
+                      <p className="text-[11px] text-ember/90">{blockedReason}</p>
+                    ) : (
+                      <p className="text-[11px] text-mist/70">—</p>
+                    )}
+                  </div>
                 </div>
               );
             })}

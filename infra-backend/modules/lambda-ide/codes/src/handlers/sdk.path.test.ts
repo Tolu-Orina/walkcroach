@@ -24,6 +24,7 @@ describe('isSdkPath', () => {
     ['/sdk-health', true],
     ['/v1/sdk-health', true],
     ['/v1/content/publish', true],
+    ['/v1/content/ensure-project', true],
     ['/v1/runs/abc', true],
     ['/ide/v1/health', false],
     ['/ide/v1/memory/mirror', false],
@@ -49,5 +50,6 @@ describe('sdk contract constants', () => {
     expect(SDK_CAPABILITIES).toContain('memory:asOf');
     expect(SDK_CAPABILITIES).toContain('memory:export');
     expect(SDK_CAPABILITIES).toContain('keys:manage');
+    expect(SDK_CAPABILITIES).toContain('projects:ensure');
   });
 });

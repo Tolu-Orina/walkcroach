@@ -61,13 +61,14 @@ export async function runWorker(runId: string): Promise<void> {
     }
 
     const req = run.request as {
-      repo: string;
+      repo?: string;
       targetDir?: string;
       source: PublishSource;
       instructions?: string;
       writeScope: WriteScope;
-      installationId: number;
+      installationId?: number;
       dryRun?: boolean;
+      noTarget?: boolean;
       resume?: { interruptId: string; value: unknown; resumedAt?: string };
     };
 
@@ -82,6 +83,7 @@ export async function runWorker(runId: string): Promise<void> {
       source: req.source,
       instructions: req.instructions,
       dryRun: req.dryRun,
+      noTarget: req.noTarget,
       answers,
       runAgent: createAgentRunner({
         writeScope: req.writeScope,

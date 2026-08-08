@@ -31,6 +31,10 @@ Ask Claude Code *"what did we decide about the ORM?"* and it recalls a decision 
 
 `recall_project_memory` and `remember` keep the names the internal agent harness uses, so a prompt written against the first-party surfaces ports here without rewording. Every tool declares an `outputSchema`, so hosts get `structuredContent` rather than parsing prose.
 
+### Scope of this package
+
+**Memory only.** `@walkcroach/sdk-mcp` does **not** expose `content.publish`, runs, or erase/export/import. Those stay on `@walkcroach/sdk` (HTTP). If a host needs publish, call the SDK from your own tool — do not stretch MCP into the content pipeline.
+
 ## Protocol conformance
 
 The 2026-07-28 revision is the largest break since authorization was added. What this server implements:

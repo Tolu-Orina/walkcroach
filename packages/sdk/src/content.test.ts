@@ -54,15 +54,26 @@ describe('content.publish validation', () => {
     expect(calls).toHaveLength(0);
   });
 
-  it.each([
-    ['not-a-uuid', 'projectId'],
-    ['', 'projectId'],
-  ])('rejects projectId %s before calling the API', async (projectId) => {
-    const { wc, calls } = client();
-    await expect(wc.content.publish({ ...valid, projectId })).rejects.toBeInstanceOf(
-      ValidationError,
-    );
-    expect(calls).toHaveLength(0);
+  it.each([['not-a-uuid', 'projectId']])(
+    'rejects projectId %s before calling the API',
+    async (projectId) => {
+      const { wc, calls } = client();
+      await expect(wc.content.publish({ ...valid, projectId })).rejects.toBeInstanceOf(
+        ValidationError,
+      );
+      expect(calls).toHaveLength(0);
+    },
+  );
+
+  it('allows omitting projectId (API ensures the default)', async () => {
+    const accepted = { runId: 'run-ensured', status: 'queued', createdAt: '2026-08-05T00:00:00Z' };
+    const { wc, calls } = client(accepted);
+    await wc.content.publish({
+      source: valid.source,
+      target: valid.target,
+      writeScope: valid.writeScope,
+    });
+    expect(calls[0]!.body.projectId).toBeUndefined();
   });
 
   it.each(['website', 'https://github.com/acme/site', 'acme/site/extra'])(
@@ -75,6 +86,28 @@ describe('content.publish validation', () => {
       expect(calls).toHaveLength(0);
     },
   );
+
+  it('requires target.repo for live publish', async () => {
+    const { wc, calls } = client();
+    await expect(
+      wc.content.publish({ ...valid, target: undefined }),
+    ).rejects.toThrow(/dryRun/);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('allows omitting target.repo when dryRun is true', async () => {
+    const accepted = { runId: 'run-dry', status: 'queued', createdAt: '2026-08-05T00:00:00Z' };
+    const { wc, calls } = client(accepted);
+    const run = await wc.content.publish({
+      source: valid.source,
+      writeScope: valid.writeScope,
+      dryRun: true,
+    });
+    expect(run.runId).toBe('run-dry');
+    expect(calls[0]!.body).toMatchObject({ dryRun: true });
+    expect(calls[0]!.body.projectId).toBeUndefined();
+    expect(calls[0]!.body.target?.repo).toBeUndefined();
+  });
 
   it('requires source content', async () => {
     const { wc } = client();

@@ -145,7 +145,7 @@ function TierCard({
 }) {
   return (
     <div
-      className={`rounded-[var(--radius-control)] border p-3 ${
+      className={`flex h-full flex-col rounded-[var(--radius-control)] border p-3 ${
         recommended ? 'border-signal/50 bg-signal/5' : 'border-line bg-ink/30'
       }`}
     >
@@ -159,18 +159,20 @@ function TierCard({
           <li key={h}>· {h}</li>
         ))}
       </ul>
-      <button
-        type="button"
-        disabled={disabled || !tier.checkoutAvailable}
-        onClick={onSelect}
-        className="interactive mt-3 w-full rounded-[var(--radius-control)] bg-signal px-3 py-2 text-xs font-semibold text-ink disabled:opacity-50"
-      >
-        {busy
-          ? 'Opening…'
-          : !tier.checkoutAvailable
-            ? 'Unavailable'
-            : `Choose ${tier.name}`}
-      </button>
+      <div className="mt-auto pt-3">
+        <button
+          type="button"
+          disabled={disabled || !tier.checkoutAvailable}
+          onClick={onSelect}
+          className="interactive w-full rounded-[var(--radius-control)] bg-signal px-3 py-2 text-xs font-semibold text-ink disabled:opacity-50"
+        >
+          {busy
+            ? 'Opening…'
+            : !tier.checkoutAvailable
+              ? 'Unavailable'
+              : `Choose ${tier.name}`}
+        </button>
+      </div>
     </div>
   );
 }

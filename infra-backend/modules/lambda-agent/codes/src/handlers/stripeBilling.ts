@@ -176,7 +176,7 @@ export async function handleBillingCheckout(
     mode: 'subscription',
     customer: customerId,
     line_items: [{ price: priceId, quantity: 1 }],
-    success_url: `${webAppUrl()}/app/settings?billing=success`,
+    success_url: `${webAppUrl()}/app/settings?billing=success&session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${webAppUrl()}/app/settings?billing=cancel`,
     client_reference_id: auth.ownerId,
     metadata: { owner_id: auth.ownerId, plan_id: planId },
@@ -210,9 +210,85 @@ export async function handleBillingPortal(
   }
   const session = await stripe.billingPortal.sessions.create({
     customer: row.stripeCustomerId,
-    return_url: `${webAppUrl()}/app/settings`,
+    return_url: `${webAppUrl()}/app/settings?billing=portal`,
   });
   return jsonResponse(200, { url: session.url });
+}
+
+/**
+ * POST /billing/confirm — body `{ sessionId }` from Checkout success redirect.
+ * Applies the plan immediately so Settings does not wait on the webhook.
+ */
+export async function handleBillingConfirm(
+  db: DbClient,
+  auth: AuthContext,
+  rawBody?: string,
+): Promise<RestResult> {
+  const stripe = stripeClient();
+  if (!stripe) {
+    return jsonResponse(503, { error: 'billing_not_configured' });
+  }
+
+  let sessionId = '';
+  try {
+    const body = JSON.parse(rawBody ?? '{}') as { sessionId?: string };
+    sessionId = (body.sessionId ?? '').trim();
+  } catch {
+    return jsonResponse(400, { error: 'invalid_json' });
+  }
+  if (!sessionId.startsWith('cs_')) {
+    return jsonResponse(400, {
+      error: 'session_id_required',
+      message: 'Pass the Checkout session_id from the success redirect.',
+    });
+  }
+
+  const session = await stripe.checkout.sessions.retrieve(sessionId, {
+    expand: ['subscription'],
+  });
+  if (session.mode !== 'subscription') {
+    return jsonResponse(400, { error: 'not_a_subscription_checkout' });
+  }
+
+  const ownerFromSession =
+    ownerIdFromStripeObject(session) ??
+    (typeof session.client_reference_id === 'string'
+      ? session.client_reference_id.trim()
+      : null);
+  if (!ownerFromSession || ownerFromSession !== auth.ownerId) {
+    return jsonResponse(403, { error: 'session_owner_mismatch' });
+  }
+
+  if (session.payment_status === 'unpaid' && session.status !== 'complete') {
+    return jsonResponse(409, {
+      error: 'checkout_incomplete',
+      message: 'Checkout is not complete yet. Try again in a moment.',
+    });
+  }
+
+  const customerId =
+    typeof session.customer === 'string'
+      ? session.customer
+      : session.customer?.id ?? null;
+
+  let plan: PlanId = normalizePlan(session.metadata?.plan_id);
+  if (plan === 'free' && session.subscription) {
+    const sub =
+      typeof session.subscription === 'string'
+        ? await stripe.subscriptions.retrieve(session.subscription)
+        : session.subscription;
+    plan = planFromSubscription(sub);
+  }
+  if (plan === 'free') plan = 'pro';
+
+  await applySubscriptionPlan(db, auth.ownerId, plan, customerId);
+  const def = planDefinition(plan);
+  return jsonResponse(200, {
+    ok: true,
+    plan,
+    planName: def.name,
+    monthlyCredits: def.monthlyCredits,
+  });
 }
 
 /** GET /billing/status — current plan + public catalog + checkout readiness. */

@@ -48,7 +48,11 @@ export function DeveloperKeysPage() {
   );
   const [loadError, setLoadError] = useState<string | null>(null);
   const [name, setName] = useState('');
-  const [scopes, setScopes] = useState<ApiKeyScope[]>(['memory:read', 'memory:write']);
+  const [scopes, setScopes] = useState<ApiKeyScope[]>([
+    'memory:read',
+    'memory:write',
+    'content:run',
+  ]);
   const [expiresInDays, setExpiresInDays] = useState<string>('');
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);

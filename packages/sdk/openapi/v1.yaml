@@ -281,19 +281,83 @@ paths:
   /content/publish:
     post:
       operationId: publishContent
-      summary: Start a programmatic content/agent run
+      summary: Start a programmatic content publish run
+      description: |
+        Accepts a document source and returns a run handle immediately.
+        Poll `GET /runs/{id}` until terminal. When `dryRun` is true,
+        `target.repo` may be omitted (no-target dry-run). When `projectId`
+        is omitted, the server ensures `__walkcroach_sdk__` for the caller.
       security:
         - cognitoBearer: []
         - apiKeyBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PublishContentRequest'
       responses:
         '200':
-          description: Run accepted
+          description: Existing run returned for idempotency key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunAccepted'
         '202':
-          description: Run accepted (async)
+          description: Fresh run accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunAccepted'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          description: Credit quota exceeded
+  /content/ensure-project:
+    post:
+      operationId: ensureProject
+      summary: Get-or-create the default SDK project
+      description: |
+        Idempotent. Default name `__walkcroach_sdk__`. Prefer omitting
+        `projectId` on publish (server auto-ensures); this endpoint is for
+        callers that need the id first.
+      security:
+        - cognitoBearer: []
+        - apiKeyBearer: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  maxLength: 120
+                  description: Optional override; defaults to __walkcroach_sdk__
+      responses:
+        '200':
+          description: Existing project
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnsuredProject'
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnsuredProject'
   /runs/{id}:
     get:
       operationId: getRun
       summary: Poll run status / events (includes threadId + interrupt when paused)
+      description: |
+        Requires `memory:read` **or** `content:run` so publish-only keys can wait.
       security:
         - cognitoBearer: []
         - apiKeyBearer: []
@@ -305,6 +369,7 @@ paths:
     delete:
       operationId: cancelRun
       summary: Cancel a run
+      description: Requires `memory:write` **or** `content:run`.
       security:
         - cognitoBearer: []
         - apiKeyBearer: []
@@ -500,3 +565,94 @@ components:
         asOf:
           type: string
           format: date-time
+    WriteScope:
+      oneOf:
+        - type: object
+          required: [mode]
+          properties:
+            mode:
+              type: string
+              enum: [additive, full]
+        - type: object
+          required: [mode, allow]
+          properties:
+            mode:
+              type: string
+              enum: [scoped]
+            allow:
+              type: array
+              items:
+                type: string
+              minItems: 1
+    PublishSource:
+      type: object
+      required: [kind, content]
+      properties:
+        kind:
+          type: string
+          enum: [markdown, docx, pdf, html]
+        content:
+          type: string
+        encoding:
+          type: string
+          enum: [utf8, base64]
+        filename:
+          type: string
+        title:
+          type: string
+    PublishContentRequest:
+      type: object
+      required: [source, writeScope]
+      properties:
+        projectId:
+          type: string
+          format: uuid
+          description: Optional — omitted ensures __walkcroach_sdk__
+        source:
+          $ref: '#/components/schemas/PublishSource'
+        target:
+          type: object
+          properties:
+            repo:
+              type: string
+              description: owner/name — required unless dryRun
+              pattern: '^[\w.-]+/[\w.-]+$'
+            path:
+              type: string
+        writeScope:
+          $ref: '#/components/schemas/WriteScope'
+        instructions:
+          type: string
+        dryRun:
+          type: boolean
+        idempotencyKey:
+          type: string
+    RunAccepted:
+      type: object
+      required: [runId, status, createdAt, pollUrl]
+      properties:
+        runId:
+          type: string
+          format: uuid
+        status:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        pollUrl:
+          type: string
+    EnsuredProject:
+      type: object
+      required: [id, name, kind, surfaceOrigin, created]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        kind:
+          type: string
+        surfaceOrigin:
+          type: string
+        created:
+          type: boolean

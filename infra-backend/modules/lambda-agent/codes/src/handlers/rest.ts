@@ -67,6 +67,7 @@ import {
 import { handleListMyApps } from './apps.js';
 import {
   handleBillingCheckout,
+  handleBillingConfirm,
   handleBillingPortal,
   handleBillingStatus,
   handleStripeWebhook,
@@ -1197,6 +1198,22 @@ export async function handleRest(
     const db = createDbClient();
     try {
       return await handleBillingCheckout(db, authResult, rawBody);
+    } finally {
+      await db.close();
+    }
+  }
+
+  if (
+    method === 'POST' &&
+    (path === '/billing/confirm' || path.endsWith('/billing/confirm'))
+  ) {
+    const authResult = await requireAuth(headers);
+    if ('error' in authResult) {
+      return jsonResponse(authResult.status, { error: authResult.error });
+    }
+    const db = createDbClient();
+    try {
+      return await handleBillingConfirm(db, authResult, rawBody);
     } finally {
       await db.close();
     }

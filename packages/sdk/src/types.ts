@@ -67,6 +67,8 @@ export type PublishResult = {
   ok: boolean;
   pullRequest?: { number: number; url: string; branch: string; commitSha: string };
   filesWritten: string[];
+  /** Generated file bodies (especially useful for dry-run / no-target). */
+  files?: Array<{ path: string; content: string }>;
   /** Prompt-injection heuristics that matched the source document. */
   signals: Array<{ pattern: string; excerpt: string }>;
   /** Patterns in generated files that warrant a closer look. */

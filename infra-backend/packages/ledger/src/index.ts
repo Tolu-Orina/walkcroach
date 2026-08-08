@@ -55,6 +55,12 @@ export const CREDIT_COSTS: Record<string, number> = {
   memory_remember: 1,
   memory_recall: 1,
   memory_import: 2,
+  /** P1 — previously free after auth; meter to close export/diff abuse. */
+  memory_list: 1,
+  memory_export: 2,
+  memory_diff: 1,
+  memory_erase: 1,
+  memory_audit: 1,
   content_publish: 5,
 };
 
@@ -149,8 +155,14 @@ export async function debitCredits(
   projectId?: string,
   metadata: Record<string, unknown> = {},
 ): Promise<
-  | { ok: true; remaining: number; ledgerId: string | null; credits: number }
-  | { ok: false; remaining: number }
+  | {
+      ok: true;
+      remaining: number;
+      limit: number;
+      ledgerId: string | null;
+      credits: number;
+    }
+  | { ok: false; remaining: number; limit: number }
 > {
   const cost = CREDIT_COSTS[actionType] ?? 0;
   await ensureBalanceRow(db, ownerId);
@@ -202,11 +214,16 @@ export async function debitCredits(
 
   const summary = await getUsageSummary(db, ownerId);
   if (debited === null && cost > 0) {
-    return { ok: false, remaining: summary.remaining };
+    return {
+      ok: false,
+      remaining: summary.remaining,
+      limit: summary.monthlyCredits,
+    };
   }
   const out = {
     ok: true as const,
     remaining: summary.remaining,
+    limit: summary.monthlyCredits,
     ledgerId: debited,
     credits: cost,
   };
