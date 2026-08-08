@@ -211,8 +211,11 @@ export async function publishContent(params: {
     prompt: [
       `Create a blog post page titled "${title}" from the source document below.`,
       params.instructions ?? '',
+      'HARD CONSTRAINT: Preserve the author\'s wording and claims. You format and design; you do not ghostwrite or invent facts.',
+      'Use available WalkCroach web skills via load_skill when designing the page (hierarchy, spacing, cards, imagery, a11y). Prefer a considered layout over a bare prose dump when the content supports structure.',
+      'Do a brief content visual review before finishing (hierarchy, measure, contrast, mobile).',
       noTarget
-        ? 'No target repository was provided. Create only new files under the content path using sensible React/TSX blog conventions.'
+        ? 'No target repository was provided. Create only new files under the content path using React/TSX blog conventions and WalkCroach design skill defaults.'
         : 'Match the existing repository conventions exactly. Create only new files.',
     ]
       .filter(Boolean)

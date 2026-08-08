@@ -184,6 +184,9 @@ resource "aws_lambda_function" "ide" {
       # Where the submit path dispatches runs. Unset would fall back to running
       # the worker in-process, which cannot outlive this function's timeout.
       WALKCROACH_WORKER_FUNCTION = aws_lambda_function.worker.function_name
+
+      # Bundled by package-lambda-ide.mjs into the zip root.
+      WALKCROACH_WEB_SKILLS_DIR = "/var/task/skills/web"
     }
   }
 
@@ -240,6 +243,9 @@ resource "aws_lambda_function" "worker" {
       ALLOW_DEV_AUTH       = var.allow_dev_auth ? "true" : "false"
       CORS_ALLOW_ORIGIN    = var.cors_allow_origin
       NODE_OPTIONS         = "--enable-source-maps"
+
+      # Bundled by package-lambda-ide.mjs — required for load_skill on content.publish.
+      WALKCROACH_WEB_SKILLS_DIR = "/var/task/skills/web"
     }
   }
 
