@@ -67,7 +67,7 @@ Example: `https://app.walkcroach.com/app/settings/connections/callback`
 Per-user access tokens are **not** in this JSON — they are written at connect time under  
 `walkcroach/{env}/connectors/*` (Secrets Manager namespace; Lambda IAM already scoped).
 
-### Phase G — WalkCroach subscription billing (~$20/mo)
+### Phase G — WalkCroach subscription billing (Free / Starter / Pro)
 
 Different from connector Stripe OAuth above.
 
@@ -75,7 +75,9 @@ Different from connector Stripe OAuth above.
 |---|---|---|
 | `stripe_secret_key` | `STRIPE_SECRET_KEY` | Platform secret key (`sk_live_…` / `sk_test_…`) |
 | `stripe_webhook_secret` | `STRIPE_WEBHOOK_SECRET` | Signing secret `whsec_…` for Checkout/subscription events |
-| `stripe_price_id_paid` | `STRIPE_PRICE_ID_PAID` | Stripe Price ID for Paid plan (`price_…`), ~$20/mo |
+| `stripe_price_id_starter` | `STRIPE_PRICE_ID_STARTER` | Stripe Price ID for Starter (`price_…`), ~$12/mo |
+| `stripe_price_id_pro` | `STRIPE_PRICE_ID_PRO` | Stripe Price ID for Pro (`price_…`), ~$20/mo |
+| `stripe_price_id_paid` | `STRIPE_PRICE_ID_PAID` | **Legacy alias for Pro** — used if `stripe_price_id_pro` is unset |
 
 **Stripe Dashboard webhook** endpoint:
 
@@ -83,7 +85,15 @@ Different from connector Stripe OAuth above.
 {API_BASE}/webhooks/stripe
 ```
 
-Subscribe at least to: `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`.
+Subscribe at least to: `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.payment_failed`, `customer.deleted`.
+
+| Event | Effect |
+|---|---|
+| `checkout.session.completed` | Apply Starter/Pro from session metadata / price |
+| `customer.subscription.created` / `updated` | Sync plan from price (or free if not active/trialing) |
+| `customer.subscription.deleted` | Downgrade to free |
+| `invoice.payment_failed` | Dunning — revoke paid entitlements (restore on next successful `subscription.updated`) |
+| `customer.deleted` | Clear `stripe_customer_id`, plan free |
 
 Checkout success/cancel URLs use `WEB_APP_URL` (Lambda env / TF var), not the secret JSON:
 
@@ -109,7 +119,8 @@ Checkout success/cancel URLs use `WEB_APP_URL` (Lambda env / TF var), not the se
   "hubspot_oauth_client_secret": "…",
   "stripe_secret_key": "sk_live_…",
   "stripe_webhook_secret": "whsec_…",
-  "stripe_price_id_paid": "price_…"
+  "stripe_price_id_starter": "price_…",
+  "stripe_price_id_pro": "price_…"
 }
 ```
 
@@ -146,7 +157,9 @@ These are wired in `modules/lambda-agent/main.tf`. Prefer **tfvars** over hand-e
 | `WEB_APP_URL` | `var.web_app_url` | **Required for OAuth redirects + Stripe Checkout return URLs** |
 | `CRDB_MCP_URL` | `var.crdb_mcp_url` | Default `https://cockroachlabs.cloud/mcp` |
 | `FREE_MONTHLY_CREDITS` | `var.free_monthly_credits` | Default `100` |
-| `PAID_MONTHLY_CREDITS` | `var.paid_monthly_credits` | Default `500` (margin-calibrated) |
+| `STARTER_MONTHLY_CREDITS` | `var.starter_monthly_credits` | Default `250` |
+| `PRO_MONTHLY_CREDITS` | `var.pro_monthly_credits` | Default `500` |
+| `PAID_MONTHLY_CREDITS` | `var.pro_monthly_credits` | Legacy alias of Pro grant (margin-calibrated) |
 | `CONNECTOR_SECRET_PREFIX` | TF literal | `walkcroach/{env}/connectors` |
 | `RUNTIME_SECRET_ARN` | secrets module | Points at runtime JSON |
 | `CORS_ALLOW_ORIGIN` | usually `web_app_url` | SPA origin |
@@ -157,8 +170,9 @@ These are wired in `modules/lambda-agent/main.tf`. Prefer **tfvars** over hand-e
 ```hcl
 web_app_url = "https://your-spa-origin.example"
 # optional overrides:
-# free_monthly_credits = 100
-# paid_monthly_credits = 500
+# free_monthly_credits    = 100
+# starter_monthly_credits = 250
+# pro_monthly_credits     = 500
 ```
 
 If `web_app_url` is empty, OAuth callback falls back to `CORS_ALLOW_ORIGIN` / localhost — fine for local, wrong for prod.
@@ -174,19 +188,22 @@ Add to Secrets Manager JSON when enabling each feature:
 - [ ] Connectors (Stripe Connect): `stripe_oauth_client_id`, `stripe_oauth_client_secret`
 - [ ] Connectors (HubSpot): `hubspot_oauth_client_id`, `hubspot_oauth_client_secret`
 - [ ] Cockroach MCP: `crdb_mcp_api_key` (+ optional `crdb_mcp_cluster_id`)
-- [ ] Billing Checkout/Portal: `stripe_secret_key`, `stripe_webhook_secret`, `stripe_price_id_paid`
+- [ ] Billing Checkout/Portal: `stripe_secret_key`, `stripe_webhook_secret`, `stripe_price_id_starter`, `stripe_price_id_pro`
 
 Set in TF / Parameter Store path:
 
 - [ ] `web_app_url` (SPA origin) so Connections + Checkout redirects work
-- [ ] Stripe webhook URL pointing at API `/webhooks/stripe`
+- [ ] Stripe webhook URL pointing at API `/webhooks/stripe` (must be Cognito-free)
 - [ ] OAuth redirect URIs in Google / Slack / Stripe Connect / HubSpot consoles
+- [ ] Create two Stripe Prices (~$12 Starter, ~$20 Pro) and paste IDs into Secrets Manager
 
 ---
 
 ## Related
 
 - Loader: `infra-backend/modules/lambda-agent/codes/src/secrets.ts`
+- Catalog: `infra-backend/packages/ledger/src/plans.ts`
+- Checkout/webhooks: `infra-backend/modules/lambda-agent/codes/src/handlers/stripeBilling.ts`
 - Secret lookup (no values): `infra-backend/modules/secrets/main.tf`
 - Web SSM: `infra-backend/modules/ssm/main.tf`
 - Status: `docs/walkcroach-master-doc.md`; connector/billing keys documented above

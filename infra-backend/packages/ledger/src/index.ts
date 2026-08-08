@@ -12,17 +12,32 @@
  * being importable by an extension backend.
  */
 import type { DbClient } from '@walkcroach/db';
+import {
+  FREE_MONTHLY_CREDITS,
+  grantForPlan,
+  normalizePlan,
+  type PlanId,
+} from './plans.js';
 
-export type Entitlement = 'free' | 'paid';
-
-/** Free monthly grant — chat/builder only; creatives gated (plan §7.1). */
-export const FREE_MONTHLY_CREDITS = Number(process.env.FREE_MONTHLY_CREDITS ?? 100);
-
-/**
- * Paid monthly grant (~$20/mo). Calibrated for margin: one video (270) plus
- * limited slides/flyers/images/chat — not an uncapped subsidy.
- */
-export const PAID_MONTHLY_CREDITS = Number(process.env.PAID_MONTHLY_CREDITS ?? 500);
+export type { PlanId, Entitlement, PlanDefinition, PlanFeatures, PublicPlanCatalogItem } from './plans.js';
+export {
+  FREE_MONTHLY_CREDITS,
+  STARTER_MONTHLY_CREDITS,
+  PRO_MONTHLY_CREDITS,
+  PAID_MONTHLY_CREDITS,
+  PLAN_CATALOG,
+  PLAN_ORDER,
+  normalizePlan,
+  planDefinition,
+  grantForPlan,
+  planRank,
+  hasCreativesAccess,
+  hasVideoAccess,
+  hasConnectorWriteAccess,
+  isUpgrade,
+  isPaidPlan,
+  publicPlanCatalog,
+} from './plans.js';
 
 export const CREDIT_COSTS: Record<string, number> = {
   agent_turn: 1,
@@ -49,11 +64,6 @@ export type BalanceRow = {
   used_this_month: number;
   period_start: Date;
 };
-
-/** Exported: the Stripe webhook path needs it when applying a plan change. */
-export function grantForPlan(plan: Entitlement): number {
-  return plan === 'paid' ? PAID_MONTHLY_CREDITS : FREE_MONTHLY_CREDITS;
-}
 
 /** Exported: callers that upsert a plan must create the balance row first. */
 export async function ensureBalanceRow(db: DbClient, ownerId: string): Promise<BalanceRow> {
@@ -95,7 +105,7 @@ export async function getUsageSummary(
   used: number;
   remaining: number;
   costs: typeof CREDIT_COSTS;
-  plan: Entitlement;
+  plan: PlanId;
   sharedPool: true;
 }> {
   const [balance, plan] = await Promise.all([
@@ -256,15 +266,15 @@ export async function refundCredits(
 /* ------------------------------ entitlements ----------------------------- */
 
 export type EntitlementRow = {
-  plan: Entitlement;
+  plan: PlanId;
   stripeCustomerId: string | null;
 };
 
-/** Owner plan — rows created lazily; missing row means 'free'. */
+/** Owner plan — rows created lazily; missing row means 'free'. Legacy `paid` → `pro`. */
 export async function getEntitlement(
   db: DbClient,
   ownerId: string,
-): Promise<Entitlement> {
+): Promise<PlanId> {
   const row = await getEntitlementRow(db, ownerId);
   return row.plan;
 }
@@ -280,9 +290,8 @@ export async function getEntitlementRow(
     `SELECT plan, stripe_customer_id FROM entitlements WHERE owner_id = $1`,
     [ownerId],
   );
-  const plan = rows[0]?.plan === 'paid' ? 'paid' : 'free';
   return {
-    plan,
+    plan: normalizePlan(rows[0]?.plan),
     stripeCustomerId: rows[0]?.stripe_customer_id ?? null,
   };
 }

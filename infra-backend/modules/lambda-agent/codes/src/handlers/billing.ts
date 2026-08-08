@@ -13,36 +13,50 @@ import {
   grantForPlan,
   FREE_MONTHLY_CREDITS,
   PAID_MONTHLY_CREDITS,
+  PRO_MONTHLY_CREDITS,
+  STARTER_MONTHLY_CREDITS,
   assertCredits,
   debitCredits,
   refundCredits,
   getEntitlement,
   getEntitlementRow,
   getUsageSummary,
+  hasCreativesAccess,
+  hasVideoAccess,
+  hasConnectorWriteAccess,
+  normalizePlan,
   type Entitlement,
   type EntitlementRow,
+  type PlanId,
 } from '@walkcroach/ledger';
 
 export {
   CREDIT_COSTS,
   FREE_MONTHLY_CREDITS,
   PAID_MONTHLY_CREDITS,
+  PRO_MONTHLY_CREDITS,
+  STARTER_MONTHLY_CREDITS,
   assertCredits,
   debitCredits,
   refundCredits,
   getEntitlement,
   getEntitlementRow,
   getUsageSummary,
+  hasCreativesAccess,
+  hasVideoAccess,
+  hasConnectorWriteAccess,
+  normalizePlan,
 };
-export type { Entitlement, EntitlementRow };
+export type { Entitlement, EntitlementRow, PlanId };
 
 /** Flip an owner to a plan; used by admin hook and Stripe webhook. */
 export async function setEntitlement(
   db: DbClient,
   ownerId: string,
-  plan: Entitlement,
+  plan: PlanId | string,
   stripeCustomerId?: string | null,
 ): Promise<void> {
+  const normalized = normalizePlan(plan);
   await db.query(
     `INSERT INTO entitlements (owner_id, plan, stripe_customer_id, plan_started_at, updated_at)
      VALUES ($1, $2, $3, now(), now())
@@ -55,22 +69,24 @@ export async function setEntitlement(
          ELSE entitlements.plan_started_at
        END,
        updated_at = now()`,
-    [ownerId, plan, stripeCustomerId ?? null],
+    [ownerId, normalized, stripeCustomerId ?? null],
   );
 }
 
 /**
  * Apply plan + credit grant ceiling together (Phase G2).
  * Does not wipe used_this_month — upgrading mid-cycle raises the ceiling only.
+ * Legacy `paid` normalizes to `pro`.
  */
 export async function applySubscriptionPlan(
   db: DbClient,
   ownerId: string,
-  plan: Entitlement,
+  plan: PlanId | string,
   stripeCustomerId?: string | null,
 ): Promise<void> {
-  await setEntitlement(db, ownerId, plan, stripeCustomerId);
-  const grant = grantForPlan(plan);
+  const normalized = normalizePlan(plan);
+  await setEntitlement(db, ownerId, normalized, stripeCustomerId);
+  const grant = grantForPlan(normalized);
   await ensureBalanceRow(db, ownerId);
   await db.query(
     `UPDATE credit_balances

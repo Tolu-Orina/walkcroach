@@ -9,7 +9,7 @@ const TABS = [
 ] as const;
 
 /**
- * Developer portal shell — API keys, SDK docs, usage pointers.
+ * Developer portal shell — API keys, live usage, governance policy, docs.
  * Sits under EcosystemShell like Settings.
  */
 export function DeveloperLayout() {
@@ -21,8 +21,9 @@ export function DeveloperLayout() {
           Developer
         </h1>
         <p className="mt-2 max-w-xl text-sm leading-relaxed text-mist">
-          Mint API keys and call the same CockroachDB memory layer your Web,
-          Browser Extension, IDE, and CLI already share — via{' '}
+          Mint API keys, watch the shared credit pool, and call the same
+          CockroachDB memory layer your Web, Browser Extension, IDE, and CLI
+          already share — via{' '}
           <code className="font-mono text-[12px] text-paper">@walkcroach/sdk</code>
           .
         </p>

@@ -1,9 +1,12 @@
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  DeleteObjectCommand,
+  DeleteObjectsCommand,
   GetObjectCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
@@ -111,6 +114,95 @@ export async function getPresignedGetUrl(
     new GetObjectCommand({ Bucket: bucket, Key: key }),
     { expiresIn: expiresInSeconds },
   );
+}
+
+/** Delete one object from artefacts bucket or local fallback. */
+export async function deleteObject(key: string): Promise<void> {
+  const trimmed = key.trim();
+  if (!trimmed) return;
+  const bucket = bucketName();
+  if (bucket) {
+    await s3().send(
+      new DeleteObjectCommand({ Bucket: bucket, Key: trimmed }),
+    );
+    return;
+  }
+  try {
+    await unlink(localPath(trimmed));
+  } catch {
+    /* already gone */
+  }
+}
+
+/** Batch-delete keys (S3 multi-delete in chunks of 1000). Returns deleted count. */
+export async function deleteObjects(keys: string[]): Promise<number> {
+  const unique = [
+    ...new Set(keys.map((k) => k.trim()).filter(Boolean)),
+  ];
+  if (unique.length === 0) return 0;
+  const bucket = bucketName();
+  if (!bucket) {
+    let n = 0;
+    for (const key of unique) {
+      try {
+        await unlink(localPath(key));
+        n += 1;
+      } catch {
+        /* skip */
+      }
+    }
+    return n;
+  }
+  let deleted = 0;
+  for (let i = 0; i < unique.length; i += 1000) {
+    const chunk = unique.slice(i, i + 1000);
+    const res = await s3().send(
+      new DeleteObjectsCommand({
+        Bucket: bucket,
+        Delete: {
+          Objects: chunk.map((Key) => ({ Key })),
+          Quiet: true,
+        },
+      }),
+    );
+    deleted += res.Deleted?.length ?? chunk.length;
+  }
+  return deleted;
+}
+
+/**
+ * Delete every object under a key prefix (e.g. `projects/{id}/`).
+ * Used on account erase so checkpoints/files/exports do not linger.
+ */
+export async function deletePrefix(prefix: string): Promise<number> {
+  const normalized = prefix.endsWith('/') ? prefix : `${prefix}/`;
+  const bucket = bucketName();
+  if (!bucket) {
+    const root = localPath(normalized.replace(/\/$/, ''));
+    try {
+      await rm(root, { recursive: true, force: true });
+      return 1;
+    } catch {
+      return 0;
+    }
+  }
+  let deleted = 0;
+  let token: string | undefined;
+  do {
+    const page = await s3().send(
+      new ListObjectsV2Command({
+        Bucket: bucket,
+        Prefix: normalized,
+        ContinuationToken: token,
+      }),
+    );
+    const keys = (page.Contents ?? [])
+      .map((o) => o.Key)
+      .filter((k): k is string => Boolean(k));
+    deleted += await deleteObjects(keys);
+    token = page.IsTruncated ? page.NextContinuationToken : undefined;
+  } while (token);
+  return deleted;
 }
 
 export async function writeSnapshot(

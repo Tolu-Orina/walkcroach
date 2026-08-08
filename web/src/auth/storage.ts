@@ -31,3 +31,37 @@ export function persistAuth(stored: StoredAuth): void {
 export function clearStoredAuth(): void {
   localStorage.removeItem(AUTH_STORAGE_KEY);
 }
+
+/**
+ * Clear credentials and user-bound caches on sign-out.
+ * Keeps device prefs (theme, shell expanded, tour).
+ */
+export function clearUserBoundStorage(): void {
+  clearStoredAuth();
+
+  const removeExact = new Set([
+    AUTH_STORAGE_KEY,
+    'walkcroach.welcome.v1',
+    'walkcroach.lastBuilderProjectId',
+  ]);
+  const removePrefixes = [
+    'walkcroach.chat.session.v1.',
+    'walkcroach.session.v1.',
+  ];
+
+  const doomed: string[] = [];
+  for (let i = 0; i < localStorage.length; i += 1) {
+    const key = localStorage.key(i);
+    if (!key) continue;
+    if (removeExact.has(key) || removePrefixes.some((p) => key.startsWith(p))) {
+      doomed.push(key);
+    }
+  }
+  for (const key of doomed) localStorage.removeItem(key);
+
+  try {
+    sessionStorage.removeItem('walkcroach.signup.pending.v1');
+  } catch {
+    /* ignore */
+  }
+}

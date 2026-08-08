@@ -1,7 +1,16 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { getSdkApiBaseUrl, getSdkHealth, getUsage } from '../../api/client';
+import {
+  getBillingStatus,
+  getSdkApiBaseUrl,
+  getSdkHealth,
+  getUsage,
+  listApiKeys,
+  type UsageSummary,
+} from '../../api/client';
 import { useAuth } from '../../auth/useAuth';
+import { CreditPoolBar } from './CreditPoolBar';
+import { planDisplayName } from './usage-format';
 
 export function DeveloperOverviewPage() {
   const { user } = useAuth();
@@ -12,7 +21,11 @@ export function DeveloperOverviewPage() {
     retention?: { asOfHuman: string };
   } | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
-  const [plan, setPlan] = useState<string | null>(null);
+  const [usage, setUsage] = useState<UsageSummary | null>(null);
+  const [usageError, setUsageError] = useState<string | null>(null);
+  const [planName, setPlanName] = useState<string | null>(null);
+  const [activeKeys, setActiveKeys] = useState<number | null>(null);
+  const [keysError, setKeysError] = useState<string | null>(null);
   const base = getSdkApiBaseUrl();
 
   useEffect(() => {
@@ -32,22 +45,73 @@ export function DeveloperOverviewPage() {
       });
     void getUsage()
       .then((u) => {
-        if (!cancelled) setPlan(u.plan === 'paid' ? 'Paid' : 'Free');
+        if (!cancelled) {
+          setUsage(u);
+          setUsageError(null);
+          setPlanName((prev) => prev ?? planDisplayName(u.plan));
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setUsage(null);
+          setUsageError(err instanceof Error ? err.message : String(err));
+        }
+      });
+    void getBillingStatus()
+      .then((b) => {
+        if (!cancelled) setPlanName(b.planName);
       })
       .catch(() => {
-        if (!cancelled) setPlan(null);
+        /* usage plan label is enough */
+      });
+    void listApiKeys()
+      .then((keys) => {
+        if (!cancelled) {
+          setActiveKeys(keys.filter((k) => !k.revokedAt).length);
+          setKeysError(null);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setActiveKeys(null);
+          setKeysError(err instanceof Error ? err.message : String(err));
+        }
       });
     return () => {
       cancelled = true;
     };
   }, []);
 
+  const lowCredits =
+    usage != null &&
+    usage.monthlyCredits > 0 &&
+    usage.remaining / usage.monthlyCredits < 0.15;
+  const noKeys = activeKeys === 0;
+
   return (
     <div className="space-y-4">
       <section className="surface space-y-4 p-5">
-        <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-mist">
-          Your workspace
-        </h2>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-mist">
+            Your workspace
+          </h2>
+          {health && !healthError && (
+            <span
+              className={`rounded-[var(--radius-control)] border px-2 py-0.5 font-mono text-[11px] ${
+                health.ok
+                  ? 'border-signal/35 bg-signal/10 text-signal'
+                  : 'border-ember/40 bg-ember/10 text-ember'
+              }`}
+            >
+              {health.ok ? 'SDK healthy' : 'SDK degraded'}
+            </span>
+          )}
+          {healthError && (
+            <span className="rounded-[var(--radius-control)] border border-ember/40 bg-ember/10 px-2 py-0.5 font-mono text-[11px] text-ember">
+              SDK unreachable
+            </span>
+          )}
+        </div>
         <dl className="space-y-2.5 text-sm">
           <div className="flex justify-between gap-4">
             <dt className="text-mist">Signed in as</dt>
@@ -57,18 +121,80 @@ export function DeveloperOverviewPage() {
           </div>
           <div className="flex justify-between gap-4">
             <dt className="text-mist">Plan</dt>
-            <dd className="font-medium text-paper">{plan ?? '—'}</dd>
+            <dd className="font-medium text-paper">
+              {planName ?? '—'}
+              {usage?.plan === 'free' && (
+                <Link
+                  to="/app/settings"
+                  className="ml-2 text-[11px] text-signal hover:underline"
+                >
+                  Upgrade
+                </Link>
+              )}
+            </dd>
+          </div>
+          <div className="flex justify-between gap-4">
+            <dt className="text-mist">Active API keys</dt>
+            <dd className="font-medium text-paper">
+              {keysError ? (
+                <span className="text-ember" title={keysError}>
+                  —
+                </span>
+              ) : activeKeys === null ? (
+                '…'
+              ) : (
+                <>
+                  {activeKeys}
+                  {noKeys && (
+                    <Link
+                      to="/app/developer/keys"
+                      className="ml-2 text-[11px] text-signal hover:underline"
+                    >
+                      Create one
+                    </Link>
+                  )}
+                </>
+              )}
+            </dd>
           </div>
           <div className="flex justify-between gap-4">
             <dt className="text-mist">SDK API base</dt>
             <dd className="truncate font-mono text-[12px] text-paper">{base}</dd>
           </div>
         </dl>
+
+        <div className="border-t border-line pt-4">
+          <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-mist">
+            Credit pool
+          </p>
+          {usageError && <p className="text-sm text-ember">{usageError}</p>}
+          {!usageError && !usage && (
+            <p className="text-sm text-mist">Loading usage…</p>
+          )}
+          {usage && <CreditPoolBar usage={usage} compact />}
+          {lowCredits && (
+            <p className="mt-2 text-[12px] text-ember">
+              Running low —{' '}
+              <Link to="/app/settings" className="text-signal hover:underline">
+                manage billing
+              </Link>{' '}
+              or check{' '}
+              <Link to="/app/developer/ops" className="text-signal hover:underline">
+                Ops
+              </Link>{' '}
+              for burn.
+            </p>
+          )}
+        </div>
+
         <div className="flex flex-wrap gap-2 pt-1">
           <Link to="/app/developer/keys" className="btn-primary text-xs">
-            Create API key
+            {noKeys ? 'Create API key' : 'Manage keys'}
           </Link>
-          <Link to="/app/developer/docs" className="btn-secondary text-xs">
+          <Link to="/app/developer/ops" className="btn-secondary text-xs">
+            Live usage
+          </Link>
+          <Link to="/app/developer/docs" className="btn-ghost text-xs">
             Quickstart
           </Link>
           <Link to="/app/settings" className="btn-ghost text-xs">
@@ -92,6 +218,9 @@ export function DeveloperOverviewPage() {
             <p className="truncate font-mono text-[11px] text-mist/80">
               {healthError.slice(0, 180)}
             </p>
+            <Link to="/app/developer/ops" className="btn-secondary text-xs">
+              Open Ops
+            </Link>
           </div>
         )}
         {!healthError && !health && (
@@ -100,8 +229,8 @@ export function DeveloperOverviewPage() {
         {health && (
           <>
             <p className="text-sm text-paper">
-              <span className="text-teal">●</span> {health.ok ? 'Reachable' : 'Degraded'}{' '}
-              · protocol {health.version}
+              <span className={health.ok ? 'text-teal' : 'text-ember'}>●</span>{' '}
+              {health.ok ? 'Reachable' : 'Degraded'} · protocol {health.version}
             </p>
             {health.retention?.asOfHuman && (
               <p className="text-[12px] leading-relaxed text-mist">

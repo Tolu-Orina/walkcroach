@@ -170,10 +170,23 @@ variable "free_monthly_credits" {
   default     = 100
 }
 
+variable "starter_monthly_credits" {
+  type        = number
+  description = "Starter-tier monthly credit grant (~$12/mo)"
+  default     = 250
+}
+
+variable "pro_monthly_credits" {
+  type        = number
+  description = "Pro-tier monthly credit grant (~$20/mo). Keep finite for margin."
+  default     = 500
+}
+
 variable "paid_monthly_credits" {
   type        = number
-  description = "Paid-tier monthly credit grant (~$20/mo). Keep finite for margin."
-  default     = 500
+  description = "Deprecated alias for Pro grant. When set, overrides pro_monthly_credits."
+  default     = null
+  nullable    = true
 }
 
 variable "allow_github_pat" {
@@ -191,6 +204,15 @@ variable "github_ssm_prefix" {
 variable "tags" {
   type    = map(string)
   default = {}
+}
+
+locals {
+  # Prefer explicit pro_monthly_credits; honor legacy paid_monthly_credits when set.
+  effective_pro_monthly_credits = (
+    var.paid_monthly_credits != null
+    ? var.paid_monthly_credits
+    : var.pro_monthly_credits
+  )
 }
 
 data "aws_caller_identity" "current" {}
@@ -238,6 +260,21 @@ data "aws_iam_policy_document" "lambda" {
       "arn:aws:secretsmanager:*:*:secret:walkcroach/${var.environment}/projects/*",
       "arn:aws:secretsmanager:*:*:secret:walkcroach/${var.environment}/connectors/*",
     ]
+  }
+
+  dynamic "statement" {
+    for_each = var.cognito_user_pool_id != "" ? [1] : []
+    content {
+      sid = "CognitoAccountErase"
+      actions = [
+        "cognito-idp:AdminDeleteUser",
+        "cognito-idp:AdminUserGlobalSignOut",
+        "cognito-idp:AdminGetUser",
+      ]
+      resources = [
+        "arn:aws:cognito-idp:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:userpool/${var.cognito_user_pool_id}",
+      ]
+    }
   }
 
   statement {
@@ -351,7 +388,9 @@ resource "aws_lambda_function" "agent" {
       WEB_APP_URL                = var.web_app_url
       CRDB_MCP_URL               = var.crdb_mcp_url
       FREE_MONTHLY_CREDITS       = tostring(var.free_monthly_credits)
-      PAID_MONTHLY_CREDITS       = tostring(var.paid_monthly_credits)
+      STARTER_MONTHLY_CREDITS    = tostring(var.starter_monthly_credits)
+      PRO_MONTHLY_CREDITS        = tostring(local.effective_pro_monthly_credits)
+      PAID_MONTHLY_CREDITS       = tostring(local.effective_pro_monthly_credits)
       ARTEFACTS_BUCKET           = var.artefacts_bucket_name
       APPS_BUCKET                = var.apps_bucket_name
       APPS_WILDCARD_DOMAIN       = var.apps_wildcard_domain

@@ -17,6 +17,8 @@ import {
   consumeHardQuota,
   debitCredits,
   getEntitlement,
+  hasCreativesAccess,
+  hasVideoAccess,
   peekHardQuota,
   peekVideoQuota,
   refundCredits,
@@ -178,7 +180,9 @@ export async function runPromptStream(
             peekVideoQuota(db, ownerId),
           ]);
           return {
-            isPaid: plan === 'paid',
+            isPaid: hasCreativesAccess(plan),
+            canVideo: hasVideoAccess(plan),
+            plan,
             imageCreditCost: 5,
             imageDailyRemaining: imageQ.remaining,
             imageDailyLimit: 3,
@@ -213,7 +217,7 @@ export async function runPromptStream(
               if (!r.ok) {
                 creativeMetric('CreativeQuotaDenied', {
                   feature: 'image_gen_daily',
-                  tier: plan === 'paid' ? 'paid' : 'free',
+                  tier: plan,
                 });
               }
               return r;

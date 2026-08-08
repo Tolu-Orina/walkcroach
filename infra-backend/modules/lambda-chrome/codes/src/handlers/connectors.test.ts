@@ -28,13 +28,15 @@ vi.mock('@walkcroach/db', () => ({
 }));
 
 const ledger = {
-  entitlement: 'paid' as 'free' | 'paid',
+  entitlement: 'pro' as 'free' | 'starter' | 'pro',
   allow: true,
   debited: [] as Array<{ action: string }>,
 };
 
 vi.mock('@walkcroach/ledger', () => ({
   getEntitlement: async () => ledger.entitlement,
+  hasConnectorWriteAccess: (plan: string) =>
+    plan === 'starter' || plan === 'pro',
   assertCredits: async () =>
     ledger.allow ? { ok: true } : { ok: false, remaining: 0 },
   debitCredits: async (
@@ -114,7 +116,7 @@ beforeEach(() => {
   process.env.GOOGLE_OAUTH_CLIENT_ID = 'gid';
   process.env.GOOGLE_OAUTH_CLIENT_SECRET = 'gsecret';
   process.env.WEB_APP_URL = 'https://walkcroach.test';
-  ledger.entitlement = 'paid';
+  ledger.entitlement = 'pro';
   ledger.allow = true;
   ledger.debited.length = 0;
   delete process.env.SLACK_OAUTH_CLIENT_ID;
@@ -313,13 +315,21 @@ describe('execute', () => {
     expect(executed).toHaveLength(0);
   });
 
-  it('gates connector writes behind a paid plan, matching Web', async () => {
+  it('gates connector writes behind Starter/Pro, matching Web', async () => {
     pendingWrite();
     ledger.entitlement = 'free';
     const res = await handleExecuteRun(cognito, RUN);
     expect(res.statusCode).toBe(402);
     expect(body(res).error).toBe('upgrade_required');
     expect(executed).toHaveLength(0);
+  });
+
+  it('allows connector writes on Starter', async () => {
+    pendingWrite();
+    ledger.entitlement = 'starter';
+    const res = await handleExecuteRun(cognito, RUN);
+    expect(res.statusCode).toBe(200);
+    expect(ledger.debited).toEqual([{ action: 'connector_write' }]);
   });
 
   it('allows a read action on a free plan', async () => {

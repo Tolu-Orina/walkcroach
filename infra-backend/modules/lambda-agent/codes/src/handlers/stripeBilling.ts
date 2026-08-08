@@ -1,21 +1,21 @@
 /**
- * Stripe Billing — Checkout + Customer Portal + webhooks (Phase G1–G2).
+ * Stripe Billing — multi-tier subscriptions (Free / Starter / Pro).
  *
- * Profitability posture (web plan §7):
- * - Paid ≈ $20/mo subscription (STRIPE_PRICE_ID_PAID)
- * - Hard caps still bind Reel/Canvas dollar burn
- * - Paid monthly credit grant is finite (default 500) so one video (270) +
- *   limited creatives fit; uncapped grants are not offered
+ * Checkout selects a paid tier by planId. Webhooks map Stripe Price IDs → plan.
+ * Legacy `paid` entitlements normalize to `pro`.
  */
 import Stripe from 'stripe';
 import type { DbClient } from '@walkcroach/db';
+import {
+  isUpgrade,
+  normalizePlan,
+  planDefinition,
+  publicPlanCatalog,
+  type PlanId,
+} from '@walkcroach/ledger';
 import type { AuthContext } from '../auth.js';
 import { jsonResponse } from '../http.js';
-import {
-  applySubscriptionPlan,
-  getEntitlementRow,
-  type Entitlement,
-} from './billing.js';
+import { applySubscriptionPlan, getEntitlementRow } from './billing.js';
 
 type RestResult = {
   statusCode: number;
@@ -31,8 +31,16 @@ function stripeClient(): Stripe | null {
   });
 }
 
-function priceIdPaid(): string {
-  return (process.env.STRIPE_PRICE_ID_PAID ?? '').trim();
+function priceIdStarter(): string {
+  return (process.env.STRIPE_PRICE_ID_STARTER ?? '').trim();
+}
+
+/** Pro price — `STRIPE_PRICE_ID_PRO` preferred; `STRIPE_PRICE_ID_PAID` kept as alias. */
+function priceIdPro(): string {
+  return (
+    (process.env.STRIPE_PRICE_ID_PRO ?? '').trim() ||
+    (process.env.STRIPE_PRICE_ID_PAID ?? '').trim()
+  );
 }
 
 function webAppUrl(): string {
@@ -40,38 +48,128 @@ function webAppUrl(): string {
 }
 
 function billingConfigured(): boolean {
-  return Boolean(stripeClient() && priceIdPaid());
+  return Boolean(stripeClient() && (priceIdStarter() || priceIdPro()));
 }
 
-/** POST /billing/checkout — start Paid subscription Checkout. */
+function priceIdForPlan(plan: PlanId): string | null {
+  if (plan === 'starter') return priceIdStarter() || null;
+  if (plan === 'pro') return priceIdPro() || null;
+  return null;
+}
+
+function planFromPriceId(priceId: string | null | undefined): PlanId | null {
+  const id = (priceId ?? '').trim();
+  if (!id) return null;
+  if (id === priceIdStarter()) return 'starter';
+  if (id === priceIdPro()) return 'pro';
+  return null;
+}
+
+function parseCheckoutBody(raw: string | undefined): { planId: PlanId } {
+  let planId: PlanId = 'pro';
+  if (raw) {
+    try {
+      const body = JSON.parse(raw) as { planId?: string; plan?: string };
+      const requested = normalizePlan(body.planId ?? body.plan);
+      if (requested === 'starter' || requested === 'pro') planId = requested;
+    } catch {
+      /* default pro */
+    }
+  }
+  return { planId };
+}
+
+async function ensureStripeCustomer(
+  db: DbClient,
+  stripe: Stripe,
+  ownerId: string,
+  existing: string | null,
+): Promise<string> {
+  if (existing) return existing;
+  const customer = await stripe.customers.create({
+    metadata: { owner_id: ownerId },
+  });
+  await applySubscriptionPlan(db, ownerId, 'free', customer.id);
+  return customer.id;
+}
+
+async function findActiveSubscription(
+  stripe: Stripe,
+  customerId: string,
+): Promise<Stripe.Subscription | null> {
+  const list = await stripe.subscriptions.list({
+    customer: customerId,
+    status: 'all',
+    limit: 10,
+  });
+  return (
+    list.data.find((s) => s.status === 'active' || s.status === 'trialing') ??
+    null
+  );
+}
+
+/** POST /billing/checkout — body `{ planId: 'starter' | 'pro' }`. */
 export async function handleBillingCheckout(
   db: DbClient,
   auth: AuthContext,
+  rawBody?: string,
 ): Promise<RestResult> {
   const stripe = stripeClient();
-  const priceId = priceIdPaid();
-  if (!stripe || !priceId) {
+  if (!stripe || !billingConfigured()) {
     return jsonResponse(503, {
       error: 'billing_not_configured',
       message: 'Stripe Checkout is not configured yet.',
     });
   }
 
-  const plan = await getEntitlementRow(db, auth.ownerId);
-  if (plan.plan === 'paid') {
-    return jsonResponse(409, {
-      error: 'already_paid',
-      message: 'You are already on the Paid plan. Use Manage billing instead.',
+  const { planId } = parseCheckoutBody(rawBody);
+  const priceId = priceIdForPlan(planId);
+  if (!priceId) {
+    return jsonResponse(503, {
+      error: 'price_not_configured',
+      message: `Stripe Price for ${planDefinition(planId).name} is not configured.`,
+      planId,
     });
   }
 
-  let customerId = plan.stripeCustomerId;
-  if (!customerId) {
-    const customer = await stripe.customers.create({
-      metadata: { owner_id: auth.ownerId },
+  const current = await getEntitlementRow(db, auth.ownerId);
+  if (current.plan === planId) {
+    return jsonResponse(409, {
+      error: 'already_on_plan',
+      message: `You are already on ${planDefinition(planId).name}. Use Manage billing to change payment methods.`,
+      planId,
     });
-    customerId = customer.id;
-    await applySubscriptionPlan(db, auth.ownerId, 'free', customerId);
+  }
+
+  const customerId = await ensureStripeCustomer(
+    db,
+    stripe,
+    auth.ownerId,
+    current.stripeCustomerId,
+  );
+
+  const existingSub = await findActiveSubscription(stripe, customerId);
+  if (existingSub) {
+    // In-place price swap for upgrades / downgrades (no second subscription).
+    const item = existingSub.items.data[0];
+    if (!item) {
+      return jsonResponse(500, { error: 'subscription_item_missing' });
+    }
+    await stripe.subscriptions.update(existingSub.id, {
+      items: [{ id: item.id, price: priceId }],
+      proration_behavior: 'create_prorations',
+      metadata: {
+        owner_id: auth.ownerId,
+        plan_id: planId,
+      },
+    });
+    await applySubscriptionPlan(db, auth.ownerId, planId, customerId);
+    return jsonResponse(200, {
+      ok: true,
+      changed: true,
+      planId,
+      url: `${webAppUrl()}/app/settings?billing=success`,
+    });
   }
 
   const session = await stripe.checkout.sessions.create({
@@ -81,9 +179,9 @@ export async function handleBillingCheckout(
     success_url: `${webAppUrl()}/app/settings?billing=success`,
     cancel_url: `${webAppUrl()}/app/settings?billing=cancel`,
     client_reference_id: auth.ownerId,
-    metadata: { owner_id: auth.ownerId },
+    metadata: { owner_id: auth.ownerId, plan_id: planId },
     subscription_data: {
-      metadata: { owner_id: auth.ownerId },
+      metadata: { owner_id: auth.ownerId, plan_id: planId },
     },
     allow_promotion_codes: true,
   });
@@ -91,7 +189,7 @@ export async function handleBillingCheckout(
   if (!session.url) {
     return jsonResponse(500, { error: 'checkout_url_missing' });
   }
-  return jsonResponse(200, { url: session.url, sessionId: session.id });
+  return jsonResponse(200, { url: session.url, sessionId: session.id, planId });
 }
 
 /** POST /billing/portal — Stripe Customer Portal (cancel / payment method). */
@@ -117,24 +215,35 @@ export async function handleBillingPortal(
   return jsonResponse(200, { url: session.url });
 }
 
-/** GET /billing/status — plan + whether Checkout is live. */
+/** GET /billing/status — current plan + public catalog + checkout readiness. */
 export async function handleBillingStatus(
   db: DbClient,
   auth: AuthContext,
 ): Promise<RestResult> {
   const row = await getEntitlementRow(db, auth.ownerId);
+  const def = planDefinition(row.plan);
+  const catalog = publicPlanCatalog({
+    starterPriceConfigured: Boolean(priceIdStarter()),
+    proPriceConfigured: Boolean(priceIdPro()),
+  });
   return jsonResponse(200, {
     plan: row.plan,
+    planName: def.name,
+    priceLabel: def.priceLabel,
+    monthlyCredits: def.monthlyCredits,
+    features: def.features,
     stripeCustomerId: row.stripeCustomerId ? 'set' : null,
     checkoutEnabled: billingConfigured(),
-    priceLabel: '~$20/mo',
+    catalog,
+    upgrades: catalog.filter(
+      (p) => p.paid && isUpgrade(row.plan, p.id) && p.checkoutAvailable,
+    ),
   });
 }
 
 function ownerIdFromStripeObject(obj: {
   metadata?: Stripe.Metadata | null;
   client_reference_id?: string | null;
-  customer?: string | Stripe.Customer | Stripe.DeletedCustomer | null;
 }): string | null {
   const fromMeta = obj.metadata?.owner_id?.trim();
   if (fromMeta) return fromMeta;
@@ -175,13 +284,28 @@ async function resolveOwnerId(
   return null;
 }
 
-function subscriptionIsPaid(status: Stripe.Subscription.Status): boolean {
+function subscriptionActive(status: Stripe.Subscription.Status): boolean {
   return status === 'active' || status === 'trialing';
+}
+
+function planFromSubscription(sub: Stripe.Subscription): PlanId {
+  const fromMeta = sub.metadata?.plan_id;
+  if (fromMeta === 'starter' || fromMeta === 'pro') return fromMeta;
+  const priceId = sub.items.data[0]?.price?.id;
+  return planFromPriceId(priceId) ?? 'pro';
 }
 
 /**
  * POST /webhooks/stripe — signature-verified entitlement sync.
  * Must receive the raw body string (not re-serialized JSON).
+ *
+ * Subscribe in Stripe Dashboard to:
+ *   checkout.session.completed
+ *   customer.subscription.created
+ *   customer.subscription.updated
+ *   customer.subscription.deleted
+ *   invoice.payment_failed
+ *   customer.deleted
  */
 export async function handleStripeWebhook(
   db: DbClient,
@@ -220,14 +344,24 @@ export async function handleStripeWebhook(
           ownerId: ownerIdFromStripeObject(session),
           customerId,
         });
-        if (resolved) {
-          await applySubscriptionPlan(
-            db,
-            resolved.ownerId,
-            'paid',
-            customerId ?? resolved.customerId,
-          );
+        if (!resolved) break;
+
+        let plan: PlanId = normalizePlan(session.metadata?.plan_id);
+        if (plan === 'free' && session.subscription) {
+          const subId =
+            typeof session.subscription === 'string'
+              ? session.subscription
+              : session.subscription.id;
+          const sub = await stripe.subscriptions.retrieve(subId);
+          plan = planFromSubscription(sub);
         }
+        if (plan === 'free') plan = 'pro';
+        await applySubscriptionPlan(
+          db,
+          resolved.ownerId,
+          plan,
+          customerId ?? resolved.customerId,
+        );
         break;
       }
       case 'customer.subscription.updated':
@@ -239,17 +373,11 @@ export async function handleStripeWebhook(
           ownerId: ownerIdFromStripeObject(sub),
           customerId,
         });
-        if (resolved) {
-          const plan: Entitlement = subscriptionIsPaid(sub.status)
-            ? 'paid'
-            : 'free';
-          await applySubscriptionPlan(
-            db,
-            resolved.ownerId,
-            plan,
-            customerId,
-          );
-        }
+        if (!resolved) break;
+        const plan: PlanId = subscriptionActive(sub.status)
+          ? planFromSubscription(sub)
+          : 'free';
+        await applySubscriptionPlan(db, resolved.ownerId, plan, customerId);
         break;
       }
       case 'customer.subscription.deleted': {
@@ -261,13 +389,41 @@ export async function handleStripeWebhook(
           customerId,
         });
         if (resolved) {
-          await applySubscriptionPlan(
-            db,
-            resolved.ownerId,
-            'free',
-            customerId,
-          );
+          await applySubscriptionPlan(db, resolved.ownerId, 'free', customerId);
         }
+        break;
+      }
+      case 'invoice.payment_failed': {
+        // Dunning: revoke paid entitlements until payment succeeds again.
+        // Restoration happens via customer.subscription.updated (active/trialing).
+        const invoice = event.data.object as Stripe.Invoice;
+        const customerId =
+          typeof invoice.customer === 'string'
+            ? invoice.customer
+            : invoice.customer?.id ?? null;
+        if (!customerId) break;
+        const resolved = await resolveOwnerId(db, stripe, { customerId });
+        if (!resolved) break;
+        await applySubscriptionPlan(db, resolved.ownerId, 'free', customerId);
+        break;
+      }
+      case 'customer.deleted': {
+        // Portal / account-erase / Stripe-side customer removal — drop local link.
+        const customer = event.data.object as Stripe.Customer | Stripe.DeletedCustomer;
+        const customerId = customer.id;
+        const { rows } = await db.query<{ owner_id: string }>(
+          `SELECT owner_id FROM entitlements WHERE stripe_customer_id = $1`,
+          [customerId],
+        );
+        const ownerId = rows[0]?.owner_id;
+        if (!ownerId) break;
+        await applySubscriptionPlan(db, ownerId, 'free', null);
+        await db.query(
+          `UPDATE entitlements
+           SET stripe_customer_id = NULL, plan = 'free', updated_at = now()
+           WHERE owner_id = $1`,
+          [ownerId],
+        );
         break;
       }
       default:

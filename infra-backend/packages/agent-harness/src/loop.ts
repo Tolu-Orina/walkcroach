@@ -83,7 +83,12 @@ export const IMAGE_GEN_DAILY_LIMIT = 3;
 
 /** How much of a creative operation this owner may still consume this turn. */
 export type CreativeLimits = {
+  /** Starter+ — images, decks, flyers, connector-gated creatives. */
   isPaid: boolean;
+  /** Pro only — Nova Reel video studio. Defaults to isPaid when omitted (legacy). */
+  canVideo?: boolean;
+  /** Current plan id when known (free | starter | pro). */
+  plan?: string;
   imageCreditCost: number;
   imageDailyRemaining: number;
   imageDailyLimit: number;
@@ -1027,7 +1032,7 @@ async function executeServerTool(params: {
           reason: 'paid_plan_required',
           feature: 'generate_image',
           message:
-            'Image generation is on the Paid plan (~$20/mo). Upgrade to unlock Nova Canvas (≤3/day).',
+            'Image generation is on Starter or Pro. Upgrade to unlock Nova Canvas (≤3/day).',
         });
         return {
           events,
@@ -1036,7 +1041,7 @@ async function executeServerTool(params: {
             status: 'error',
             content: [
               {
-                text: 'Image generation requires a Paid plan. Tell the user to upgrade in Settings → Usage & billing.',
+                text: 'Image generation requires Starter or Pro. Tell the user to upgrade in Settings → Usage & billing.',
               },
             ],
           },
@@ -1681,13 +1686,14 @@ async function executeServerTool(params: {
     }
 
     if (tool.name === 'generate_video_brief') {
-      if (!creative.isPaid) {
+      const canVideo = creative.canVideo ?? creative.isPaid;
+      if (!canVideo) {
         events.push({
           type: 'upgrade_required',
-          reason: 'paid_plan_required',
+          reason: 'pro_plan_required',
           feature: 'video',
           message:
-            'Video Studio requires Paid (~$20/mo). One ≤30s video / 72h after upgrade.',
+            'Video Studio requires Pro ($20/mo). Starter covers images and decks; Pro adds ≤30s video / 72h.',
         });
         return {
           events,
@@ -1696,7 +1702,7 @@ async function executeServerTool(params: {
             status: 'error',
             content: [
               {
-                text: 'generate_video_brief is paid-only. Tell the user to upgrade — do not invent a video.',
+                text: 'generate_video_brief requires Pro. Tell the user to upgrade — do not invent a video.',
               },
             ],
           },
@@ -1850,13 +1856,18 @@ async function executeServerTool(params: {
     }
 
     if (tool.name === 'start_video_job') {
-      if (!creative.isPaid) {
+      const canVideo = creative.canVideo ?? creative.isPaid;
+      if (!canVideo) {
         return {
           events,
           result: {
             toolUseId: tool.toolUseId,
             status: 'error',
-            content: [{ text: 'start_video_job is paid-only.' }],
+            content: [
+              {
+                text: 'start_video_job requires the Pro plan. Starter includes images and decks; upgrade to Pro for video.',
+              },
+            ],
           },
         };
       }

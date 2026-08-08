@@ -3,6 +3,7 @@
  * Same owner_id ledger as WalkCroach Web (`credit_balances` + `entitlements`).
  */
 import { createDbClient } from '@walkcroach/db';
+import { normalizePlan } from '@walkcroach/ledger';
 import type { AuthContext } from '../auth.js';
 import { jsonResponse } from '../http.js';
 import { FREE_MONTHLY_CREDITS } from './credits-shared.js';
@@ -59,7 +60,7 @@ export async function handleGetCredits(
       `SELECT plan FROM entitlements WHERE owner_id = $1`,
       [auth.ownerId],
     );
-    const plan = ent[0]?.plan === 'paid' ? 'paid' : 'free';
+    const plan = normalizePlan(ent[0]?.plan);
     const remaining = Math.max(0, monthly - used);
     const resetsAt = new Date(
       Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth() + 1, 1),

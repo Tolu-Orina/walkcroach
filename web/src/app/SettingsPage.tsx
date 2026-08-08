@@ -1,12 +1,16 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
+  confirmAccountErase,
   getBillingStatus,
   getGithubStatus,
   getUsage,
   listProjects,
   openBillingPortal,
+  proposeAccountErase,
   startBillingCheckout,
+  type AccountEraseProposeResult,
+  type BillingStatus,
   type UsageSummary,
 } from '../api/client';
 import { useAuth } from '../auth/useAuth';
@@ -19,6 +23,12 @@ type GhRow = {
   repo: string | null;
 };
 
+function planLabel(plan: string | undefined): string {
+  if (plan === 'starter') return 'Starter';
+  if (plan === 'pro' || plan === 'paid') return 'Pro';
+  return 'Free';
+}
+
 /**
  * Profile / Settings — Phase F (PF-20 / PF-21 / PF-22).
  * Avatar in the ecosystem rail opens this page.
@@ -28,13 +38,21 @@ export function SettingsPage() {
   const [searchParams] = useSearchParams();
   const [usage, setUsage] = useState<UsageSummary | null>(null);
   const [usageError, setUsageError] = useState<string | null>(null);
-  const [billingBusy, setBillingBusy] = useState(false);
+  const [billingBusy, setBillingBusy] = useState<string | null>(null);
   const [billingError, setBillingError] = useState<string | null>(null);
-  const [checkoutEnabled, setCheckoutEnabled] = useState<boolean | null>(null);
+  const [billing, setBilling] = useState<BillingStatus | null>(null);
   const [githubRows, setGithubRows] = useState<GhRow[]>([]);
   const [githubLoading, setGithubLoading] = useState(true);
   const [githubError, setGithubError] = useState<string | null>(null);
   const billingFlash = searchParams.get('billing');
+
+  const [eraseOpen, setEraseOpen] = useState(false);
+  const [eraseProposal, setEraseProposal] =
+    useState<AccountEraseProposeResult | null>(null);
+  const [eraseEmail, setEraseEmail] = useState('');
+  const [erasePhrase, setErasePhrase] = useState('');
+  const [eraseBusy, setEraseBusy] = useState(false);
+  const [eraseError, setEraseError] = useState<string | null>(null);
 
   useEffect(() => {
     void getUsage()
@@ -47,8 +65,8 @@ export function SettingsPage() {
         setUsageError(err instanceof Error ? err.message : String(err));
       });
     void getBillingStatus()
-      .then((s) => setCheckoutEnabled(s.checkoutEnabled))
-      .catch(() => setCheckoutEnabled(false));
+      .then((s) => setBilling(s))
+      .catch(() => setBilling(null));
   }, [billingFlash]);
 
   useEffect(() => {
@@ -107,7 +125,8 @@ export function SettingsPage() {
   const connectedCount = githubRows.filter((r) => r.connected).length;
 
   return (
-    <div className="mx-auto max-w-2xl px-5 py-10 sm:px-6">
+    <div className="h-full min-h-0 overflow-y-auto">
+      <div className="mx-auto max-w-2xl px-5 py-10 sm:px-6">
       <p className="eyebrow">Profile</p>
       <h1 className="mt-3 font-display text-3xl font-extrabold tracking-tight text-paper">
         Settings
@@ -116,7 +135,7 @@ export function SettingsPage() {
         Account, appearance, usage, and connections.
       </p>
 
-      {/* PF-20 Account */}
+      {/* Account — profile only; sign-out lives in Session below */}
       <section className="surface mt-8 space-y-4 p-5">
         <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-mist">
           Account
@@ -137,17 +156,10 @@ export function SettingsPage() {
           <Link to="/forgot-password" className="btn-ghost text-xs">
             Reset password
           </Link>
-          <button
-            type="button"
-            onClick={signOut}
-            className="btn-secondary text-xs"
-          >
-            Sign out
-          </button>
         </div>
       </section>
 
-      {/* PF-20 Appearance */}
+      {/* Appearance */}
       <section className="surface mt-4 space-y-3 p-5">
         <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-mist">
           Appearance
@@ -155,7 +167,7 @@ export function SettingsPage() {
         <ThemeToggle />
       </section>
 
-      {/* Phase G — Usage & billing */}
+      {/* Usage & billing */}
       <section className="surface mt-4 space-y-4 p-5">
         <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-mist">
           Usage & billing
@@ -185,7 +197,7 @@ export function SettingsPage() {
                   </span>
                 </p>
                 <span className="text-[11px] font-semibold uppercase tracking-wider text-mist">
-                  {usage.plan === 'paid' ? 'Paid plan' : 'Free plan'}
+                  {planLabel(billing?.plan ?? usage.plan)} plan
                 </span>
               </div>
               <div className="mt-2 h-2 overflow-hidden rounded-full bg-line">
@@ -224,42 +236,101 @@ export function SettingsPage() {
         {billingError && (
           <p className="text-sm text-ember">{billingError}</p>
         )}
+
+        {billing?.catalog && (
+          <div className="grid gap-3 sm:grid-cols-3">
+            {billing.catalog.map((tier) => {
+              const current = (billing.plan === tier.id) || (billing.plan === 'pro' && tier.id === 'pro');
+              const canBuy =
+                tier.paid &&
+                tier.checkoutAvailable &&
+                billing.checkoutEnabled &&
+                !current;
+              return (
+                <div
+                  key={tier.id}
+                  className={`rounded-[var(--radius-control)] border p-3 ${
+                    current
+                      ? 'border-signal/40 bg-signal/5'
+                      : 'border-line bg-ink/30'
+                  }`}
+                >
+                  <div className="flex items-baseline justify-between gap-2">
+                    <p className="text-sm font-semibold text-paper">{tier.name}</p>
+                    <p className="text-[12px] text-mist">{tier.priceLabel}</p>
+                  </div>
+                  <p className="mt-1 text-[11px] leading-relaxed text-mist">
+                    {tier.blurb}
+                  </p>
+                  <ul className="mt-2 space-y-1 text-[11px] text-mist">
+                    {tier.highlights.map((h) => (
+                      <li key={h}>· {h}</li>
+                    ))}
+                  </ul>
+                  {current ? (
+                    <p className="mt-3 text-[11px] font-semibold uppercase tracking-wider text-signal">
+                      Current
+                    </p>
+                  ) : canBuy ? (
+                    <button
+                      type="button"
+                      disabled={billingBusy !== null}
+                      className="interactive mt-3 w-full rounded-[var(--radius-control)] bg-signal px-2.5 py-1.5 text-xs font-semibold text-ink disabled:opacity-50"
+                      onClick={() => {
+                        setBillingBusy(tier.id);
+                        setBillingError(null);
+                        void startBillingCheckout(tier.id as 'starter' | 'pro')
+                          .then((result) => {
+                            if (result.url) {
+                              window.location.assign(result.url);
+                              return;
+                            }
+                            if (result.changed) {
+                              window.location.assign(
+                                '/app/settings?billing=success',
+                              );
+                              return;
+                            }
+                            setBillingError('Checkout did not return a URL.');
+                            setBillingBusy(null);
+                          })
+                          .catch((err) => {
+                            setBillingError(
+                              err instanceof Error ? err.message : String(err),
+                            );
+                            setBillingBusy(null);
+                          });
+                      }}
+                    >
+                      {billingBusy === tier.id
+                        ? 'Opening…'
+                        : `Choose ${tier.name}`}
+                    </button>
+                  ) : (
+                    <p className="mt-3 text-[11px] text-mist/70">
+                      {tier.paid && !tier.checkoutAvailable
+                        ? 'Price not configured'
+                        : '—'}
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         <div className="flex flex-wrap gap-2">
-          {usage?.plan !== 'paid' ? (
+          {(billing?.plan === 'starter' ||
+            billing?.plan === 'pro' ||
+            usage?.plan === 'starter' ||
+            usage?.plan === 'pro' ||
+            usage?.plan === 'paid') && (
             <button
               type="button"
-              disabled={billingBusy || checkoutEnabled !== true}
-              className="interactive rounded-[var(--radius-control)] bg-signal px-3 py-1.5 text-xs font-semibold text-ink disabled:opacity-50"
-              onClick={() => {
-                setBillingBusy(true);
-                setBillingError(null);
-                void startBillingCheckout()
-                  .then(({ url }) => {
-                    window.location.assign(url);
-                  })
-                  .catch((err) => {
-                    setBillingError(
-                      err instanceof Error ? err.message : String(err),
-                    );
-                    setBillingBusy(false);
-                  });
-              }}
-            >
-              {billingBusy
-                ? 'Opening…'
-                : checkoutEnabled === false
-                  ? 'Billing unavailable'
-                  : checkoutEnabled === null
-                    ? 'Checking…'
-                    : 'Upgrade · ~$20/mo'}
-            </button>
-          ) : (
-            <button
-              type="button"
-              disabled={billingBusy}
+              disabled={billingBusy !== null}
               className="btn-secondary text-xs disabled:opacity-50"
               onClick={() => {
-                setBillingBusy(true);
+                setBillingBusy('portal');
                 setBillingError(null);
                 void openBillingPortal()
                   .then(({ url }) => {
@@ -269,21 +340,21 @@ export function SettingsPage() {
                     setBillingError(
                       err instanceof Error ? err.message : String(err),
                     );
-                    setBillingBusy(false);
+                    setBillingBusy(null);
                   });
               }}
             >
-              {billingBusy ? 'Opening…' : 'Manage billing'}
+              {billingBusy === 'portal' ? 'Opening…' : 'Manage billing'}
             </button>
           )}
         </div>
         <p className="text-[12px] leading-relaxed text-mist">
-          Paid includes creatives and connector writes. Hard caps still apply
-          (3 images/day, 1 video/72h) so platform cost stays bounded.
+          Starter unlocks images, decks, flyers, and connector writes. Pro adds
+          video. Hard caps still apply (3 images/day, 1 video/72h on Pro).
         </p>
       </section>
 
-      {/* PF-22 Connections */}
+      {/* Connections */}
       <section className="surface mt-4 space-y-4 p-5">
         <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-mist">
           Connections
@@ -417,14 +488,221 @@ export function SettingsPage() {
         </p>
       </section>
 
-      <p className="mt-6 text-[11px] text-mist/70">
+      {/* Session */}
+      <section className="surface mt-4 space-y-3 p-5">
+        <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-mist">
+          Session
+        </h2>
+        <p className="text-[12px] leading-relaxed text-mist">
+          Signs you out on this device and clears stored credentials and local
+          session caches.
+        </p>
+        <button
+          type="button"
+          onClick={() => void signOut()}
+          className="btn-secondary text-xs"
+        >
+          Sign out
+        </button>
+      </section>
+
+      {/* Danger zone — Phase C account erase */}
+      <section className="surface mt-4 space-y-3 border border-ember/35 p-5">
+        <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-ember">
+          Danger zone
+        </h2>
+        <p className="text-[12px] leading-relaxed text-mist">
+          Permanently erase this account: revoke API keys, disconnect connectors,
+          cancel and delete Stripe customer, delete S3 artefacts, redact chats
+          and captures, tombstone memory (audited), soft-delete projects, then
+          delete the Cognito user. This cannot be undone.
+        </p>
+
+        {!eraseOpen ? (
+          <button
+            type="button"
+            className="interactive rounded-[var(--radius-control)] border border-ember/50 bg-ember/10 px-3 py-1.5 text-xs font-semibold text-ember"
+            onClick={() => {
+              setEraseOpen(true);
+              setEraseError(null);
+              setEraseProposal(null);
+              setEraseEmail(user?.email?.trim() ?? '');
+              setErasePhrase('');
+            }}
+            disabled={user?.isAnonymous === true}
+          >
+            Delete account…
+          </button>
+        ) : (
+          <div className="space-y-3 rounded-[var(--radius-control)] border border-ember/25 bg-ink/40 p-3">
+            {!eraseProposal ? (
+              <>
+                <label className="block space-y-1">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-mist">
+                    Account email
+                  </span>
+                  <input
+                    type="email"
+                    autoComplete="email"
+                    className="w-full rounded-[var(--radius-control)] border border-line bg-ink px-2.5 py-1.5 text-sm text-paper"
+                    value={eraseEmail}
+                    onChange={(e) => setEraseEmail(e.target.value)}
+                    disabled={eraseBusy}
+                  />
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={eraseBusy || !eraseEmail.includes('@')}
+                    className="interactive rounded-[var(--radius-control)] bg-ember px-3 py-1.5 text-xs font-semibold text-ink disabled:opacity-50"
+                    onClick={() => {
+                      setEraseBusy(true);
+                      setEraseError(null);
+                      void proposeAccountErase(eraseEmail.trim())
+                        .then((p) => setEraseProposal(p))
+                        .catch((err) =>
+                          setEraseError(
+                            err instanceof Error ? err.message : String(err),
+                          ),
+                        )
+                        .finally(() => setEraseBusy(false));
+                    }}
+                  >
+                    {eraseBusy ? 'Preparing…' : 'Continue'}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={eraseBusy}
+                    className="btn-ghost text-xs"
+                    onClick={() => {
+                      setEraseOpen(false);
+                      setEraseProposal(null);
+                      setEraseError(null);
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-[12px] text-mist">
+                  This will remove{' '}
+                  <span className="text-paper">
+                    {eraseProposal.summary.projects} project
+                    {eraseProposal.summary.projects === 1 ? '' : 's'}
+                  </span>
+                  , revoke{' '}
+                  <span className="text-paper">
+                    {eraseProposal.summary.apiKeysActive} API key
+                    {eraseProposal.summary.apiKeysActive === 1 ? '' : 's'}
+                  </span>
+                  , and disconnect{' '}
+                  <span className="text-paper">
+                    {eraseProposal.summary.connectorsConnected} connector
+                    {eraseProposal.summary.connectorsConnected === 1 ? '' : 's'}
+                  </span>
+                  {eraseProposal.summary.hasStripeCustomer
+                    ? ', and cancel your Stripe subscription'
+                    : ''}
+                  .
+                </p>
+                <label className="block space-y-1">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-mist">
+                    Re-type email
+                  </span>
+                  <input
+                    type="email"
+                    className="w-full rounded-[var(--radius-control)] border border-line bg-ink px-2.5 py-1.5 text-sm text-paper"
+                    value={eraseEmail}
+                    onChange={(e) => setEraseEmail(e.target.value)}
+                    disabled={eraseBusy}
+                  />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-mist">
+                    Type{' '}
+                    <span className="font-mono text-paper">
+                      {eraseProposal.confirmPhrase}
+                    </span>
+                  </span>
+                  <input
+                    type="text"
+                    autoComplete="off"
+                    className="w-full rounded-[var(--radius-control)] border border-line bg-ink px-2.5 py-1.5 font-mono text-sm text-paper"
+                    value={erasePhrase}
+                    onChange={(e) => setErasePhrase(e.target.value)}
+                    disabled={eraseBusy}
+                    placeholder={eraseProposal.confirmPhrase}
+                  />
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={
+                      eraseBusy ||
+                      erasePhrase !== eraseProposal.confirmPhrase ||
+                      !eraseEmail.includes('@')
+                    }
+                    className="interactive rounded-[var(--radius-control)] bg-ember px-3 py-1.5 text-xs font-semibold text-ink disabled:opacity-50"
+                    onClick={() => {
+                      setEraseBusy(true);
+                      setEraseError(null);
+                      void confirmAccountErase({
+                        proposalId: eraseProposal.proposalId,
+                        email: eraseEmail.trim(),
+                        confirmPhrase: erasePhrase,
+                      })
+                        .then(async () => {
+                          await signOut();
+                        })
+                        .catch((err) => {
+                          setEraseError(
+                            err instanceof Error ? err.message : String(err),
+                          );
+                          setEraseBusy(false);
+                        });
+                    }}
+                  >
+                    {eraseBusy ? 'Erasing…' : 'Erase my account'}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={eraseBusy}
+                    className="btn-ghost text-xs"
+                    onClick={() => {
+                      setEraseOpen(false);
+                      setEraseProposal(null);
+                      setErasePhrase('');
+                      setEraseError(null);
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+                <p className="text-[11px] text-mist/70">
+                  Proposal expires{' '}
+                  {new Date(eraseProposal.expiresAt).toLocaleString()}.
+                </p>
+              </>
+            )}
+            {eraseError && (
+              <p className="text-sm text-ember" role="alert">
+                {eraseError}
+              </p>
+            )}
+          </div>
+        )}
+      </section>
+
+      <p className="mt-6 pb-8 text-[11px] text-mist/70">
         <a href="/privacy.html" className="text-signal underline-offset-2 hover:underline">
           Privacy
         </a>
         {' · '}
-        Account export / delete and social sign-in are out of weekend scope
-        (PF-23 / PF-24 cut).
+        Account erase is audited; memory uses tombstones, not silent delete.
       </p>
+      </div>
     </div>
   );
 }

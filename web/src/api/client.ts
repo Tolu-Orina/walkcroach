@@ -620,12 +620,33 @@ export async function recordInlineEdit(
   return parseJson(res);
 }
 
+export type PlanId = 'free' | 'starter' | 'pro';
+
+export type PlanFeatures = {
+  creatives: boolean;
+  video: boolean;
+  connectorWrites: boolean;
+};
+
+export type BillingPlanCatalogItem = {
+  id: PlanId;
+  name: string;
+  priceLabel: string;
+  priceCents: number;
+  monthlyCredits: number;
+  features: PlanFeatures;
+  paid: boolean;
+  blurb: string;
+  highlights: string[];
+  checkoutAvailable: boolean;
+};
+
 export type UsageSummary = {
   monthlyCredits: number;
   used: number;
   remaining: number;
   costs: Record<string, number>;
-  plan?: 'free' | 'paid';
+  plan?: PlanId | 'paid';
   sharedPool?: boolean;
 };
 
@@ -636,21 +657,35 @@ export async function getUsage(): Promise<UsageSummary> {
   return parseJson(res);
 }
 
-export async function getBillingStatus(): Promise<{
-  plan: 'free' | 'paid';
-  checkoutEnabled: boolean;
+export type BillingStatus = {
+  plan: PlanId;
+  planName: string;
   priceLabel: string;
-}> {
+  monthlyCredits: number;
+  features: PlanFeatures;
+  checkoutEnabled: boolean;
+  catalog: BillingPlanCatalogItem[];
+  upgrades: BillingPlanCatalogItem[];
+  stripeCustomerId?: string | null;
+};
+
+export async function getBillingStatus(): Promise<BillingStatus> {
   const res = await fetch(`${API_URL}/billing/status`, {
     headers: authHeaders(),
   });
   return parseJson(res);
 }
 
-export async function startBillingCheckout(): Promise<{ url: string }> {
+export async function startBillingCheckout(
+  planId: 'starter' | 'pro' = 'pro',
+): Promise<{ url?: string; planId?: string; changed?: boolean; ok?: boolean }> {
   const res = await fetch(`${API_URL}/billing/checkout`, {
     method: 'POST',
-    headers: authHeaders(),
+    headers: {
+      ...authHeaders(),
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ planId }),
   });
   return parseJson(res);
 }
@@ -663,8 +698,72 @@ export async function openBillingPortal(): Promise<{ url: string }> {
   return parseJson(res);
 }
 
+export type AccountEraseSummary = {
+  projects: number;
+  apiKeysActive: number;
+  connectorsConnected: number;
+  hasStripeCustomer: boolean;
+  plan: string;
+};
+
+export type AccountEraseProposeResult = {
+  proposalId: string;
+  confirmPhrase: string;
+  expiresAt: string;
+  summary: AccountEraseSummary;
+  message: string;
+};
+
+export type AccountEraseConfirmResult = {
+  ok: boolean;
+  proposalId: string;
+  apiKeysRevoked: number;
+  connectorsRevoked: number;
+  memoryErased: number;
+  messagesRedacted: number;
+  projectsSoftDeleted: number;
+  s3ObjectsDeleted: number;
+  stripeCancelled: boolean;
+  stripeCustomerDeleted: boolean;
+  cognitoDeleted: boolean;
+  cognitoSkipped?: string;
+  message: string;
+};
+
+/** Phase C — propose account erase (typed confirm follows). */
+export async function proposeAccountErase(
+  email: string,
+): Promise<AccountEraseProposeResult> {
+  const res = await fetch(`${API_URL}/me/account/erase/propose`, {
+    method: 'POST',
+    headers: {
+      ...authHeaders(),
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ email }),
+  });
+  return parseJson(res);
+}
+
+/** Phase C — confirm + execute account erase. */
+export async function confirmAccountErase(input: {
+  proposalId: string;
+  email: string;
+  confirmPhrase: string;
+}): Promise<AccountEraseConfirmResult> {
+  const res = await fetch(`${API_URL}/me/account/erase/confirm`, {
+    method: 'POST',
+    headers: {
+      ...authHeaders(),
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(input),
+  });
+  return parseJson(res);
+}
+
 export type CreativeQuota = {
-  plan: 'free' | 'paid';
+  plan: PlanId | 'paid';
   image: { used: number; limit: number; remaining: number; resetAt: string; unit: string };
   video: {
     used: number;

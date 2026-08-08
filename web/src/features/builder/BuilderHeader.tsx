@@ -180,7 +180,7 @@ export function BuilderHeader({
             </button>
             <button
               type="button"
-              onClick={signOut}
+              onClick={() => void signOut()}
               className="interactive block w-full px-3 py-2 text-left text-sm text-ember hover:bg-ink/60"
             >
               Sign out

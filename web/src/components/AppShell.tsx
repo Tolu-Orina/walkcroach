@@ -93,7 +93,7 @@ export function AppShell({
                   </span>
                   <button
                     type="button"
-                    onClick={signOut}
+                    onClick={() => void signOut()}
                     className="btn-ghost text-xs"
                   >
                     Sign out

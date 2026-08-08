@@ -1,6 +1,25 @@
 import { useEffect, useState } from 'react';
 import { getUsage, type UsageSummary } from '../../api/client';
 
+function planHint(plan: string | undefined): { title: string; suffix: string } {
+  if (plan === 'starter') {
+    return {
+      title: 'Starter plan credits this month (shared with Chrome)',
+      suffix: ' · starter',
+    };
+  }
+  if (plan === 'pro' || plan === 'paid') {
+    return {
+      title: 'Pro plan credits this month (shared with Chrome)',
+      suffix: ' · pro',
+    };
+  }
+  return {
+    title: 'Free plan credits this month — upgrade for creatives',
+    suffix: ' · free',
+  };
+}
+
 export function UsageMeter() {
   const [usage, setUsage] = useState<UsageSummary | null>(null);
 
@@ -20,15 +39,12 @@ export function UsageMeter() {
   const pct = usage.monthlyCredits
     ? Math.round((usage.remaining / usage.monthlyCredits) * 100)
     : 0;
+  const hint = planHint(usage.plan);
 
   return (
     <div
       className="flex items-center gap-2 rounded-sm border border-line bg-ink/60 px-2 py-1"
-      title={
-        usage.plan === 'paid'
-          ? 'Paid plan credits this month (shared with Chrome)'
-          : 'Free plan credits this month — upgrade for creatives'
-      }
+      title={hint.title}
     >
       <div className="h-1.5 w-16 overflow-hidden rounded-full bg-line">
         <div
@@ -38,7 +54,7 @@ export function UsageMeter() {
       </div>
       <span className="text-[10px] text-mist">
         {usage.remaining}/{usage.monthlyCredits}
-        {usage.plan === 'paid' ? '' : ' · free'}
+        {hint.suffix}
       </span>
     </div>
   );

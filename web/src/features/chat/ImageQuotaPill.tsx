@@ -80,19 +80,24 @@ export function ImageQuotaPill() {
       ? 'border-red-400/40 bg-red-400/10 text-red-300'
       : 'border-signal/30 bg-signal/10 text-signal';
 
+  const hasCreatives =
+    quota.plan === 'starter' || quota.plan === 'pro' || quota.plan === 'paid';
+  const hasVideo = quota.plan === 'pro' || quota.plan === 'paid';
   const videoTitle =
     videoRemaining === 0
       ? `Video resets around ${quota.video.resetAt ?? '—'}`
-      : '1× ≤30s video per rolling 72 hours (paid)';
+      : hasVideo
+        ? '1× ≤30s video per rolling 72 hours (Pro)'
+        : 'Video requires Pro';
 
   return (
     <div className="flex flex-wrap items-center gap-2">
       <div
         className={`interactive flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-mono text-[11px] ${tone}`}
         title={
-          quota.plan === 'paid'
-            ? 'Paid plan: 5 credits per image · ≤3 / 24h'
-            : 'Images require Paid plan'
+          hasCreatives
+            ? 'Starter/Pro: 5 credits per image · ≤3 / 24h'
+            : 'Images require Starter or Pro'
         }
       >
         <span className="inline-block h-1.5 w-1.5 rounded-full bg-current" />
@@ -106,17 +111,27 @@ export function ImageQuotaPill() {
       >
         <span className="inline-block h-1.5 w-1.5 rounded-full bg-current" />
         <span>
-          {videoRemaining === 0
+          {!hasVideo
             ? 'video locked'
-            : `video ${videoRemaining}/${quota.video.limit}`}
+            : videoRemaining === 0
+              ? 'video locked'
+              : `video ${videoRemaining}/${quota.video.limit}`}
         </span>
       </div>
-      {quota.plan !== 'paid' && (
+      {!hasCreatives && (
         <Link
           to="/app/settings"
           className="interactive rounded-full border border-signal/40 bg-signal/10 px-2.5 py-1 font-mono text-[11px] text-signal hover:bg-signal/20"
         >
           upgrade
+        </Link>
+      )}
+      {hasCreatives && !hasVideo && (
+        <Link
+          to="/app/settings"
+          className="interactive rounded-full border border-signal/40 bg-signal/10 px-2.5 py-1 font-mono text-[11px] text-signal hover:bg-signal/20"
+        >
+          unlock video
         </Link>
       )}
     </div>

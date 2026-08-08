@@ -64,7 +64,7 @@ export function DebugScreensPage() {
               : 'Sign in as Builder (dev)'}
           </button>
           {status === 'authenticated' && (
-            <button type="button" onClick={signOut} className="btn-ghost text-xs">
+            <button type="button" onClick={() => void signOut()} className="btn-ghost text-xs">
               Sign out
             </button>
           )}

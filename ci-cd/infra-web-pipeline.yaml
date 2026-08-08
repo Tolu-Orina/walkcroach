@@ -355,8 +355,20 @@ Resources:
                 Action:
                   - ssm:PutParameter
                   - ssm:GetParameter
+                  - ssm:GetParameters
+                  - ssm:GetParametersByPath
+                  - ssm:DeleteParameter
+                  - ssm:DeleteParameters
                   - ssm:AddTagsToResource
+                  - ssm:ListTagsForResource
+                  - ssm:RemoveTagsFromResource
                 Resource: !Sub 'arn:aws:ssm:*:${AWS::AccountId}:parameter/walkcroach/dev/web/*'
+              # DescribeParameters is account-scoped (no resource ARN); required to refresh aws_ssm_parameter.
+              - Sid: SsmDescribeParametersDev
+                Effect: Allow
+                Action:
+                  - ssm:DescribeParameters
+                Resource: '*'
               - Effect: Allow
                 Action:
                   - logs:CreateLogGroup
@@ -446,8 +458,19 @@ Resources:
                 Action:
                   - ssm:PutParameter
                   - ssm:GetParameter
+                  - ssm:GetParameters
+                  - ssm:GetParametersByPath
+                  - ssm:DeleteParameter
+                  - ssm:DeleteParameters
                   - ssm:AddTagsToResource
+                  - ssm:ListTagsForResource
+                  - ssm:RemoveTagsFromResource
                 Resource: !Sub 'arn:aws:ssm:*:${AWS::AccountId}:parameter/walkcroach/test/web/*'
+              - Sid: SsmDescribeParametersTest
+                Effect: Allow
+                Action:
+                  - ssm:DescribeParameters
+                Resource: '*'
               - Effect: Allow
                 Action:
                   - logs:CreateLogGroup
@@ -537,8 +560,19 @@ Resources:
                 Action:
                   - ssm:PutParameter
                   - ssm:GetParameter
+                  - ssm:GetParameters
+                  - ssm:GetParametersByPath
+                  - ssm:DeleteParameter
+                  - ssm:DeleteParameters
                   - ssm:AddTagsToResource
+                  - ssm:ListTagsForResource
+                  - ssm:RemoveTagsFromResource
                 Resource: !Sub 'arn:aws:ssm:*:${AWS::AccountId}:parameter/walkcroach/prod/web/*'
+              - Sid: SsmDescribeParametersProd
+                Effect: Allow
+                Action:
+                  - ssm:DescribeParameters
+                Resource: '*'
               - Effect: Allow
                 Action:
                   - logs:CreateLogGroup

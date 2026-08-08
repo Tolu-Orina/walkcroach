@@ -16,6 +16,7 @@ import {
   assertCredits,
   debitCredits,
   getEntitlement,
+  hasCreativesAccess,
   refundCredits,
 } from './billing.js';
 
@@ -78,7 +79,7 @@ export async function handleConfirmCreativeRender(
   assetId: string,
 ): Promise<RestResult> {
   const plan = await getEntitlement(db, auth.ownerId);
-  if (plan !== 'paid') {
+  if (!hasCreativesAccess(plan)) {
     return jsonResponse(402, { error: 'paid_plan_required' });
   }
 

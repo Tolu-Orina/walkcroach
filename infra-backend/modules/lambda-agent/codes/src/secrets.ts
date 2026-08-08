@@ -78,6 +78,8 @@ export async function ensureRuntimeSecrets(): Promise<void> {
     stripe_secret_key?: string;
     stripe_webhook_secret?: string;
     stripe_price_id_paid?: string;
+    stripe_price_id_pro?: string;
+    stripe_price_id_starter?: string;
   };
 
   applySecret(
@@ -157,6 +159,16 @@ export async function ensureRuntimeSecrets(): Promise<void> {
     'stripe_price_id_paid',
     secret.stripe_price_id_paid,
     'STRIPE_PRICE_ID_PAID',
+  );
+  applySecret(
+    'stripe_price_id_pro',
+    secret.stripe_price_id_pro,
+    'STRIPE_PRICE_ID_PRO',
+  );
+  applySecret(
+    'stripe_price_id_starter',
+    secret.stripe_price_id_starter,
+    'STRIPE_PRICE_ID_STARTER',
   );
 
   // Lambda uses the execution role for Bedrock (IAM). Bearer tokens expire (~12h)

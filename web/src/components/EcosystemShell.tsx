@@ -85,6 +85,27 @@ function IconProfile() {
   );
 }
 
+/** Door / exit — sign out affordance in the rail footer. */
+function IconSignOut() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-[1.15rem] w-[1.15rem]" fill="none" aria-hidden>
+      <path
+        d="M10 4.5H7.5A2.5 2.5 0 0 0 5 7v10a2.5 2.5 0 0 0 2.5 2.5H10"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+      <path
+        d="M14 8.5 17.5 12 14 15.5M9.5 12h8"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 function IconPlus() {
   return (
     <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" aria-hidden>
@@ -205,7 +226,7 @@ function RailNavLink({
 
 function EcosystemRail() {
   const { expanded, toggle, setExpanded } = useShell();
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const [recents, setRecents] = useState<Array<{ id: string; title: string }>>(
@@ -401,7 +422,7 @@ function EcosystemRail() {
 
         <div
           className={`mt-auto shrink-0 border-t border-line pt-3 ${
-            expanded ? 'px-3' : 'flex justify-center'
+            expanded ? 'px-3' : 'flex flex-col items-center gap-1'
           }`}
         >
           <NavLink
@@ -432,6 +453,24 @@ function EcosystemRail() {
               </span>
             )}
           </NavLink>
+          <button
+            type="button"
+            title="Sign out"
+            aria-label="Sign out"
+            onClick={() => void signOut()}
+            className={`interactive flex items-center gap-3 rounded-[var(--radius-control)] text-mist transition hover:bg-panel hover:text-paper ${
+              expanded ? 'mt-1 h-10 w-full px-2.5' : 'mt-1 h-10 w-10 justify-center'
+            }`}
+          >
+            <span className="grid shrink-0 place-items-center">
+              <IconSignOut />
+            </span>
+            {expanded && (
+              <span className="truncate font-sans text-sm font-medium tracking-tight">
+                Sign out
+              </span>
+            )}
+          </button>
         </div>
       </aside>
     </>

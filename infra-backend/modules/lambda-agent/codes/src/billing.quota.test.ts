@@ -83,10 +83,21 @@ describe('creative entitlements + hard quotas (Phase A)', () => {
     expect(await getEntitlement(db, 'u1')).toBe('free');
   });
 
-  it('reads and sets paid plan', async () => {
+  it('reads and sets pro plan', async () => {
     const { db } = fakeDb();
-    await setEntitlement(db, 'u1', 'paid');
-    expect(await getEntitlement(db, 'u1')).toBe('paid');
+    await setEntitlement(db, 'u1', 'pro');
+    expect(await getEntitlement(db, 'u1')).toBe('pro');
+  });
+
+  it('normalizes legacy paid rows to pro', async () => {
+    const { db } = fakeDb({ plan: 'paid' });
+    expect(await getEntitlement(db, 'u1')).toBe('pro');
+  });
+
+  it('reads starter plan', async () => {
+    const { db } = fakeDb();
+    await setEntitlement(db, 'u1', 'starter');
+    expect(await getEntitlement(db, 'u1')).toBe('starter');
   });
 
   it('hard cap: allows up to the limit, then blocks', async () => {

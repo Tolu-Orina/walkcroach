@@ -42,6 +42,7 @@ import {
   assertCredits,
   debitCredits,
   getEntitlement,
+  hasConnectorWriteAccess,
   refundCredits,
 } from './billing.js';
 
@@ -302,10 +303,10 @@ export async function handleExecuteConnectorRun(
 
   if (action.write) {
     const plan = await getEntitlement(db, auth.ownerId);
-    if (plan !== 'paid') {
+    if (!hasConnectorWriteAccess(plan)) {
       return jsonResponse(402, {
         error: 'paid_plan_required',
-        message: 'Connector writes require a paid plan.',
+        message: 'Connector writes require Starter or Pro.',
       });
     }
   }

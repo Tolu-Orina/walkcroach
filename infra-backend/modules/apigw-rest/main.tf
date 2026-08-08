@@ -228,6 +228,8 @@ resource "aws_api_gateway_deployment" "this" {
         aws_api_gateway_integration.tool_result_post.id,
         aws_api_gateway_integration.proxy_any.id,
         aws_api_gateway_integration.proxy_options.id,
+        aws_api_gateway_integration.webhooks_stripe_post.id,
+        aws_api_gateway_integration.webhooks_stripe_options.id,
         aws_api_gateway_integration.chrome_proxy_any.id,
         aws_api_gateway_integration.chrome_proxy_options.id,
         aws_api_gateway_integration.chrome_options.id,

@@ -72,6 +72,10 @@ import {
   handleStripeWebhook,
 } from './stripeBilling.js';
 import {
+  handleAccountEraseConfirm,
+  handleAccountErasePropose,
+} from './accountErase.js';
+import {
   handleConnectorOauthCallback,
   handleConnectorOauthStart,
   handleDeclineConnectorRun,
@@ -1192,7 +1196,7 @@ export async function handleRest(
     }
     const db = createDbClient();
     try {
-      return await handleBillingCheckout(db, authResult);
+      return await handleBillingCheckout(db, authResult, rawBody);
     } finally {
       await db.close();
     }
@@ -1209,6 +1213,40 @@ export async function handleRest(
     const db = createDbClient();
     try {
       return await handleBillingPortal(db, authResult);
+    } finally {
+      await db.close();
+    }
+  }
+
+  if (
+    method === 'POST' &&
+    (path === '/me/account/erase/propose' ||
+      path.endsWith('/me/account/erase/propose'))
+  ) {
+    const authResult = await requireAuth(headers);
+    if ('error' in authResult) {
+      return jsonResponse(authResult.status, { error: authResult.error });
+    }
+    const db = createDbClient();
+    try {
+      return await handleAccountErasePropose(db, authResult, rawBody);
+    } finally {
+      await db.close();
+    }
+  }
+
+  if (
+    method === 'POST' &&
+    (path === '/me/account/erase/confirm' ||
+      path.endsWith('/me/account/erase/confirm'))
+  ) {
+    const authResult = await requireAuth(headers);
+    if ('error' in authResult) {
+      return jsonResponse(authResult.status, { error: authResult.error });
+    }
+    const db = createDbClient();
+    try {
+      return await handleAccountEraseConfirm(db, authResult, rawBody);
     } finally {
       await db.close();
     }

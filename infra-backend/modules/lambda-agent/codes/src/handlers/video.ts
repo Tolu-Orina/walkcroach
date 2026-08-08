@@ -27,6 +27,7 @@ import {
   debitCredits,
   getEntitlement,
   HARD_QUOTAS,
+  hasVideoAccess,
   peekVideoQuota,
   refundCredits,
 } from './billing.js';
@@ -178,8 +179,11 @@ export async function handleConfirmVideoJob(
   jobId: string,
 ): Promise<RestResult> {
   const plan = await getEntitlement(db, auth.ownerId);
-  if (plan !== 'paid') {
-    return jsonResponse(402, { error: 'paid_plan_required' });
+  if (!hasVideoAccess(plan)) {
+    return jsonResponse(402, {
+      error: 'pro_plan_required',
+      message: 'Video studio requires the Pro plan.',
+    });
   }
 
   const { rows } = await db.query<VideoJobRow>(

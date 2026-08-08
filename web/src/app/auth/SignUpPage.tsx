@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { cognitoErrorMessage } from '../../auth/cognito-idp';
+import { stashPendingSignup } from '../../auth/signup-pending';
 import { useAuth } from '../../auth/useAuth';
 import { AuthCard, AuthError, AuthLink } from '../../components/auth/AuthCard';
 
@@ -29,6 +30,7 @@ export function SignUpPage() {
     try {
       if (cognitoEnabled) {
         await registerAccount({ email, password, name });
+        stashPendingSignup({ email: email.trim(), password });
         navigate(`/verify?email=${encodeURIComponent(email.trim())}`);
         return;
       }

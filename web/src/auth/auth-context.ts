@@ -5,7 +5,7 @@ import type { StoredAuth } from './storage';
 export type AuthContextValue = AuthState & {
   signIn: (displayName?: string) => void;
   signInAnonymous: () => void;
-  signOut: () => void;
+  signOut: () => Promise<void>;
   completeSession: (stored: StoredAuth) => void;
   loginWithPassword: (email: string, password: string) => Promise<void>;
   registerAccount: (input: {

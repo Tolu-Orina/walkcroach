@@ -150,6 +150,13 @@ export async function cognitoRefreshTokens(refreshToken: string): Promise<Cognit
   return toTokens(data.AuthenticationResult, refreshToken);
 }
 
+/** Invalidate Cognito refresh tokens for this device session. */
+export async function cognitoGlobalSignOut(accessToken: string): Promise<void> {
+  await cognitoRequest('GlobalSignOut', {
+    AccessToken: accessToken,
+  });
+}
+
 export function cognitoErrorMessage(err: unknown): string {
   if (err instanceof CognitoAuthError) {
     switch (err.code) {

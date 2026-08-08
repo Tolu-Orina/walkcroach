@@ -21,6 +21,7 @@ import {
   assertCredits,
   debitCredits,
   getEntitlement,
+  hasConnectorWriteAccess,
 } from '@walkcroach/ledger';
 import type { AuthContext } from '../auth.js';
 import { jsonResponse } from '../http.js';
@@ -228,10 +229,10 @@ export async function handleExecuteRun(
 
     if (action.write) {
       const plan = await getEntitlement(db, auth.ownerId);
-      if (plan !== 'paid') {
+      if (!hasConnectorWriteAccess(plan)) {
         return jsonResponse(402, {
           error: 'upgrade_required',
-          message: 'Connector writes require a paid plan.',
+          message: 'Connector writes require Starter or Pro.',
         });
       }
     }

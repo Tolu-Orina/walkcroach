@@ -1,11 +1,14 @@
 /**
  * Loom-inspired governance checklist for platform operators (Pre–Phase 6).
  *
- * Not a control-plane product — documentation + light UI so publish/scopes/
- * HITL/cost attribution are reviewable before Phase 6 public agent package.
+ * Policy-only by design — not a control-plane product. Live usage and keys
+ * stay on Overview / Ops / API keys. This page documents publish/scopes/
+ * HITL/cost attribution before Phase 6 public agent package.
  */
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { ReactNode } from 'react';
+import { getSdkHealth } from '../../api/client';
 
 function Section({
   title,
@@ -25,13 +28,33 @@ function Section({
 }
 
 export function DeveloperGovernancePage() {
+  const [asOfHuman, setAsOfHuman] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getSdkHealth()
+      .then((h) => {
+        if (!cancelled) setAsOfHuman(h.retention?.asOfHuman ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setAsOfHuman(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <div className="space-y-4">
       <p className="text-sm leading-relaxed text-mist">
         Patterns borrowed from enterprise agent platforms (e.g. AWS Loom) —
         applied to WalkCroach without forking their control plane. Memory stays
         on <code className="font-mono text-[12px] text-paper">/v1</code>; agent
-        loops stay private until Phase 6 triggers.
+        loops stay private until Phase 6 triggers. For live meters, use{' '}
+        <Link to="/app/developer/ops" className="text-signal hover:underline">
+          Ops
+        </Link>
+        .
       </p>
 
       <Section title="1. Registry / review before publish">
@@ -70,7 +93,7 @@ export function DeveloperGovernancePage() {
             <Link to="/app/developer/ops" className="text-signal hover:underline">
               Ops
             </Link>
-            .
+            — credit pool, ledger rates, and per-key remember/recall/publish.
           </li>
           <li>
             Ledger debits emit optional Stripe Billing Meter events (
@@ -143,7 +166,14 @@ export function DeveloperGovernancePage() {
           <li>
             Memory path CloudWatch alarms:{' '}
             <code className="font-mono text-[12px]">WalkCroach/Memory</code> — see
-            Ops.
+            Ops (documented pointer, not live polling).
+          </li>
+          <li>
+            asOf / diff retention window:{' '}
+            <span className="font-mono text-paper">
+              {asOfHuman ?? 'load from sdk-health…'}
+            </span>{' '}
+            — not multi-year time travel.
           </li>
           <li>We do not host a LangSmith competitor; export only.</li>
         </ul>

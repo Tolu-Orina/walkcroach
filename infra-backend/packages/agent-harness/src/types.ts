@@ -44,6 +44,7 @@ export type AgentEvent =
       type: 'upgrade_required';
       reason:
         | 'paid_plan_required'
+        | 'pro_plan_required'
         | 'insufficient_credits'
         | 'image_quota_exceeded'
         | 'video_quota_exceeded';

@@ -5,19 +5,22 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { isCognitoEnabled, allowDevAuth, refreshCognitoTokens } from './cognito';
 import {
   cognitoConfirmForgotPassword,
   cognitoConfirmSignUp,
   cognitoForgotPassword,
+  cognitoGlobalSignOut,
   cognitoResendConfirmation,
   cognitoSignIn,
   cognitoSignUp,
 } from './cognito-idp';
 import { AuthContext } from './auth-context';
 import { sessionFromCognitoTokens } from './session';
+import { clearPendingSignup } from './signup-pending';
 import {
-  clearStoredAuth,
+  clearUserBoundStorage,
   loadStoredAuth,
   persistAuth,
   type StoredAuth,
@@ -49,6 +52,7 @@ function applySession(
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const navigate = useNavigate();
   const cognitoEnabled = isCognitoEnabled();
   const devAuthAllowed = allowDevAuth();
 
@@ -88,7 +92,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             }
             return;
           } catch {
-            clearStoredAuth();
+            clearUserBoundStorage();
             if (!cancelled) setState({ user: null, token: null, status: 'anonymous' });
             return;
           }
@@ -171,10 +175,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     applySession(setState, { user, token: devToken(id) });
   }, [devAuthAllowed]);
 
-  const signOut = useCallback(() => {
-    clearStoredAuth();
+  const signOut = useCallback(async () => {
+    const stored = loadStoredAuth();
+    const accessToken = stored?.cognito?.accessToken;
+    if (accessToken) {
+      try {
+        await cognitoGlobalSignOut(accessToken);
+      } catch {
+        // Still clear local credentials even if Cognito revoke fails (offline, expired).
+      }
+    }
+    clearPendingSignup();
+    clearUserBoundStorage();
     setState({ user: null, token: null, status: 'anonymous' });
-  }, []);
+    navigate('/signin', { replace: true });
+  }, [navigate]);
 
   const value = useMemo(
     () => ({

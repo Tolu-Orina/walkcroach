@@ -1,6 +1,11 @@
 import { useState, type FormEvent } from 'react';
 import { Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { cognitoErrorMessage } from '../../auth/cognito-idp';
+import { hasCompletedWelcome } from '../../auth/session';
+import {
+  clearPendingSignup,
+  readPendingSignup,
+} from '../../auth/signup-pending';
 import { useAuth } from '../../auth/useAuth';
 import {
   AuthCard,
@@ -10,7 +15,8 @@ import {
 } from '../../components/auth/AuthCard';
 
 export function VerifyEmailPage() {
-  const { cognitoEnabled, confirmEmail, resendConfirmation } = useAuth();
+  const { cognitoEnabled, confirmEmail, loginWithPassword, resendConfirmation } =
+    useAuth();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const email = params.get('email') ?? '';
@@ -35,6 +41,22 @@ export function VerifyEmailPage() {
     setBusy(true);
     try {
       await confirmEmail(email, code);
+
+      const pending = readPendingSignup();
+      const password =
+        pending && pending.email.toLowerCase() === email.trim().toLowerCase()
+          ? pending.password
+          : null;
+
+      if (password) {
+        await loginWithPassword(email, password);
+        clearPendingSignup();
+        navigate(hasCompletedWelcome() ? '/app/chat' : '/welcome', { replace: true });
+        return;
+      }
+
+      // Verified without a stashed password (e.g. deep link) — fall back to sign-in.
+      clearPendingSignup();
       navigate('/signin?verified=1', { replace: true });
     } catch (err) {
       setError(cognitoErrorMessage(err));
@@ -86,7 +108,7 @@ export function VerifyEmailPage() {
           />
         </div>
         <button type="submit" disabled={busy || !code.trim()} className="btn-primary w-full">
-          {busy ? 'Verifying…' : 'Verify email'}
+          {busy ? 'Verifying…' : 'Verify and continue'}
         </button>
         <button
           type="button"

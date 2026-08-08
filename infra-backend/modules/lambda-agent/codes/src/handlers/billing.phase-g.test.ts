@@ -35,7 +35,7 @@ describe('Phase G billing profitability', () => {
       query: vi.fn(async (sql: string, params?: unknown[]) => {
         calls.push({ sql, params });
         if (sql.includes('FROM entitlements')) {
-          return { rows: [{ plan: 'paid', stripe_customer_id: 'cus_x' }] };
+          return { rows: [{ plan: 'pro', stripe_customer_id: 'cus_x' }] };
         }
         if (sql.includes('FROM credit_balances') && sql.includes('SELECT')) {
           return {
@@ -52,7 +52,7 @@ describe('Phase G billing profitability', () => {
         return { rows: [] };
       }),
     };
-    await applySubscriptionPlan(db as never, 'o1', 'paid', 'cus_x');
+    await applySubscriptionPlan(db as never, 'o1', 'pro', 'cus_x');
     expect(calls.some((c) => c.sql.includes('INSERT INTO entitlements'))).toBe(
       true,
     );
@@ -63,9 +63,21 @@ describe('Phase G billing profitability', () => {
           c.params?.[1] === PAID_MONTHLY_CREDITS,
       ),
     ).toBe(true);
-    expect(await getEntitlement(db as never, 'o1')).toBe('paid');
+    expect(await getEntitlement(db as never, 'o1')).toBe('pro');
     const usage = await getUsageSummary(db as never, 'o1');
-    expect(usage.plan).toBe('paid');
+    expect(usage.plan).toBe('pro');
     expect(usage.sharedPool).toBe(true);
+  });
+
+  it('legacy paid entitlement normalizes to pro', async () => {
+    const db = {
+      query: vi.fn(async (sql: string) => {
+        if (sql.includes('FROM entitlements')) {
+          return { rows: [{ plan: 'paid', stripe_customer_id: null }] };
+        }
+        return { rows: [] };
+      }),
+    };
+    expect(await getEntitlement(db as never, 'o1')).toBe('pro');
   });
 });

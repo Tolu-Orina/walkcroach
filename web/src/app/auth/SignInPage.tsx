@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { CognitoAuthError, cognitoErrorMessage } from '../../auth/cognito-idp';
 import { hasCompletedWelcome } from '../../auth/session';
+import { stashPendingSignup } from '../../auth/signup-pending';
 import { useAuth } from '../../auth/useAuth';
 import {
   AuthCard,
@@ -48,6 +49,7 @@ export function SignInPage() {
       navigate(next, { replace: true });
     } catch (err) {
       if (err instanceof CognitoAuthError && err.code === 'UserNotConfirmedException') {
+        stashPendingSignup({ email: email.trim(), password });
         navigate(`/verify?email=${encodeURIComponent(email.trim())}`);
         return;
       }
