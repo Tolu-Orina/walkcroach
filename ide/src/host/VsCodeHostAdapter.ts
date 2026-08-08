@@ -208,6 +208,19 @@ export class VsCodeHostAdapter implements HostAdapter {
     await fs.writeFile(abs, content, 'utf8');
   }
 
+  /** Phase 1 — enable stale-read guard against real workspace FS. */
+  readonly supportsMtimeFreshness = true;
+
+  async getFileMtimeMs(rel: string): Promise<number | null> {
+    this.assertTrustedTools();
+    try {
+      const st = await fs.stat(this.resolvePath(rel));
+      return st.mtimeMs;
+    } catch {
+      return null;
+    }
+  }
+
   async applyDiff(rel: string, diff: string): Promise<void> {
     this.assertTrustedTools();
     const before = await this.readFile(rel);

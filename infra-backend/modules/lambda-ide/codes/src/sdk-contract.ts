@@ -29,6 +29,7 @@ export const SDK_CAPABILITIES = [
   'keys:manage',
   'content:publish',
   'content:run',
+  'graphs:run',
   'runs:read',
   'projects:ensure',
 ] as const;
@@ -42,5 +43,6 @@ export const SDK_ROOT_SEGMENTS = [
   'health',
   'sdk-health',
   'content',
+  'graphs',
   'runs',
 ] as const;

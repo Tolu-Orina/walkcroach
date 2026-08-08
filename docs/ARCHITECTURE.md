@@ -74,3 +74,12 @@ When A or B fires: open an ADR proposing a shared core with two adapters (or rej
 - Memory-contracts drift check vs OpenAPI `MemoryKind`
 - Harness export fixture validates via contracts `validateExport` (SDK-readable)
 - Agent-engine security evals + harness memory unit tests
+- **Agentic-pattern upgrade (Phases 0–8):** `agent-engine` + `agent-harness` `src/fitness/agentic-pattern-fitness.test.ts` (thrash, plan isolation, CriticGate, Graph bounds/reuse, BYO fail-closed, checkpoint GC policy). Retrospective: `docs/adr/ADR-J-phase7-8-retrospective.md`.
+- **Tool sync hardening:** content-hash freshness (mtime alone is insufficient); session `formatOnSave` suppress on IDE/Desktop; Desktop `supportsMtimeFreshness` parity with IDE/CLI.
+
+## Agentic Graph / Critic (Phases 3–8)
+
+- Internal Graph + CRDB checkpoints in `@walkcroach/agent-harness` (not agent-engine).
+- Public Run Graph DSL: platform catalog only — **BYO tools rejected** (ADR-I / ADR-J).
+- CriticGate Tier 1 always on; Tier 2/3 opt-in via `WALKCROACH_ENABLE_MODEL_CRITIC` (default off).
+- Checkpoint bulky state retention: 30 days (`pruneStaleGraphCheckpoints`).

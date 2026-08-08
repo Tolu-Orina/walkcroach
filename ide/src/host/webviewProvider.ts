@@ -691,6 +691,52 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
     return '';
   }
 
+  /**
+   * Session-scoped suppress of editor.formatOnSave for the agent run.
+   * Reduces autosave/format races that false-trigger stale-read / edit mismatch.
+   */
+  private async beginFormatOnSaveSuppress(): Promise<() => Promise<void>> {
+    const folder = vscode.workspace.workspaceFolders?.[0];
+    const cfg = folder
+      ? vscode.workspace.getConfiguration('editor', folder.uri)
+      : vscode.workspace.getConfiguration('editor');
+    const scope = folder
+      ? vscode.ConfigurationTarget.WorkspaceFolder
+      : vscode.ConfigurationTarget.Workspace;
+    const priorFormatOnSave = cfg.inspect<boolean>('formatOnSave');
+    const priorMode = cfg.inspect<string>('formatOnSaveMode');
+    const previousFormatOnSave = folder
+      ? (priorFormatOnSave?.workspaceFolder ?? priorFormatOnSave?.workspace)
+      : priorFormatOnSave?.workspace;
+    const previousMode = folder
+      ? (priorMode?.workspaceFolder ?? priorMode?.workspace)
+      : priorMode?.workspace;
+    try {
+      await cfg.update('formatOnSave', false, scope);
+    } catch (err) {
+      this.output.appendLine(
+        `formatOnSave suppress failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return async () => {};
+    }
+    return async () => {
+      try {
+        await cfg.update(
+          'formatOnSave',
+          previousFormatOnSave === undefined ? undefined : previousFormatOnSave,
+          scope,
+        );
+        if (previousMode !== undefined) {
+          await cfg.update('formatOnSaveMode', previousMode, scope);
+        }
+      } catch (err) {
+        this.output.appendLine(
+          `formatOnSave restore failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    };
+  }
+
   private async applySaveSettings(
     msg: Extract<
       NonNullable<ReturnType<MessageBridge['parseIncoming']>>,
@@ -1193,7 +1239,9 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
     }
 
     if (!this.host.getWorkspaceRoot() && mode !== 'ping') {
-      this.bridge?.postError('Open a folder to run the agent on a workspace.');
+      this.bridge?.postError(
+        'Open Folder (workspace root) before running the agent.',
+      );
       return;
     }
 
@@ -1247,6 +1295,7 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
       });
     }
 
+    const formatRestore = await this.beginFormatOnSaveSuppress();
     try {
       const bedrockOpts = await this.withBedrockRunOptions();
       await this.withBedrockSecretEnv(async () => {
@@ -1308,6 +1357,7 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
       this.streaming = false;
       this.host.setRunSignal(undefined);
     } finally {
+      await formatRestore();
       await this.persistTranscript();
     }
   }

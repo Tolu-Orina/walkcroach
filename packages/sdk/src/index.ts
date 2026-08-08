@@ -1,4 +1,5 @@
 import { ContentApi } from './content.js';
+import { GraphsApi } from './graphs.js';
 import { createTransport, type Transport } from './http.js';
 import { MemoryApi } from './memory.js';
 import { ProjectsApi } from './projects.js';
@@ -7,6 +8,7 @@ import type { ApiKeySummary, WalkCroachConfig } from './types.js';
 export class WalkCroach {
   readonly memory: MemoryApi;
   readonly content: ContentApi;
+  readonly graphs: GraphsApi;
   readonly projects: ProjectsApi;
   private readonly transport: Transport;
 
@@ -14,6 +16,7 @@ export class WalkCroach {
     this.transport = createTransport(config);
     this.memory = new MemoryApi(this.transport);
     this.content = new ContentApi(this.transport);
+    this.graphs = new GraphsApi(this.transport);
     this.projects = new ProjectsApi(this.transport);
   }
 
@@ -89,6 +92,15 @@ export {
   RunInterruptedError,
   type PublishOptions,
 } from './content.js';
+export {
+  GraphsApi,
+  type GraphsCatalog,
+  type GraphsRunOptions,
+  type GraphsValidateResult,
+  type PublicGraphDefinition,
+  type PublicGraphEdge,
+  type PublicGraphNode,
+} from './graphs.js';
 export { ProjectsApi, type EnsuredProject } from './projects.js';
 export {
   createAskUserInterrupt,
@@ -106,9 +118,26 @@ export {
   TransientError,
   ServerError,
 } from './errors.js';
+export {
+  CONTENT_PUBLISH_CONTRACT_VERSION,
+  GRAPH_RUN_CONTRACT_VERSION,
+  RUN_PROGRESS_EVENT_TYPES,
+  isRunProgressEventType,
+  isStageProgressEvent,
+  isCriticProgressEvent,
+  isPlanProgressEvent,
+  type ContentPublishContractVersion,
+  type GraphRunContractVersion,
+  type CriticFinding,
+  type RunProgressEventType,
+  type RunProgressEvent,
+  type PlanApprovalPolicy,
+} from './run-contract.js';
 export type {
   ApiKeySummary,
+  DurableRunResult,
   ExportedEntry,
+  GraphRunResult,
   ImportResult,
   MemoryDiff,
   MemoryEntry,

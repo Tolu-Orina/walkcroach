@@ -223,6 +223,64 @@ export {
 } from './tool-loop-guard.js';
 
 export {
+  DEFAULT_OBSERVE_WINDOW,
+  PHASE0_HALT_PROBE_THRESHOLDS,
+  emptyToolCallObserve,
+  classifyToolError,
+  recordToolCallObservation,
+  summarizeToolCallObserve,
+  shortFingerprint,
+  type ToolErrorClass,
+  type ToolCallObserveState,
+  type ToolCallObservation,
+  type ToolCallObserveTotals,
+} from './tool-call-observe.js';
+
+export {
+  DEFAULT_THRASH_WINDOW,
+  DEFAULT_THRASH_THRESHOLD,
+  DEFAULT_NUDGE_BUDGET,
+  PHASE1_DEFAULTS_RATIONALE,
+  resolveBoundedExecutorConfig,
+  emptyBoundedExecutorState,
+  beforeBoundedToolCall,
+  afterBoundedToolResult,
+  armThrashOneShot,
+  breakThrashLoop,
+  recordThrashExecution,
+  type BoundedExecutorConfig,
+  type BoundedExecutorState,
+} from './bounded-executor.js';
+
+export {
+  DEFAULT_MTIME_TOLERANCE_MS,
+  FRESHNESS_EXCERPT_MAX_CHARS,
+  createReadFreshnessTracker,
+  recordReadFreshness,
+  hashFileContent,
+  assertFreshForWrite,
+  evaluateMutationFreshness,
+  formatFreshnessExcerpt,
+  formatEditMismatchError,
+  type ReadFreshnessTracker,
+  type FreshnessSnapshot,
+  type MutationKind,
+} from './read-freshness.js';
+
+export {
+  PLANNER_TOOL_ALLOWLIST,
+  PLANNER_FORBIDDEN_TOOLS,
+  PLAN_SECTION_HEADINGS,
+  PLANNER_SYSTEM_PROMPT,
+  assertPlannerSchemaHasNoWriteTools,
+  validatePlanArtifact,
+  looksLikePlanningTask,
+  isPlannerSpawnName,
+  buildPlannerUserPrompt,
+  formatApprovedPlanBlock,
+} from './planner.js';
+
+export {
   ApprovalController,
   FleetApprovalRouter,
   bindApprovals,

@@ -47,7 +47,7 @@ const contractRoots = new Set(
 
 // OpenAPI documents /health as ide-local alias; contract includes it.
 // APIGW mounts /sdk-health instead of stealing agent /health.
-const requiredInBoth = ['keys', 'memory', 'content', 'runs', 'sdk-health'];
+const requiredInBoth = ['keys', 'memory', 'content', 'graphs', 'runs', 'sdk-health'];
 const missingOpenapi = requiredInBoth.filter((r) => !openapiRoots.has(r));
 const missingContract = requiredInBoth.filter((r) => !contractRoots.has(r));
 

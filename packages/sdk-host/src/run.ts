@@ -31,6 +31,10 @@ export type RunRequest = {
   timeoutMs?: number;
   answers?: Record<string, string>;
   mode?: 'full' | 'plan';
+  /** Phase 5 — Planner only; stop after approve (Draft is a separate graph node). */
+  planOnly?: boolean;
+  /** Phase 5 — inject an already-approved plan into Draft/Revise. */
+  approvedPlan?: string;
 };
 
 export type RunResult = {
@@ -45,6 +49,8 @@ export type RunResult = {
   /** Set when the loop needed a human decision it could not get. */
   inputRequired?: { question: string; options: string[] };
   error?: string;
+  /** Phase 5 — plan markdown when planOnly completed (`plan_ready`). */
+  approvedPlan?: string;
 };
 
 /**
@@ -115,6 +121,13 @@ export async function runProgrammatic(req: RunRequest): Promise<RunResult> {
       // Sub-agents are allowed: they keep exploratory noise out of the main
       // context window, which matters more without a human to steer.
       subagentsEnabled: true,
+      // Phase 1: thrash escalate / nudge exhaustion must fail-closed (no UI).
+      // Phase 2: present_plan auto-approves.
+      boundedExecutor: { interactive: false },
+      autoApprovePlan: true,
+      plannerFirstOnIntent: false,
+      planOnly: req.planOnly,
+      approvedPlan: req.approvedPlan,
     });
 
     const done = [...events].reverse().find((e) => e.type === 'done');
@@ -163,13 +176,30 @@ export async function runProgrammatic(req: RunRequest): Promise<RunResult> {
 
   const fatal = events.some((e) => e.type === 'error' && e.fatal);
 
+  const planTelemetry = [...events]
+    .reverse()
+    .find(
+      (e) =>
+        e.type === 'telemetry' &&
+        (e.name === 'plan.auto_approved' || e.name === 'plan.approved'),
+    );
+  const approvedPlan =
+    planTelemetry && planTelemetry.type === 'telemetry' && planTelemetry.detail
+      ? planTelemetry.detail
+      : req.approvedPlan;
+
+  const planReady = reason === 'plan_ready';
+
   return {
-    ok: !error && !fatal && reason !== 'input_required',
+    ok: planReady
+      ? Boolean(approvedPlan) && !error && !fatal
+      : !error && !fatal && reason !== 'input_required',
     reason,
     filesWritten: host.writtenPaths(),
     refusals: host.refusals,
     events,
     ...(inputRequired ? { inputRequired } : {}),
     ...(error ? { error } : {}),
+    ...(approvedPlan ? { approvedPlan } : {}),
   };
 }

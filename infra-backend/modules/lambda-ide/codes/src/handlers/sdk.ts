@@ -23,6 +23,7 @@ import {
   SDK_ROOT_SEGMENTS,
 } from '../sdk-contract.js';
 import { handleContentPublish } from './content.js';
+import { handleGraphsCatalog, handleGraphsRun, handleGraphsValidate } from './graphs.js';
 import { handleCancelRun, handleGetRun, handleResumeRun } from './runs.js';
 import {
   handleApiKeyUsage,
@@ -125,6 +126,17 @@ export async function handleSdkRest(req: HttpRequest) {
   }
   if (method === 'POST' && /^\/content\/publish\/?$/.test(path)) {
     return handleContentPublish(auth, req.body);
+  }
+
+  // ── graphs (Phase 6b) ───────────────────────────────────────────────────
+  if (method === 'GET' && /^\/graphs\/catalog\/?$/.test(path)) {
+    return handleGraphsCatalog(auth);
+  }
+  if (method === 'POST' && /^\/graphs\/validate\/?$/.test(path)) {
+    return handleGraphsValidate(auth, req.body);
+  }
+  if (method === 'POST' && /^\/graphs\/run\/?$/.test(path)) {
+    return handleGraphsRun(auth, req.body);
   }
 
   // Legacy alias — never relied on for APIGW (root `/projects` is the agent

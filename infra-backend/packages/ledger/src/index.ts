@@ -62,6 +62,8 @@ export const CREDIT_COSTS: Record<string, number> = {
   memory_erase: 1,
   memory_audit: 1,
   content_publish: 5,
+  /** Phase 6b — public Run Graph DSL submit. */
+  graph_run: 3,
 };
 
 export type BalanceRow = {

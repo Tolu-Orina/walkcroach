@@ -65,6 +65,11 @@ export type PublishSource = {
 
 export type PublishResult = {
   ok: boolean;
+  /**
+   * Product contract id — always `content.publish/v1` for this surface.
+   * Graph runs use `graph.run/v1` ({@link GraphRunResult}).
+   */
+  contractVersion?: import('./run-contract.js').ContentPublishContractVersion | string;
   pullRequest?: { number: number; url: string; branch: string; commitSha: string };
   filesWritten: string[];
   /** Generated file bodies (especially useful for dry-run / no-target). */
@@ -73,13 +78,37 @@ export type PublishResult = {
   signals: Array<{ pattern: string; excerpt: string }>;
   /** Patterns in generated files that warrant a closer look. */
   flags: Array<{ rule: string; path: string; excerpt: string }>;
+  /** CriticGate findings from the Critique stage (Phase 4/5). */
+  criticFindings?: import('./run-contract.js').CriticFinding[];
   /** Anything policy or write-scope refused. */
   refusals: Array<{ rule: string; reason: string; subject: string }>;
   /** House-style conventions newly written to memory. */
   learned: string[];
   reason: string;
   error?: string;
+  /** True when Plan was auto-approved on the async path (A1 / Phase 5). */
+  planAutoApproved?: boolean;
+  /** Approved plan markdown injected into Draft (when present). */
+  approvedPlan?: string;
 };
+
+/** Result shape for `kind: graph.run` (Phase 6b). */
+export type GraphRunResult = {
+  ok: boolean;
+  contractVersion?: import('./run-contract.js').GraphRunContractVersion | string;
+  graphId: string;
+  nodeExecutionCount: number;
+  reviseCount: number;
+  visitCounts: Record<string, number>;
+  reason: string;
+  error?: string;
+  rememberedId?: string;
+  criticFindings?: import('./run-contract.js').CriticFinding[];
+  hits?: unknown[];
+  pipelineOk?: boolean;
+};
+
+export type DurableRunResult = PublishResult | GraphRunResult;
 
 export type RunStatus =
   | 'queued'
@@ -108,7 +137,7 @@ export type RunSnapshot = {
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
-  result: PublishResult | null;
+  result: PublishResult | GraphRunResult | null;
   error: string | null;
   /** Present when status === 'interrupted'. */
   interrupt: import('./interrupt.js').RunInterrupt | null;

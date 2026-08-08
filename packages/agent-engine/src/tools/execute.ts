@@ -51,6 +51,7 @@ export type ExecuteToolOptions = {
     name: string;
     prompt: string;
     signal?: AbortSignal;
+    role?: 'planner' | 'default';
   }) => Promise<string>;
   /** Phase B context */
   mcp?: CockroachMcpClient | null;
@@ -69,6 +70,26 @@ export type ExecuteToolOptions = {
   turnId?: string;
   /** P3 — local semantic index settings (.walkcroach/settings.json index). Unset → enabled with defaults. */
   indexSettings?: { enabled: boolean; maxFiles: number };
+  /** Phase 1 — stale-read tracker (only enforced when host.supportsMtimeFreshness). */
+  readFreshness?: import('../read-freshness.js').ReadFreshnessTracker | null;
+  /**
+   * Phase 2 — when true, submit_plan is allowed (Planner subagent only).
+   * Main agent must use present_plan, not submit_plan.
+   */
+  plannerMode?: boolean;
+  /** Called when Planner successfully submit_plan's. */
+  onPlanSubmitted?: (planPath: string) => void;
+  /**
+   * Phase 2 — mutable session bag for present_plan outcomes (owned by the loop).
+   */
+  planSession?: {
+    autoApprove: boolean;
+    /** Set when user Approves or auto-approves. */
+    approvedPlan: string | null;
+    approvedPlanPath: string | null;
+    /** Set when user chooses Revise (free text / selected). */
+    reviseFeedback: string | null;
+  };
 };
 
 function str(v: unknown): string {
@@ -84,6 +105,72 @@ function assertPathAllowed(
       `Path denied by .walkcroach/settings.json (or built-in sensitive list): ${path}`,
     );
   }
+}
+
+async function getMtimeMs(
+  opts: ExecuteToolOptions,
+  path: string,
+): Promise<number | null> {
+  const host = opts.host;
+  if (!host.supportsMtimeFreshness || !host.getFileMtimeMs) return null;
+  try {
+    return await host.getFileMtimeMs(path);
+  } catch {
+    return null;
+  }
+}
+
+async function noteReadFreshness(
+  opts: ExecuteToolOptions,
+  path: string,
+  content: string,
+): Promise<void> {
+  const tracker = opts.readFreshness;
+  if (!tracker) return;
+  const { recordReadFreshness } = await import('../read-freshness.js');
+  const mtimeMs = await getMtimeMs(opts, path);
+  recordReadFreshness(tracker, path, { content, mtimeMs });
+}
+
+/**
+ * Content-aware freshness gate. Always runs when a tracker is present
+ * (hash-based; mtime optional). On reject, refreshes tracker to current bytes.
+ */
+async function gateMutationFreshness(
+  opts: ExecuteToolOptions,
+  params: {
+    path: string;
+    currentContent: string | null;
+    kind: 'write_file' | 'edit_file' | 'apply_patch';
+    oldStr?: string;
+    oldStrs?: string[];
+  },
+): Promise<string | undefined> {
+  const tracker = opts.readFreshness;
+  if (!tracker) return undefined;
+  const { evaluateMutationFreshness, recordReadFreshness } = await import(
+    '../read-freshness.js'
+  );
+  const mtimeMs = await getMtimeMs(opts, params.path);
+  const check = evaluateMutationFreshness({
+    tracker,
+    path: params.path,
+    currentContent: params.currentContent,
+    currentMtimeMs: mtimeMs,
+    kind: params.kind,
+    oldStr: params.oldStr,
+    oldStrs: params.oldStrs,
+  });
+  if (!check.ok) {
+    if (params.currentContent !== null) {
+      recordReadFreshness(tracker, params.path, {
+        content: params.currentContent,
+        mtimeMs,
+      });
+    }
+    throw new Error(check.message);
+  }
+  return check.note;
 }
 
 /**
@@ -126,6 +213,7 @@ async function executeToolBody(
         host.emit({ type: 'tool_card', id, name, status: 'running' });
         const path = str(input.path);
         const raw = await host.readFile(path);
+        await noteReadFreshness(opts, path, raw);
         content = truncateText(raw).text;
         break;
       }
@@ -466,6 +554,11 @@ async function executeToolBody(
           before = '';
           beforeExisted = false;
         }
+        await gateMutationFreshness(opts, {
+          path,
+          currentContent: beforeExisted ? before : null,
+          kind: 'write_file',
+        });
         const decision = await host.showDiffPreview(path, before, next, {
           toolName: 'write_file',
           stepId: id,
@@ -486,14 +579,30 @@ async function executeToolBody(
           };
         }
         host.emit({ type: 'tool_card', id, name, status: 'running' });
+        // Re-check immediately before write (formatter race).
+        let latest = before;
+        let latestExisted = beforeExisted;
+        try {
+          latest = await host.readFile(path);
+          latestExisted = true;
+        } catch {
+          latest = '';
+          latestExisted = false;
+        }
+        await gateMutationFreshness(opts, {
+          path,
+          currentContent: latestExisted ? latest : null,
+          kind: 'write_file',
+        });
         await host.writeFile(path, next);
+        await noteReadFreshness(opts, path, next);
         if (opts.turnId) {
           await recordCheckpoint(host.getWorkspaceRoot(), {
             turnId: opts.turnId,
             toolUseId: id,
             path,
-            before,
-            beforeExisted,
+            before: latest,
+            beforeExisted: latestExisted,
             after: next,
           });
         }
@@ -509,13 +618,47 @@ async function executeToolBody(
           throw new Error('edit_file requires a non-empty old_str');
         }
         const before = await host.readFile(path);
+        const freshnessNote = await gateMutationFreshness(opts, {
+          path,
+          currentContent: before,
+          kind: 'edit_file',
+          oldStr: old_str,
+        });
         if (!before.includes(old_str)) {
-          throw new Error(`old_str not found in ${path}`);
+          const { formatEditMismatchError, recordReadFreshness } = await import(
+            '../read-freshness.js'
+          );
+          if (opts.readFreshness) {
+            recordReadFreshness(opts.readFreshness, path, {
+              content: before,
+              mtimeMs: await getMtimeMs(opts, path),
+            });
+          }
+          throw new Error(
+            formatEditMismatchError({
+              path,
+              reason: `old_str not found in ${path}`,
+              content: before,
+            }),
+          );
         }
         const occurrences = before.split(old_str).length - 1;
         if (occurrences > 1) {
+          const { formatEditMismatchError, recordReadFreshness } = await import(
+            '../read-freshness.js'
+          );
+          if (opts.readFreshness) {
+            recordReadFreshness(opts.readFreshness, path, {
+              content: before,
+              mtimeMs: await getMtimeMs(opts, path),
+            });
+          }
           throw new Error(
-            `old_str matches ${occurrences} locations in ${path}. Provide more surrounding context so the match is unique.`,
+            formatEditMismatchError({
+              path,
+              reason: `old_str matches ${occurrences} locations in ${path}. Provide more surrounding context so the match is unique.`,
+              content: before,
+            }),
           );
         }
         const after = before.replace(old_str, new_str);
@@ -539,18 +682,47 @@ async function executeToolBody(
           };
         }
         host.emit({ type: 'tool_card', id, name, status: 'running' });
-        await host.writeFile(path, after);
+        const latest = await host.readFile(path);
+        await gateMutationFreshness(opts, {
+          path,
+          currentContent: latest,
+          kind: 'edit_file',
+          oldStr: old_str,
+        });
+        if (!latest.includes(old_str) || latest.split(old_str).length - 1 !== 1) {
+          const { formatEditMismatchError, recordReadFreshness } = await import(
+            '../read-freshness.js'
+          );
+          if (opts.readFreshness) {
+            recordReadFreshness(opts.readFreshness, path, {
+              content: latest,
+              mtimeMs: await getMtimeMs(opts, path),
+            });
+          }
+          throw new Error(
+            formatEditMismatchError({
+              path,
+              reason: `old_str no longer uniquely matches ${path} after approval (file changed).`,
+              content: latest,
+            }),
+          );
+        }
+        const latestAfter = latest.replace(old_str, new_str);
+        await host.writeFile(path, latestAfter);
+        await noteReadFreshness(opts, path, latestAfter);
         if (opts.turnId) {
           await recordCheckpoint(host.getWorkspaceRoot(), {
             turnId: opts.turnId,
             toolUseId: id,
             path,
-            before,
+            before: latest,
             beforeExisted: true,
-            after,
+            after: latestAfter,
           });
         }
-        content = `Edited ${path}`;
+        content = freshnessNote
+          ? `Edited ${path}\n${freshnessNote}`
+          : `Edited ${path}`;
         break;
       }
       case 'apply_patch': {
@@ -558,7 +730,33 @@ async function executeToolBody(
         assertPathAllowed(opts.policy, path);
         const edits = normalizePatchEdits(input.edits);
         const before = await host.readFile(path);
-        const after = applyPatchEdits(before, edits);
+        const freshnessNote = await gateMutationFreshness(opts, {
+          path,
+          currentContent: before,
+          kind: 'apply_patch',
+          oldStrs: edits.map((e) => e.old_str),
+        });
+        let after: string;
+        try {
+          after = applyPatchEdits(before, edits);
+        } catch (err) {
+          const { formatEditMismatchError, recordReadFreshness } = await import(
+            '../read-freshness.js'
+          );
+          if (opts.readFreshness) {
+            recordReadFreshness(opts.readFreshness, path, {
+              content: before,
+              mtimeMs: await getMtimeMs(opts, path),
+            });
+          }
+          throw new Error(
+            formatEditMismatchError({
+              path,
+              reason: err instanceof Error ? err.message : String(err),
+              content: before,
+            }),
+          );
+        }
         if (before === after) {
           throw new Error('apply_patch produced no changes');
         }
@@ -582,22 +780,53 @@ async function executeToolBody(
           };
         }
         host.emit({ type: 'tool_card', id, name, status: 'running' });
+        const latest = await host.readFile(path);
+        await gateMutationFreshness(opts, {
+          path,
+          currentContent: latest,
+          kind: 'apply_patch',
+          oldStrs: edits.map((e) => e.old_str),
+        });
+        let latestAfter: string;
+        try {
+          latestAfter = applyPatchEdits(latest, edits);
+        } catch (err) {
+          const { formatEditMismatchError, recordReadFreshness } = await import(
+            '../read-freshness.js'
+          );
+          if (opts.readFreshness) {
+            recordReadFreshness(opts.readFreshness, path, {
+              content: latest,
+              mtimeMs: await getMtimeMs(opts, path),
+            });
+          }
+          throw new Error(
+            formatEditMismatchError({
+              path,
+              reason: err instanceof Error ? err.message : String(err),
+              content: latest,
+            }),
+          );
+        }
         if (host.applyDiff) {
           await host.applyDiff(path, JSON.stringify(edits));
         } else {
-          await host.writeFile(path, after);
+          await host.writeFile(path, latestAfter);
         }
+        await noteReadFreshness(opts, path, latestAfter);
         if (opts.turnId) {
           await recordCheckpoint(host.getWorkspaceRoot(), {
             turnId: opts.turnId,
             toolUseId: id,
             path,
-            before,
+            before: latest,
             beforeExisted: true,
-            after,
+            after: latestAfter,
           });
         }
-        content = `Patched ${path} (${edits.length} edit${edits.length === 1 ? '' : 's'})`;
+        content = freshnessNote
+          ? `Patched ${path} (${edits.length} edit${edits.length === 1 ? '' : 's'})\n${freshnessNote}`
+          : `Patched ${path} (${edits.length} edit${edits.length === 1 ? '' : 's'})`;
         break;
       }
       case 'enter_worktree': {
@@ -988,17 +1217,30 @@ async function executeToolBody(
         }
         const subName = str(input.name) || 'subagent';
         const prompt = str(input.prompt);
+        const roleRaw = str(input.role).toLowerCase();
+        const role =
+          roleRaw === 'planner' ||
+          (await import('../planner.js')).isPlannerSpawnName(subName)
+            ? 'planner'
+            : 'default';
         host.emit({
           type: 'subagent',
           id,
           name: subName,
           status: 'running',
         });
-        host.emit({ type: 'tool_card', id, name, status: 'running', detail: subName });
+        host.emit({
+          type: 'tool_card',
+          id,
+          name,
+          status: 'running',
+          detail: role === 'planner' ? `${subName} (planner)` : subName,
+        });
         const summary = await opts.spawnSubagent({
           name: subName,
           prompt,
           signal,
+          role,
         });
         host.emit({
           type: 'subagent',
@@ -1008,6 +1250,131 @@ async function executeToolBody(
           summary,
         });
         content = truncateText(summary, 8000).text;
+        break;
+      }
+      case 'submit_plan': {
+        if (!opts.plannerMode) {
+          throw new Error(
+            'submit_plan is only available inside the Planner subagent. Spawn role=planner, then present_plan from the parent.',
+          );
+        }
+        const {
+          validatePlanArtifact,
+          newPlanPath,
+          plansDirRel,
+        } = await import('../planner.js');
+        const planMarkdown = str(input.plan_markdown);
+        const validated = validatePlanArtifact(planMarkdown);
+        if (!validated.ok) {
+          throw new Error(validated.message);
+        }
+        const planPath = newPlanPath();
+        host.emit({
+          type: 'tool_card',
+          id,
+          name,
+          status: 'running',
+          detail: planPath,
+        });
+        // Ensure plans dir exists by writing the file (hosts mkdir on write).
+        const header = `# WalkCroach plan\n\n_Submitted by Planner · ${new Date().toISOString()}_\n\n`;
+        const body = `${header}${planMarkdown.trim()}\n`;
+        // writeFile may need parent dir — try write; if fail, write via list noop
+        try {
+          await host.listDir(plansDirRel());
+        } catch {
+          // dir may not exist; writeFile on IDE/CLI mkdir -p parent
+        }
+        await host.writeFile(planPath, body);
+        opts.onPlanSubmitted?.(planPath);
+        content = [
+          'Plan submitted and validated.',
+          `plan_path: ${planPath}`,
+          'Parent agent: call present_plan with this plan_path.',
+        ].join('\n');
+        break;
+      }
+      case 'present_plan': {
+        if (opts.plannerMode) {
+          throw new Error(
+            'present_plan is for the parent agent after Planner finishes, not inside the Planner.',
+          );
+        }
+        const {
+          validatePlanArtifact,
+          formatApprovedPlanBlock,
+        } = await import('../planner.js');
+        const planPath = str(input.plan_path);
+        if (!planPath.includes('.walkcroach/plans/')) {
+          throw new Error(
+            'present_plan requires a path under .walkcroach/plans/ (from submit_plan)',
+          );
+        }
+        host.emit({
+          type: 'tool_card',
+          id,
+          name,
+          status: 'running',
+          detail: planPath,
+        });
+        const raw = await host.readFile(planPath);
+        const validated = validatePlanArtifact(raw);
+        if (!validated.ok) {
+          throw new Error(`Invalid plan at ${planPath}: ${validated.message}`);
+        }
+        const session = opts.planSession;
+        const autoApprove = session?.autoApprove === true;
+        if (autoApprove) {
+          if (session) {
+            session.approvedPlan = formatApprovedPlanBlock(raw, planPath);
+            session.approvedPlanPath = planPath;
+            session.reviseFeedback = null;
+          }
+          content = [
+            'Plan auto-approved (non-interactive host).',
+            `plan_path: ${planPath}`,
+            'Execute the approved plan as non-negotiable context.',
+          ].join('\n');
+          break;
+        }
+        const preview = truncateText(raw, 4000).text;
+        const answer = await host.askUser({
+          question: [
+            `Review plan (${planPath}).`,
+            'Choose Approve to execute, or Revise (add feedback in free text).',
+            '',
+            preview,
+          ].join('\n'),
+          options: ['Approve', 'Revise'],
+          allowFreeText: true,
+          stepId: id,
+        });
+        if (answer.selected.toLowerCase().startsWith('approve')) {
+          if (session) {
+            session.approvedPlan = formatApprovedPlanBlock(raw, planPath);
+            session.approvedPlanPath = planPath;
+            session.reviseFeedback = null;
+          }
+          content = [
+            'Plan approved by user.',
+            `plan_path: ${planPath}`,
+            'Execute the approved plan as non-negotiable context.',
+          ].join('\n');
+        } else {
+          const feedback =
+            answer.freeText?.trim() ||
+            'User requested revisions (no free-text details).';
+          if (session) {
+            session.approvedPlan = null;
+            session.approvedPlanPath = null;
+            session.reviseFeedback = feedback;
+          }
+          content = [
+            'Plan revision requested.',
+            `Feedback: ${feedback}`,
+            'Spawn Planner again with this feedback, then present_plan.',
+          ].join('\n');
+        }
         break;
       }
       case 'cockroach_mcp': {
@@ -1450,6 +1817,8 @@ function summarizeInput(
   if (name === 'await_terminal') return str(input.task_id);
   if (name === 'verify') return str(input.command) || 'verify';
   if (name === 'spawn_subagent') return str(input.name);
+  if (name === 'submit_plan') return 'plan artifact';
+  if (name === 'present_plan') return str(input.plan_path);
   if (name === 'cockroach_mcp') return str(input.tool);
   if (name === 'mcp_call') return `${str(input.server)}.${str(input.tool)}`;
   if (name === 'load_skill') return str(input.name);

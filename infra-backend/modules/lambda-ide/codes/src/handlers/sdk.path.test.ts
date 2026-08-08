@@ -25,6 +25,8 @@ describe('isSdkPath', () => {
     ['/v1/sdk-health', true],
     ['/v1/content/publish', true],
     ['/v1/content/ensure-project', true],
+    ['/v1/graphs/catalog', true],
+    ['/v1/graphs/run', true],
     ['/v1/runs/abc', true],
     ['/ide/v1/health', false],
     ['/ide/v1/memory/mirror', false],
@@ -36,7 +38,7 @@ describe('isSdkPath', () => {
 
   it('root segments stay aligned with the contract constant', () => {
     expect([...SDK_ROOT_SEGMENTS].sort()).toEqual(
-      ['content', 'health', 'keys', 'memory', 'runs', 'sdk-health'].sort(),
+      ['content', 'graphs', 'health', 'keys', 'memory', 'runs', 'sdk-health'].sort(),
     );
   });
 });

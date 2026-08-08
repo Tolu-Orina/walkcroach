@@ -147,6 +147,94 @@ A 500 is deliberately not retried: on a write path it may have committed before 
 
 A 404 is returned both for "no such project" and "not your project". That is intentional — a 403 would confirm existence and let a caller enumerate other tenants' ids.
 
+## Content publish (`content.publish/v1`)
+
+Turn a document into a pull request (or dry-run files) via a durable run:
+
+```ts
+import {
+  WalkCroach,
+  CONTENT_PUBLISH_CONTRACT_VERSION,
+  isStageProgressEvent,
+  isCriticProgressEvent,
+  isPlanProgressEvent,
+} from '@walkcroach/sdk';
+
+const wc = new WalkCroach({ apiKey: process.env.WALKCROACH_API_KEY });
+
+const run = await wc.content.publish({
+  source: { kind: 'markdown', content: '# Hello\n\nBody', title: 'Hello' },
+  target: { repo: 'acme/site' },
+  writeScope: { mode: 'additive' },
+});
+
+const result = await run.wait({
+  onProgress: (e) => {
+    if (isPlanProgressEvent(e.type)) console.log('plan', e.type);
+    if (isStageProgressEvent(e.type)) console.log('stage', e.type, e.payload);
+    if (isCriticProgressEvent(e.type)) console.log('critic', e.type);
+  },
+});
+
+console.log(result.contractVersion); // 'content.publish/v1'
+// Also available: result.planAutoApproved, result.criticFindings, result.approvedPlan
+```
+
+### Plan approval: auto vs required
+
+| Policy | `content.publish/v1` |
+|---|---|
+| **Auto (default)** | Plan stage runs the schema-restricted Planner, then **auto-approves** (A1). Async SDK / Lambda have no live HITL channel. |
+| **`requirePlanApproval` / `planApproval: 'required'`** | **Rejected** at the client with `ValidationError`. Interactive `present_plan` lives in the IDE. |
+
+`InterruptKind` includes `plan_decision` for future async HITL; do not rely on it for publish v1.
+
+Progress/result shapes (`RunSnapshot`, `PublishResult`, `stage.*` / `critic.*` / `plan.auto_approved`) are shared with `graphs.run` — there is **no** public GraphBuilder in v1.
+
+## Run Graph DSL (`graphs.*`)
+
+Compose a quality pipeline from the **platform node catalog** only (ADR-I). BYO tools and HostAdapter plugins are rejected.
+
+```ts
+import { WalkCroach, isStageProgressEvent } from '@walkcroach/sdk';
+
+const wc = new WalkCroach({ apiKey: process.env.WALKCROACH_API_KEY });
+
+const catalog = await wc.graphs.catalog();
+// catalog.nodes: fence, plan, draft, critique, revise, remember, memory.* …
+// catalog.presets: content.publish
+
+const check = await wc.graphs.validate({
+  graph: {
+    entry: 'fence',
+    maxNodeExecutions: 12,
+    nodes: [
+      { id: 'fence', type: 'fence' },
+      { id: 'critique', type: 'critique', config: { minArtifacts: 0 } },
+    ],
+    edges: [
+      { from: 'fence', to: 'critique' },
+      { from: 'critique', to: null },
+    ],
+  },
+});
+if (!check.ok) throw new Error(check.errors.join('; '));
+
+const run = await wc.graphs.run({
+  graph: check.graph!,
+  input: { text: 'Untrusted customer brief' },
+});
+
+const result = await run.wait({
+  onProgress: (e) => {
+    if (isStageProgressEvent(e.type)) console.log(e.type, e.payload);
+  },
+});
+// result.contractVersion === 'graph.run/v1' (custom graphs)
+```
+
+`preset: 'content.publish'` forwards to the same pipeline as `content.publish` (use publish fields: `source`, `writeScope`, …).
+
 ## Security
 
 `apiKey` is **server-side only**. The constructor throws if it is used where `window` is defined, because a service key shipped to a page is a full tenant compromise that rotating one user's password does not undo. Use `accessToken` for user-context calls in a browser.

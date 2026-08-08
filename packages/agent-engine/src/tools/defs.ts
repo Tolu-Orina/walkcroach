@@ -105,12 +105,16 @@ export const PHASE_A_TOOLS: ToolDef[] = [
   {
     name: 'edit_file',
     description:
-      'Apply an exact search/replace edit to an existing file (requires approval)',
+      'Apply an exact search/replace edit to an existing file (requires approval). old_str must match exactly once — include 3–5 lines of unique surrounding context; never guess indentation. On edit_mismatch/stale_read, re-read first; do not retry the identical old_str.',
     inputSchema: {
       type: 'object',
       properties: {
         path: { type: 'string' },
-        old_str: { type: 'string' },
+        old_str: {
+          type: 'string',
+          description:
+            'Exact unique substring to replace; anchor with 3–5 surrounding lines',
+        },
         new_str: { type: 'string' },
       },
       required: ['path', 'old_str', 'new_str'],
@@ -119,18 +123,22 @@ export const PHASE_A_TOOLS: ToolDef[] = [
   {
     name: 'apply_patch',
     description:
-      'Apply multiple sequential unique search/replace hunks to one existing file (requires approval). Prefer this over many edit_file calls when changing several places in the same file. Each old_str must match exactly once.',
+      'Apply multiple sequential unique search/replace hunks to one existing file (requires approval). Prefer this over many edit_file calls when changing several places in the same file. Each old_str must match exactly once — anchor with unique surrounding context; never guess indentation.',
     inputSchema: {
       type: 'object',
       properties: {
         path: { type: 'string' },
         edits: {
           type: 'array',
-          description: '1–20 hunks applied in order',
+          description: '1–20 hunks applied in order; each old_str unique in the file',
           items: {
             type: 'object',
             properties: {
-              old_str: { type: 'string' },
+              old_str: {
+                type: 'string',
+                description:
+                  'Exact unique substring; include 3–5 lines of unique context',
+              },
               new_str: { type: 'string' },
             },
             required: ['old_str', 'new_str'],
@@ -382,17 +390,58 @@ export const PHASE_A_TOOLS: ToolDef[] = [
   {
     name: 'spawn_subagent',
     description:
-      'Fan out a focused sub-task to an isolated sub-agent (read-only tools). Returns a summary only.',
+      'Fan out a focused sub-task to an isolated sub-agent. Default: read-only exploration (returns a summary). role=planner: schema-restricted Planner that explores then submit_plan (no general writes/shell). After Planner, call present_plan on the plan path.',
     inputSchema: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: 'Short label shown in the UI' },
+        name: {
+          type: 'string',
+          description:
+            'Short label shown in the UI. Use "Planner" (or role=planner) for plan-then-execute.',
+        },
         prompt: {
           type: 'string',
           description: 'Instructions for the sub-agent',
         },
+        role: {
+          type: 'string',
+          description:
+            'Optional role. "planner" runs the Phase-2 Planner (submit_plan only write). Default: explore summary.',
+          enum: ['planner', 'default'],
+        },
       },
       required: ['name', 'prompt'],
+    },
+  },
+  {
+    name: 'submit_plan',
+    description:
+      'Planner-only: write a validated seven-section plan under .walkcroach/plans/. Not available to the main agent. Sections required: Goal, Context, Files to modify, Files to create, Implementation steps, Verification criteria, Risks.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        plan_markdown: {
+          type: 'string',
+          description:
+            'Full plan markdown with ## headings for each required section',
+        },
+      },
+      required: ['plan_markdown'],
+    },
+  },
+  {
+    name: 'present_plan',
+    description:
+      'Present a submitted plan file for user Approve or Revise (free-text feedback). On Approve, the plan becomes non-negotiable execution context. Prefer after spawn_subagent role=planner.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        plan_path: {
+          type: 'string',
+          description: 'Path returned by submit_plan (under .walkcroach/plans/)',
+        },
+      },
+      required: ['plan_path'],
     },
   },
   {
@@ -589,6 +638,8 @@ export function toBedrockTools(opts?: {
   includePhaseB?: boolean;
   includePhaseC?: boolean;
   includeSharedSkills?: boolean;
+  /** When set, only these tool names are offered (schema-level allowlist). */
+  allowlist?: readonly string[];
 }) {
   const includeSubagents = opts?.includeSubagents !== false;
   const includePhaseB = opts?.includePhaseB !== false;
@@ -598,8 +649,22 @@ export function toBedrockTools(opts?: {
   if (includePhaseB) list = [...list, ...PHASE_B_TOOLS];
   if (includePhaseC) list = [...list, ...PHASE_C_TOOLS];
   if (includeSharedSkills) list = [...list, ...SHARED_SKILL_TOOLS];
+  if (opts?.allowlist) {
+    const allowed = new Set(opts.allowlist);
+    list = list.filter((t) => allowed.has(t.name));
+  }
   return list
-    .filter((t) => includeSubagents || t.name !== 'spawn_subagent')
+    .filter((t) => {
+      if (opts?.allowlist) return true;
+      return includeSubagents || t.name !== 'spawn_subagent';
+    })
+    // present_plan / submit_plan: submit_plan is planner-only (allowlist);
+    // present_plan is for the parent agent (exclude from default subagent runs).
+    .filter((t) => {
+      if (opts?.allowlist) return true;
+      if (t.name === 'submit_plan') return false;
+      return true;
+    })
     .map((t) => ({
       toolSpec: {
         name: t.name,
@@ -621,5 +686,8 @@ export const READ_ONLY_TOOL_NAMES = new Set([
   'recall_project_memory',
   'ask_user',
   'await_terminal',
+  /** Planner scratch write — allowed under readOnly when role=planner. */
+  'submit_plan',
+  'present_plan',
 ]);
 /** Subagents / plan mode must not own the parent checklist. */

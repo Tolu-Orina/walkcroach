@@ -59,6 +59,33 @@ import {
   emptyToolLoopGuard,
   type ToolLoopGuardState,
 } from './tool-loop-guard.js';
+import {
+  emptyToolCallObserve,
+  emitToolCallObservation,
+  emitToolCallObserveSummary,
+  recordToolCallObservation,
+  type ToolCallObserveState,
+} from './tool-call-observe.js';
+import {
+  afterBoundedToolResult,
+  armThrashOneShot,
+  beforeBoundedToolCall,
+  breakThrashLoop,
+  emptyBoundedExecutorState,
+  nudgeBudgetExhaustedMessage,
+  recordThrashExecution,
+  resolveBoundedExecutorConfig,
+  type BoundedExecutorConfig,
+  type BoundedExecutorState,
+} from './bounded-executor.js';
+import { createReadFreshnessTracker } from './read-freshness.js';
+import {
+  PLANNER_SYSTEM_PROMPT,
+  PLANNER_TOOL_ALLOWLIST,
+  assertPlannerSchemaHasNoWriteTools,
+  buildPlannerUserPrompt,
+  looksLikePlanningTask,
+} from './planner.js';
 
 export const DEFAULT_MAX_ITERATIONS = 24;
 export const DEFAULT_MAX_SUBAGENTS = 3;
@@ -177,8 +204,41 @@ export type RunLoopParams = {
   /**
    * Identical failed run_terminal/verify calls before refuse + stop
    * (default DEFAULT_IDENTICAL_FAILURE_LIMIT).
+   * Ignored when boundedExecutor.enabled (Phase 1 thrash supersedes).
    */
   identicalFailureLimit?: number;
+  /**
+   * Phase 1 bounded executor (thrash two-tier + nudge budget).
+   * Default enabled with OpenDev-educated defaults (see PHASE1_DEFAULTS_RATIONALE).
+   * Pass `{ enabled: false }` to keep legacy failure-only tool-loop-guard.
+   * sdk-host should set `{ interactive: false }`.
+   */
+  boundedExecutor?: Partial<BoundedExecutorConfig> | null;
+  /**
+   * Phase 2 — approved plan markdown block injected into system prompt.
+   */
+  approvedPlan?: string;
+  /**
+   * Phase 2 — when true, present_plan auto-approves (sdk-host / non-interactive).
+   * Defaults from !boundedExecutor.interactive when unset.
+   */
+  autoApprovePlan?: boolean;
+  /** Phase 2 — Planner subagent only. */
+  plannerMode?: boolean;
+  /** Phase 2 — schema-level tool allowlist (Planner). */
+  toolAllowlist?: readonly string[];
+  onPlanSubmitted?: (planPath: string) => void;
+  /**
+   * When true (default), prompts that lookLikePlanningTask run Planner→present
+   * before the normal loop. Set false to only plan on mode:plan / explicit spawn.
+   */
+  plannerFirstOnIntent?: boolean;
+  /**
+   * Phase 5 — after Planner + present_plan approve, stop without executing.
+   * Emits telemetry `plan.auto_approved` (or `plan.approved`) and done `plan_ready`.
+   * Draft stage then runs with `approvedPlan` injected.
+   */
+  planOnly?: boolean;
   /**
    * Prior Bedrock messages for multi-turn continuity (Continue / follow-ups).
    * When set with followUp, prompt is appended as a lightweight user turn.
@@ -305,13 +365,25 @@ export async function runAgentLoop(params: RunLoopParams): Promise<void> {
       return;
     }
 
+    // Phase 2 ADR-A: sticky mode:plan / permissionMode plan → Planner subagent,
+    // then present_plan, then execute. Bare params.readOnly stays sticky explore
+    // (runFullLoop) and must NOT enter this path.
     if (mode === 'plan' || resolved.readOnly) {
-      await runFullLoop({
+      await runPlanThenExecute({
         ...params,
-        readOnly: true,
         mode: 'full',
-        actionBias: params.actionBias ?? 'never',
+        readOnly: false,
       });
+      return;
+    }
+
+    // Planning-intent heuristic: plan-then-execute once when no plan yet.
+    if (
+      !params.approvedPlan &&
+      looksLikePlanningTask(prompt) &&
+      (params.plannerFirstOnIntent ?? true)
+    ) {
+      await runPlanThenExecute(params);
       return;
     }
 
@@ -359,10 +431,38 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
     params.maxOutputContinuations ?? DEFAULT_MAX_OUTPUT_CONTINUATIONS;
   const identicalFailureLimit =
     params.identicalFailureLimit ?? DEFAULT_IDENTICAL_FAILURE_LIMIT;
+  const boundedCfg = resolveBoundedExecutorConfig(params.boundedExecutor);
   const turnId = params.turnId ?? randomUUID();
   let subagentCount = 0;
   let toolLoopGuard: ToolLoopGuardState = emptyToolLoopGuard();
   let stuckLoopStop = false;
+  /** Phase 0: log-only thrash/error instrumentation (never refuses). */
+  let toolCallObserve: ToolCallObserveState = emptyToolCallObserve();
+  /** Phase 1: enforcing thrash + nudge budget. */
+  let boundedState: BoundedExecutorState = emptyBoundedExecutorState(boundedCfg);
+  const readFreshness = createReadFreshnessTracker();
+  const planSession = {
+    autoApprove:
+      params.autoApprovePlan ??
+      boundedCfg.interactive === false,
+    approvedPlan: null as string | null,
+    approvedPlanPath: null as string | null,
+    reviseFeedback: null as string | null,
+  };
+
+  const emitObserveSummary = (): void => {
+    const summary = emitToolCallObserveSummary(telemetry, toolCallObserve);
+    host.emit({
+      type: 'telemetry',
+      name: 'tool_call_observe_summary',
+      counters: {
+        observe_calls: Number(summary.calls),
+        observe_would_halt_3: Number(summary.would_halt_3),
+        observe_max_repeat: Number(summary.max_repeat_seen),
+      },
+      detail: JSON.stringify(summary),
+    });
+  };
 
   host.emit({ type: 'phase', phase: 'gather' });
 
@@ -466,31 +566,49 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
     skillsCatalog: includePhaseB ? skills.catalogText() : undefined,
     rulesMd: workspaceConfig.rulesMd || undefined,
     ruleCatalog: formatRuleCatalog(workspaceConfig.ruleCatalog) || undefined,
+    approvedPlan: params.approvedPlan,
+    systemPromptOverride: params.plannerMode
+      ? PLANNER_SYSTEM_PROMPT
+      : undefined,
   });
   const tools = (
-    params.readOnly
+    params.toolAllowlist
       ? toBedrockTools({
           includeSubagents: false,
           includePhaseB: false,
-          includePhaseC: Boolean(params.projectMemory),
-        }).filter((t) =>
-          [
-            'read_file',
-            'list_dir',
-            'search',
-            'glob',
-            'semantic_search',
-            'ask_user',
-            'recall_project_memory',
-          ].includes(t.toolSpec?.name ?? ''),
-        )
-      : toBedrockTools({
-          includeSubagents: subagentsEnabled,
-          includePhaseB,
-          includePhaseC,
-          includeSharedSkills,
+          includePhaseC: false,
+          includeSharedSkills: false,
+          allowlist: params.toolAllowlist,
         })
+      : params.readOnly
+        ? toBedrockTools({
+            includeSubagents: false,
+            includePhaseB: false,
+            includePhaseC: Boolean(params.projectMemory),
+          }).filter((t) =>
+            [
+              'read_file',
+              'list_dir',
+              'search',
+              'glob',
+              'semantic_search',
+              'ask_user',
+              'recall_project_memory',
+              'load_rule',
+              'load_skill',
+            ].includes(t.toolSpec?.name ?? ''),
+          )
+        : toBedrockTools({
+            includeSubagents: subagentsEnabled,
+            includePhaseB,
+            includePhaseC,
+            includeSharedSkills,
+          })
   ) as import('@aws-sdk/client-bedrock-runtime').ToolConfiguration['tools'];
+
+  if (params.plannerMode && params.toolAllowlist) {
+    assertPlannerSchemaHasNoWriteTools(params.toolAllowlist);
+  }
 
   const prior = params.priorMessages?.length
     ? cloneMessages(params.priorMessages)
@@ -587,25 +705,120 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
   }
 
   async function runOneTool(tool: ParsedToolUse): Promise<ToolResultBlock> {
-    const gate = beforeToolCall(
-      toolLoopGuard,
-      tool.name,
-      tool.input,
-      identicalFailureLimit,
-    );
-    if (gate.action === 'refuse') {
-      host.emit({
-        type: 'warning',
-        message: `Blocked identical failing tool retry (${tool.name})`,
-      });
-      stuckLoopStop = true;
-      return {
-        toolResult: {
-          toolUseId: tool.toolUseId,
-          content: [{ text: gate.message }],
-          status: 'error',
-        },
-      };
+    let thrashFingerprint: string | null = null;
+
+    if (boundedCfg.enabled) {
+      let thrash = beforeBoundedToolCall(boundedState, tool.name, tool.input);
+      if (thrash.action === 'warn_skip') {
+        boundedState = thrash.state;
+        host.emit({ type: 'warning', message: thrash.message });
+        telemetry.emit('walkcroach.thrash.warn_skip', {
+          'walkcroach.tool.name': tool.name,
+          'walkcroach.phase': 1,
+        });
+        const recorded = recordToolCallObservation(toolCallObserve, {
+          toolName: tool.name,
+          input: tool.input,
+          status: 'rejected',
+          content: thrash.message,
+        });
+        toolCallObserve = recorded.state;
+        emitToolCallObservation(telemetry, recorded.observation);
+        return {
+          toolResult: {
+            toolUseId: tool.toolUseId,
+            content: [{ text: thrash.message }],
+            status: 'error',
+          },
+        };
+      }
+      if (thrash.action === 'escalate') {
+        host.emit({ type: 'warning', message: thrash.message });
+        telemetry.emit('walkcroach.thrash.escalate', {
+          'walkcroach.tool.name': tool.name,
+          'walkcroach.phase': 1,
+          interactive: boundedCfg.interactive,
+        });
+        if (boundedCfg.interactive) {
+          const answer = await host.askUser({
+            question: thrash.message,
+            options: ['Allow once', 'Break'],
+            allowFreeText: false,
+          });
+          const allow = answer.selected.toLowerCase().startsWith('allow');
+          if (allow) {
+            boundedState = armThrashOneShot(thrash.state, thrash.fingerprint);
+            thrash = beforeBoundedToolCall(boundedState, tool.name, tool.input);
+            if (thrash.action !== 'allow') {
+              // Should not happen after one-shot arm; fail closed.
+              stuckLoopStop = true;
+              return {
+                toolResult: {
+                  toolUseId: tool.toolUseId,
+                  content: [
+                    {
+                      text: 'Thrash one-shot allow failed to arm; stopping loop.',
+                    },
+                  ],
+                  status: 'error',
+                },
+              };
+            }
+            boundedState = thrash.state;
+            thrashFingerprint = thrash.fingerprint;
+          } else {
+            boundedState = breakThrashLoop(thrash.state, thrash.fingerprint);
+            stuckLoopStop = true;
+            const msg =
+              'Thrash loop broken by user. Do not repeat the same tool call; change strategy.';
+            return {
+              toolResult: {
+                toolUseId: tool.toolUseId,
+                content: [{ text: msg }],
+                status: 'error',
+              },
+            };
+          }
+        } else {
+          boundedState = breakThrashLoop(thrash.state, thrash.fingerprint);
+          stuckLoopStop = true;
+          const msg = [
+            thrash.message,
+            'Non-interactive host: failing closed (no Allow UI).',
+          ].join(' ');
+          return {
+            toolResult: {
+              toolUseId: tool.toolUseId,
+              content: [{ text: msg }],
+              status: 'error',
+            },
+          };
+        }
+      } else {
+        boundedState = thrash.state;
+        thrashFingerprint = thrash.fingerprint;
+      }
+    } else {
+      const gate = beforeToolCall(
+        toolLoopGuard,
+        tool.name,
+        tool.input,
+        identicalFailureLimit,
+      );
+      if (gate.action === 'refuse') {
+        host.emit({
+          type: 'warning',
+          message: `Blocked identical failing tool retry (${tool.name})`,
+        });
+        stuckLoopStop = true;
+        return {
+          toolResult: {
+            toolUseId: tool.toolUseId,
+            content: [{ text: gate.message }],
+            status: 'error',
+          },
+        };
+      }
     }
 
     if (tool.name === 'spawn_subagent') {
@@ -634,7 +847,7 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
       subagentCount += 1;
     }
 
-    const exec: ToolExecResult = await executeTool({
+    let exec: ToolExecResult = await executeTool({
       host,
       tool,
       signal,
@@ -649,18 +862,31 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
       policy,
       turnId,
       indexSettings: workspaceConfig.settings.index,
+      readFreshness: host.supportsMtimeFreshness ? readFreshness : null,
+      plannerMode: params.plannerMode,
+      onPlanSubmitted: params.onPlanSubmitted,
+      planSession,
       spawnSubagent: subagentsEnabled
-        ? async ({ name, prompt: subPrompt, signal: subSignal }) => {
+        ? async ({ name, prompt: subPrompt, signal: subSignal, role }) => {
             return runSubagent({
               host,
               name,
               prompt: subPrompt,
               signal: subSignal ?? signal,
               depth: depth + 1,
+              role: role ?? 'default',
+              region: params.region,
+              client: params.client,
+              modelId: params.modelId,
+              projectMemory: params.projectMemory,
             });
           }
         : undefined,
     });
+
+    if (boundedCfg.enabled && thrashFingerprint) {
+      boundedState = recordThrashExecution(boundedState, thrashFingerprint);
+    }
 
     if (MUTATING_TOOLS.has(tool.name) && exec.status === 'success') {
       didMutatingWork = true;
@@ -675,13 +901,90 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
       }
     }
 
-    toolLoopGuard = afterToolResult(
-      toolLoopGuard,
-      tool.name,
-      tool.input,
-      exec.status === 'success' ? 'success' : 'error',
-    );
+    if (!boundedCfg.enabled) {
+      toolLoopGuard = afterToolResult(
+        toolLoopGuard,
+        tool.name,
+        tool.input,
+        exec.status === 'success' ? 'success' : 'error',
+      );
+    } else {
+      const nudged = afterBoundedToolResult(boundedState, {
+        toolName: tool.name,
+        status: exec.status,
+        content: exec.content,
+      });
+      boundedState = nudged.state;
+      if (nudged.recoveryHint && exec.status !== 'success') {
+        exec = {
+          ...exec,
+          content: `${exec.content}\n\n${nudged.recoveryHint}`,
+        };
+      }
+      if (nudged.budgetExhausted && exec.status !== 'success') {
+        const msg = nudgeBudgetExhaustedMessage(boundedState, tool.name);
+        host.emit({ type: 'warning', message: msg });
+        telemetry.emit('walkcroach.nudge.budget_exhausted', {
+          'walkcroach.tool.name': tool.name,
+          'walkcroach.phase': 1,
+        });
+        if (boundedCfg.interactive) {
+          const answer = await host.askUser({
+            question: msg,
+            options: ['Continue trying', 'Stop'],
+            allowFreeText: false,
+          });
+          if (answer.selected.toLowerCase().startsWith('stop')) {
+            stuckLoopStop = true;
+          } else {
+            boundedState = {
+              ...boundedState,
+              consecutiveFailures: 0,
+              consecutiveSameClass: 0,
+              lastErrorClass: null,
+            };
+          }
+        } else {
+          stuckLoopStop = true;
+          exec = {
+            ...exec,
+            content: `${exec.content}\n\n${msg} Non-interactive host: failing closed.`,
+          };
+        }
+      }
+    }
+
+    // Phase 0 — observe always (alongside Phase 1 enforcement).
+    {
+      const recorded = recordToolCallObservation(toolCallObserve, {
+        toolName: tool.name,
+        input: tool.input,
+        status: exec.status,
+        content: exec.content,
+      });
+      toolCallObserve = recorded.state;
+      emitToolCallObservation(telemetry, recorded.observation);
+      host.emit({
+        type: 'telemetry',
+        name: 'tool_call_observe',
+        counters: {
+          count_in_window: recorded.observation.countInWindow,
+          consecutive_failures: recorded.observation.consecutiveFailures,
+        },
+        detail: JSON.stringify({
+          tool: recorded.observation.toolName,
+          fingerprint: recorded.observation.fingerprintShort,
+          status: recorded.observation.status,
+          errorClass: recorded.observation.errorClass,
+          wouldHaltAt: recorded.observation.wouldHaltAt,
+          observeOnly: false,
+          phase: boundedCfg.enabled ? 1 : 0,
+        }),
+      });
+    }
+
     if (
+      !boundedCfg.enabled &&
       toolLoopGuard.streak >= identicalFailureLimit &&
       exec.status !== 'success'
     ) {
@@ -960,6 +1263,7 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
         }
 
         host.emit({ type: 'phase', phase: 'verify' });
+        emitObserveSummary();
         host.emit({
           type: 'telemetry',
           name: 'session_complete',
@@ -998,6 +1302,7 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
 
       if (stuckLoopStop) {
         host.emit({ type: 'phase', phase: 'verify' });
+        emitObserveSummary();
         host.emit({
           type: 'telemetry',
           name: 'session_complete',
@@ -1015,6 +1320,7 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
     }
 
     host.emit({ type: 'phase', phase: 'verify' });
+    emitObserveSummary();
     host.emit({
       type: 'telemetry',
       name: 'session_complete',
@@ -1039,12 +1345,165 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
   }
 }
 
+async function runPlanThenExecute(params: RunLoopParams): Promise<void> {
+  const { host, signal } = params;
+  const boundedCfg = resolveBoundedExecutorConfig(params.boundedExecutor);
+  const autoApprove =
+    params.autoApprovePlan ?? boundedCfg.interactive === false;
+
+  let task = params.prompt;
+  let approvedPlan: string | null = params.approvedPlan ?? null;
+
+  for (let round = 0; round < 3 && !approvedPlan; round++) {
+    host.emit({
+      type: 'warning',
+      message:
+        round === 0
+          ? 'Phase 2: running Planner subagent (schema-restricted)…'
+          : `Phase 2: Planner revise round ${round + 1}…`,
+    });
+
+    let lastPlanPath: string | null = null;
+    const summary = await runSubagent({
+      host,
+      name: 'Planner',
+      prompt: buildPlannerUserPrompt(task),
+      signal,
+      depth: 1,
+      role: 'planner',
+      region: params.region,
+      client: params.client,
+      modelId: params.modelId,
+      projectMemory: params.projectMemory,
+      onPlanSubmitted: (p) => {
+        lastPlanPath = p;
+      },
+    });
+
+    if (!lastPlanPath) {
+      host.emit({
+        type: 'warning',
+        message:
+          'Planner finished without submit_plan. Stopping plan-then-execute.',
+      });
+      host.emit({
+        type: 'done',
+        reason: 'incomplete',
+        canContinue: true,
+        turnId: params.turnId,
+      });
+      host.emit({
+        type: 'telemetry',
+        name: 'planner_missing_submit',
+        detail: summary.slice(0, 500),
+      });
+      return;
+    }
+
+    const planSession = {
+      autoApprove,
+      approvedPlan: null as string | null,
+      approvedPlanPath: null as string | null,
+      reviseFeedback: null as string | null,
+    };
+
+    const present = await executeTool({
+      host,
+      tool: {
+        toolUseId: randomUUID(),
+        name: 'present_plan',
+        input: { plan_path: lastPlanPath },
+      },
+      planSession,
+      signal,
+    });
+
+    if (planSession.approvedPlan) {
+      approvedPlan = planSession.approvedPlan;
+      host.emit({
+        type: 'telemetry',
+        name: autoApprove ? 'plan.auto_approved' : 'plan.approved',
+        detail: approvedPlan.slice(0, 8_000),
+        counters: { plan_chars: approvedPlan.length },
+      });
+      host.emit({
+        type: 'warning',
+        message: params.planOnly
+          ? `Plan approved (${planSession.approvedPlanPath ?? lastPlanPath}). planOnly — skipping execute.`
+          : `Plan approved (${planSession.approvedPlanPath ?? lastPlanPath}). Executing…`,
+      });
+      break;
+    }
+
+    if (planSession.reviseFeedback) {
+      task = [
+        params.prompt,
+        '',
+        '# Revision feedback from user',
+        planSession.reviseFeedback,
+        '',
+        `# Prior plan (${lastPlanPath})`,
+        'Revise and call submit_plan again.',
+      ].join('\n');
+      continue;
+    }
+
+    host.emit({
+      type: 'warning',
+      message: `present_plan did not approve or revise: ${present.content}`,
+    });
+    host.emit({
+      type: 'done',
+      reason: 'incomplete',
+      canContinue: true,
+      turnId: params.turnId,
+    });
+    return;
+  }
+
+  if (!approvedPlan) {
+    host.emit({
+      type: 'done',
+      reason: 'incomplete',
+      canContinue: true,
+      turnId: params.turnId,
+    });
+    return;
+  }
+
+  if (params.planOnly) {
+    host.emit({
+      type: 'done',
+      reason: 'plan_ready',
+      canContinue: true,
+      turnId: params.turnId,
+    });
+    return;
+  }
+
+  await runFullLoop({
+    ...params,
+    mode: 'full',
+    readOnly: false,
+    approvedPlan,
+    actionBias: params.actionBias ?? 'always',
+    // Avoid re-entering plan-then-execute via intent heuristic.
+    plannerFirstOnIntent: false,
+  });
+}
+
 async function runSubagent(params: {
   host: HostAdapter;
   name: string;
   prompt: string;
   signal?: AbortSignal;
   depth: number;
+  role?: 'planner' | 'default';
+  region?: string;
+  client?: import('@aws-sdk/client-bedrock-runtime').BedrockRuntimeClient;
+  modelId?: string;
+  projectMemory?: import('./project-memory.js').ProjectMemoryBridge | null;
+  onPlanSubmitted?: (planPath: string) => void;
 }): Promise<string> {
   const chunks: string[] = [];
   const wrapping = wrapHost(params.host, (event) => {
@@ -1060,9 +1519,13 @@ async function runSubagent(params: {
     }
   });
 
+  const isPlanner = params.role === 'planner';
+
   await runFullLoop({
     host: wrapping,
-    prompt: `[Sub-agent: ${params.name}]\n${params.prompt}\n\nReturn a concise summary of findings. Do not write files.`,
+    prompt: isPlanner
+      ? params.prompt
+      : `[Sub-agent: ${params.name}]\n${params.prompt}\n\nReturn a concise summary of findings. Do not write files.`,
     signal: params.signal,
     mode: 'full',
     readOnly: true,
@@ -1070,8 +1533,16 @@ async function runSubagent(params: {
     subagentsEnabled: false,
     includePhaseB: false,
     depth: params.depth,
-    maxIterations: 8,
-    projectMemory: undefined,
+    maxIterations: isPlanner ? 12 : 8,
+    projectMemory: isPlanner ? params.projectMemory : undefined,
+    region: params.region,
+    client: params.client,
+    modelId: params.modelId,
+    plannerMode: isPlanner,
+    toolAllowlist: isPlanner ? PLANNER_TOOL_ALLOWLIST : undefined,
+    onPlanSubmitted: params.onPlanSubmitted,
+    plannerFirstOnIntent: false,
+    boundedExecutor: { interactive: false },
   });
 
   const summary = chunks.join('').trim();

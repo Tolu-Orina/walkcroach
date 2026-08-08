@@ -303,4 +303,15 @@ export interface HostAdapter {
   stdioMcp?: import('./mcp-stdio.js').StdioMcpSupervisor;
   secrets: HostSecrets;
   emit(event: AgentEvent): void;
+  /**
+   * Phase 1 — when true, engine tracks read mtimes and rejects stale writes.
+   * Real FS hosts (IDE/CLI) should set true + implement getFileMtimeMs.
+   * In-memory hosts (MemoryFileSystem / FakeHost default) leave unset/false.
+   */
+  supportsMtimeFreshness?: boolean;
+  /**
+   * mtime in ms since epoch for a workspace-relative or absolute path the
+   * agent uses with read_file / write_file. Return null if the file does not exist.
+   */
+  getFileMtimeMs?(path: string): Promise<number | null>;
 }

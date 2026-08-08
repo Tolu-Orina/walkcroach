@@ -284,9 +284,22 @@ paths:
       summary: Start a programmatic content publish run
       description: |
         Accepts a document source and returns a run handle immediately.
-        Poll `GET /runs/{id}` until terminal. When `dryRun` is true,
-        `target.repo` may be omitted (no-target dry-run). When `projectId`
-        is omitted, the server ensures `__walkcroach_sdk__` for the caller.
+        Poll `GET /runs/{id}` (with `afterSeq`) until terminal, or use the
+        TypeScript SDK `RunHandle.wait({ onProgress })`.
+
+        **Contract:** `content.publish/v1`.
+
+        **Plan approval (A1):** the Plan stage always **auto-approves** on this
+        async path — there is no live HITL channel. `requirePlanApproval` /
+        `planApproval: required` are rejected at the SDK client (and must not
+        be relied on server-side in v1). Interactive plan review is IDE-only.
+
+        Progress events include Graph `stage.*`, `plan.auto_approved`, and
+        `critic.*` (plus lifecycle `started` / `finished` / `interrupt`).
+        Engine tool noise may also appear; filter with SDK helpers.
+
+        When `dryRun` is true, `target.repo` may be omitted (no-target dry-run).
+        When `projectId` is omitted, the server ensures `__walkcroach_sdk__`.
       security:
         - cognitoBearer: []
         - apiKeyBearer: []
@@ -352,20 +365,141 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EnsuredProject'
+  /graphs/catalog:
+    get:
+      operationId: getGraphsCatalog
+      summary: List platform Run Graph node types, presets, and caps
+      description: |
+        Closed catalog for `graph.run/v1` (Phase 6b / ADR-I).
+        Customers compose these node types only — no BYO tools, HostAdapter,
+        or arbitrary code nodes. `content.publish` is a **named preset**, not
+        a node type.
+      security:
+        - cognitoBearer: []
+        - apiKeyBearer: []
+      responses:
+        '200':
+          description: Catalog
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GraphsCatalog'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /graphs/validate:
+    post:
+      operationId: validateGraph
+      summary: Validate a public graph definition (fail-closed on BYO)
+      description: |
+        Rejects unknown node types, forbidden BYO keys (`tools`, `hostAdapter`, …),
+        illegal edge predicates, and bound violations. Does not execute.
+      security:
+        - cognitoBearer: []
+        - apiKeyBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GraphsValidateRequest'
+      responses:
+        '200':
+          description: Valid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GraphsValidateResponse'
+        '400':
+          description: Invalid graph / BYO rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GraphsValidateResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /graphs/run:
+    post:
+      operationId: runGraph
+      summary: Submit a catalog-only Run Graph (or content.publish preset)
+      description: |
+        **Contract:** `graph.run/v1`.
+
+        Pass either `graph` (catalog definition) or `preset: content.publish`
+        (forwards to the content.publish pipeline). Same poll / wait /
+        onProgress path as other durable runs (`GET /runs/{id}`).
+
+        Requires `content:run`. Metered as `graph_run` (custom graphs) or
+        `content_publish` (preset).
+      security:
+        - cognitoBearer: []
+        - apiKeyBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GraphsRunRequest'
+      responses:
+        '200':
+          description: Existing run returned for idempotency key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunAccepted'
+        '202':
+          description: Fresh run accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunAccepted'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          description: Credit quota exceeded
   /runs/{id}:
     get:
       operationId: getRun
       summary: Poll run status / events (includes threadId + interrupt when paused)
       description: |
         Requires `memory:read` **or** `content:run` so publish-only keys can wait.
+        Pass `afterSeq` to receive only new events since the last poll.
+        Response schema: `RunSnapshot` (status, result, events, interrupt).
       security:
         - cognitoBearer: []
         - apiKeyBearer: []
       parameters:
         - $ref: '#/components/parameters/RunId'
+        - name: afterSeq
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+          description: Return events with seq greater than this value
+        - name: events
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+          description: Max events to return (server may clamp)
       responses:
         '200':
           description: Snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunSnapshot'
     delete:
       operationId: cancelRun
       summary: Cancel a run
@@ -627,6 +761,16 @@ components:
           type: boolean
         idempotencyKey:
           type: string
+        planApproval:
+          type: string
+          enum: [auto, required]
+          description: |
+            v1 only supports `auto` (default). `required` is rejected — async
+            SDK auto-approves Plan (A1). Interactive plan review is IDE-only.
+        requirePlanApproval:
+          type: boolean
+          deprecated: true
+          description: Alias for planApproval=required; rejected on v1
     RunAccepted:
       type: object
       required: [runId, status, createdAt, pollUrl]
@@ -641,6 +785,358 @@ components:
           format: date-time
         pollUrl:
           type: string
+    RunEvent:
+      type: object
+      required: [seq, at, type, payload]
+      properties:
+        seq:
+          type: integer
+        at:
+          type: string
+          format: date-time
+        type:
+          type: string
+          description: |
+            Platform progress types include stage.*, plan.auto_approved,
+            critic.*, started, finished, interrupt, error. Engine tool events
+            may also appear as opaque strings.
+        payload:
+          type: object
+          additionalProperties: true
+    PublishResult:
+      type: object
+      required: [ok, filesWritten, signals, flags, refusals, learned, reason]
+      properties:
+        ok:
+          type: boolean
+        contractVersion:
+          type: string
+          description: Always content.publish/v1 for this surface
+          example: content.publish/v1
+        pullRequest:
+          type: object
+          properties:
+            number:
+              type: integer
+            url:
+              type: string
+            branch:
+              type: string
+            commitSha:
+              type: string
+        filesWritten:
+          type: array
+          items:
+            type: string
+        files:
+          type: array
+          items:
+            type: object
+            properties:
+              path:
+                type: string
+              content:
+                type: string
+        signals:
+          type: array
+          items:
+            type: object
+        flags:
+          type: array
+          items:
+            type: object
+        criticFindings:
+          type: array
+          items:
+            $ref: '#/components/schemas/CriticFinding'
+        refusals:
+          type: array
+          items:
+            type: object
+        learned:
+          type: array
+          items:
+            type: string
+        reason:
+          type: string
+        error:
+          type: string
+        planAutoApproved:
+          type: boolean
+        approvedPlan:
+          type: string
+    CriticFinding:
+      type: object
+      required: [checkId, rule, severity, message]
+      properties:
+        checkId:
+          type: string
+        rule:
+          type: string
+        severity:
+          type: string
+          enum: [error, warning]
+        message:
+          type: string
+        path:
+          type: string
+        excerpt:
+          type: string
+    RunSnapshot:
+      type: object
+      required:
+        - runId
+        - threadId
+        - status
+        - kind
+        - attempts
+        - createdAt
+        - startedAt
+        - finishedAt
+        - result
+        - error
+        - interrupt
+        - events
+        - lastSeq
+        - pollAfterMs
+      properties:
+        runId:
+          type: string
+          format: uuid
+        threadId:
+          type: string
+          description: LangGraph-style alias — equals runId for content runs
+        status:
+          type: string
+          enum: [queued, running, succeeded, failed, cancelled, interrupted]
+        kind:
+          type: string
+          example: content.publish
+        attempts:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        startedAt:
+          type: string
+          nullable: true
+          format: date-time
+        finishedAt:
+          type: string
+          nullable: true
+          format: date-time
+        result:
+          nullable: true
+          oneOf:
+            - $ref: '#/components/schemas/PublishResult'
+            - $ref: '#/components/schemas/GraphRunResult'
+        error:
+          type: string
+          nullable: true
+        interrupt:
+          type: object
+          nullable: true
+          additionalProperties: true
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/RunEvent'
+        lastSeq:
+          type: integer
+        pollAfterMs:
+          type: integer
+    GraphRunResult:
+      type: object
+      required:
+        - ok
+        - graphId
+        - nodeExecutionCount
+        - reviseCount
+        - visitCounts
+        - reason
+      properties:
+        ok:
+          type: boolean
+        contractVersion:
+          type: string
+          example: graph.run/v1
+        graphId:
+          type: string
+        nodeExecutionCount:
+          type: integer
+        reviseCount:
+          type: integer
+        visitCounts:
+          type: object
+          additionalProperties:
+            type: integer
+        reason:
+          type: string
+        error:
+          type: string
+        rememberedId:
+          type: string
+        criticFindings:
+          type: array
+          items:
+            $ref: '#/components/schemas/CriticFinding'
+        pipelineOk:
+          type: boolean
+    GraphsCatalog:
+      type: object
+      required: [contractVersion, nodes, presets, predicates, caps]
+      properties:
+        contractVersion:
+          type: string
+          example: graph.run/v1
+        nodes:
+          type: array
+          items:
+            type: object
+            required: [type, kind, description, configKeys]
+            properties:
+              type:
+                type: string
+              kind:
+                type: string
+              description:
+                type: string
+              configKeys:
+                type: array
+                items:
+                  type: string
+        presets:
+          type: array
+          items:
+            type: object
+            required: [id, description]
+            properties:
+              id:
+                type: string
+                example: content.publish
+              description:
+                type: string
+        predicates:
+          type: array
+          items:
+            type: string
+        caps:
+          type: object
+          properties:
+            maxNodeExecutions:
+              type: integer
+            maxNodes:
+              type: integer
+            maxEdges:
+              type: integer
+        note:
+          type: string
+    GraphsValidateRequest:
+      type: object
+      properties:
+        graph:
+          $ref: '#/components/schemas/PublicGraphDefinition'
+        preset:
+          type: string
+          enum: [content.publish]
+    GraphsValidateResponse:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+        contractVersion:
+          type: string
+        errors:
+          type: array
+          items:
+            type: string
+        needsAgent:
+          type: boolean
+        graph:
+          $ref: '#/components/schemas/PublicGraphDefinition'
+        preset:
+          type: string
+        note:
+          type: string
+    GraphsRunRequest:
+      type: object
+      properties:
+        projectId:
+          type: string
+          format: uuid
+        graph:
+          $ref: '#/components/schemas/PublicGraphDefinition'
+        preset:
+          type: string
+          enum: [content.publish]
+        input:
+          type: object
+          additionalProperties: true
+        writeScope:
+          $ref: '#/components/schemas/WriteScope'
+        idempotencyKey:
+          type: string
+        source:
+          $ref: '#/components/schemas/PublishSource'
+        target:
+          type: object
+          properties:
+            repo:
+              type: string
+            path:
+              type: string
+        instructions:
+          type: string
+        dryRun:
+          type: boolean
+    PublicGraphDefinition:
+      type: object
+      required: [entry, maxNodeExecutions, nodes, edges]
+      description: |
+        Catalog-only graph. Unknown types and BYO keys are rejected.
+        No HostAdapter, tools, or CriticGate schema authoring.
+      properties:
+        id:
+          type: string
+        entry:
+          type: string
+        maxNodeExecutions:
+          type: integer
+          minimum: 1
+          maximum: 40
+        nodes:
+          type: array
+          maxItems: 24
+          items:
+            type: object
+            required: [id, type]
+            properties:
+              id:
+                type: string
+              type:
+                type: string
+                description: Must be a PLATFORM_NODE_TYPES catalog id
+              config:
+                type: object
+                additionalProperties: true
+        edges:
+          type: array
+          maxItems: 48
+          items:
+            type: object
+            required: [from, to]
+            properties:
+              from:
+                type: string
+              to:
+                nullable: true
+                oneOf:
+                  - type: string
+                  - type: 'null'
+              when:
+                type: string
+                description: Named predicate (always, criticPass, …) — no customer JS
     EnsuredProject:
       type: object
       required: [id, name, kind, surfaceOrigin, created]

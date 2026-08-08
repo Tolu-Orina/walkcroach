@@ -1,7 +1,13 @@
 import { ValidationError, WalkCroachError } from './errors.js';
 import type { Transport } from './http.js';
 import type { RunInterrupt } from './interrupt.js';
+import {
+  CONTENT_PUBLISH_CONTRACT_VERSION,
+  type PlanApprovalPolicy,
+} from './run-contract.js';
 import type {
+  DurableRunResult,
+  GraphRunResult,
   PublishResult,
   PublishSource,
   RunEvent,
@@ -44,7 +50,42 @@ export type PublishOptions = {
    * turns one blog post into two pull requests.
    */
   idempotencyKey?: string;
+  /**
+   * Plan approval policy (`content.publish/v1`).
+   *
+   * - Omit or `'auto'` — Plan stage **auto-approves** (A1). Async SDK runs have
+   *   no live human channel for plan review; the Planner still runs.
+   * - `'required'` — **rejected in v1** with {@link ValidationError}. Use the
+   *   IDE for interactive `present_plan`. Reserved for a future contract once
+   *   async HITL exists. Alias: `requirePlanApproval: true` → `'required'`.
+   */
+  planApproval?: PlanApprovalPolicy;
+  /**
+   * @deprecated Prefer {@link PublishOptions.planApproval} `'required'`.
+   * When true, rejected on content.publish/v1 (same as planApproval: 'required').
+   */
+  requirePlanApproval?: boolean;
 };
+
+function normalizePublishResult(result: PublishResult): PublishResult {
+  return {
+    ...result,
+    contractVersion: result.contractVersion ?? CONTENT_PUBLISH_CONTRACT_VERSION,
+  };
+}
+
+function isPublishResult(result: DurableRunResult): result is PublishResult {
+  return Array.isArray((result as PublishResult).filesWritten);
+}
+
+function normalizeDurableResult(result: DurableRunResult): DurableRunResult {
+  if (isPublishResult(result)) return normalizePublishResult(result);
+  const g = result as GraphRunResult;
+  return {
+    ...g,
+    contractVersion: g.contractVersion ?? 'graph.run/v1',
+  };
+}
 
 export class ContentApi {
   constructor(private readonly transport: Transport) {}
@@ -60,6 +101,19 @@ export class ContentApi {
   async publish(opts: PublishOptions): Promise<RunHandle> {
     const dryRun = Boolean(opts.dryRun);
     const repo = opts.target?.repo?.trim() ?? '';
+
+    const planApproval: PlanApprovalPolicy =
+      opts.planApproval ??
+      (opts.requirePlanApproval === true ? 'required' : 'auto');
+    if (planApproval === 'required') {
+      throw new ValidationError(
+        'requirePlanApproval / planApproval:"required" is not supported on content.publish/v1. ' +
+          'The async SDK auto-approves Plan (A1). Use the IDE for interactive plan review.',
+        400,
+        null,
+        { field: 'planApproval' },
+      );
+    }
 
     if (opts.projectId != null && opts.projectId !== '' && !UUID_RE.test(opts.projectId)) {
       throw new ValidationError('projectId must be a uuid', 400, null, {
@@ -161,12 +215,16 @@ export class RunHandle {
   /**
    * Wait for the run to finish.
    * Throws {@link RunInterruptedError} when paused for human input.
+   *
+   * `onProgress` receives every polled event. Prefer filtering with
+   * `isStageProgressEvent` / `isCriticProgressEvent` / `isPlanProgressEvent`
+   * from `@walkcroach/sdk` — engine tool noise may also appear on the channel.
    */
   async wait(opts: {
     onProgress?: (event: RunEvent) => void;
     timeoutMs?: number;
     signal?: AbortSignal;
-  } = {}): Promise<PublishResult> {
+  } = {}): Promise<DurableRunResult> {
     const deadline = Date.now() + (opts.timeoutMs ?? 15 * 60_000);
     let afterSeq = 0;
 
@@ -191,7 +249,9 @@ export class RunHandle {
       }
 
       if (TERMINAL.includes(snap.status)) {
-        if (snap.status === 'succeeded' && snap.result) return snap.result;
+        if (snap.status === 'succeeded' && snap.result) {
+          return normalizeDurableResult(snap.result);
+        }
         throw new RunFailedError(this.runId, snap.status, snap.error ?? 'run did not succeed');
       }
 

@@ -7,7 +7,7 @@ export const AGENT_SYSTEM_PROMPT = [
   'You are WalkCroach IDE, a local coding agent in the developer\'s workspace.',
   'Follow gather → act → verify: inspect only what you need, make the changes, then verify.',
   'Use tools for all file and shell operations. Paths must be relative to the workspace root (never absolute Windows/macOS paths).',
-  'Prefer glob over recursive list_dir. Use search for exact strings/regex; use semantic_search for conceptual/fuzzy questions where you do not know the literal terms. Prefer edit_file or apply_patch for surgical changes; use write_file for new files or full rewrites. Prefer apply_patch when several unique hunks land in the same file.',
+  'Prefer glob over recursive list_dir. Use search for exact strings/regex; use semantic_search for conceptual/fuzzy questions where you do not know the literal terms. Prefer edit_file or apply_patch for surgical changes; use write_file for new files or full rewrites. Prefer apply_patch when several unique hunks land in the same file. When editing, anchor old_str with 3–5 surrounding lines of unique context; never guess indentation; if edit_mismatch/stale_read, re-read before retrying — do not resubmit the same old_str.',
   'Use run_terminal for installs, builds, tests (mode=blocking, default). Prefer non-interactive flags (-y, --yes, CI=true) when the CLI supports them. For known confirm prompts, pass replies (e.g. ["y"]) or stdin with trailing newlines. If a CLI unexpectedly asks [y/N], the host surfaces ask_user (interactive Tier B, default on when not preloading stdin). Password/sudo prompts abort — do not send secrets via stdin. For REPLs/TUIs and multi-step stdin conversations (python -i, node, psql, debuggers), use terminal_session: start → write → read → close (backend pty when native addon loads, else pipe). For long-lived processes (vite/dev servers/watchers), use mode=background then await_terminal to poll — never block the loop on a forever-running server. Prefer write_file for source files so the user sees a diff.',
   'On multi-step work, call todo_write early and keep exactly one item in_progress until done (persisted under .walkcroach/todos.json). Update the checklist as you finish each step — do not leave everything pending.',
   'After mutating work, call verify (commands from .walkcroach/verify.json) before claiming the task is done. Do not treat a prior failing test run as success — run a fresh verify.',
@@ -16,6 +16,7 @@ export const AGENT_SYSTEM_PROMPT = [
   'Never invent file contents you have not read. Keep WALKCROACH.md updated with durable conventions via update_walkcroach_md.',
   'Honor .walkcroach/rules/*.md and .walkcroach/settings.json (deny paths, terminal timeouts, background allowlist, PostToolUse/Stop hooks). Stop hooks must exit 0 before the task is marked complete. Some rules are listed as metadata only (name + description) — call load_rule when one looks relevant to the current task.',
   'For large multi-file work, you may call spawn_subagent for read-only exploration; you apply writes yourself.',
+  'For plan-then-execute: spawn_subagent with role=planner (or name Planner), then present_plan on the returned plan_path. After Approve, follow the plan as non-negotiable.',
   'Do not run destructive or infrastructure-provisioning commands unless the user explicitly asked.',
   'CockroachDB: call load_skill for official CockroachDB Agent Skills (bundled from cockroachlabs/cockroachdb-skills); use cockroach_mcp for interactive schema/data (read-only default); ccloud only for cloud provisioning/lifecycle (always approval-gated). Prefer cockroachdb-walkcroach-tools when unsure which surface to use.',
   'For any other MCP server configured in .walkcroach/mcp.json, use mcp_call with the server name (never cockroach_mcp for those). Every mcp_call requires explicit user approval.',
@@ -32,9 +33,13 @@ export function assembleSystemBlocks(params: {
   skillsCatalog?: string;
   rulesMd?: string;
   ruleCatalog?: string;
+  /** Phase 2 — approved plan injected as non-negotiable context. */
+  approvedPlan?: string;
+  /** Replace the default agent system prompt (Planner subagent). */
+  systemPromptOverride?: string;
 }): SystemContentBlock[] {
   const blocks: SystemContentBlock[] = [
-    { text: AGENT_SYSTEM_PROMPT },
+    { text: params.systemPromptOverride?.trim() || AGENT_SYSTEM_PROMPT },
     { cachePoint: { type: 'default' } },
   ];
 
@@ -70,6 +75,11 @@ export function assembleSystemBlocks(params: {
     blocks.push({ cachePoint: { type: 'default' } });
   }
 
+  if (params.approvedPlan?.trim()) {
+    blocks.push({ text: params.approvedPlan.trim() });
+    blocks.push({ cachePoint: { type: 'default' } });
+  }
+
   return blocks;
 }
 
@@ -79,6 +89,8 @@ export function looksLikeActionTask(prompt: string): boolean {
     prompt,
   );
 }
+
+export { looksLikePlanningTask } from './planner.js';
 
 /**
  * IDE Agent mode → always; Ask/plan → never; CLI/default → auto (regex).

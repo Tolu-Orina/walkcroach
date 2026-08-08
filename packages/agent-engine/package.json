@@ -16,6 +16,7 @@
     "build": "tsc -p tsconfig.json && node scripts/copy-skill-assets.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "test:fitness": "vitest run src/fitness",
     "test:coverage": "vitest run --coverage",
     "eval": "vitest run src/eval",
     "smoke:ping": "node --import tsx src/smoke-ping.ts",

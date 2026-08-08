@@ -49,6 +49,15 @@ export type AgentRun = {
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
+  /** Phase 3 Graph checkpoint (null when run is not graph-backed). */
+  graphId: string | null;
+  currentStage: string | null;
+  stageState: Record<string, unknown>;
+  stageStateVersion: number;
+  checkpointAt: string | null;
+  reviseCount: number;
+  nodeExecutionCount: number;
+  toolFingerprints: unknown[];
 };
 
 export type RunEvent = {
@@ -74,6 +83,14 @@ function toRun(row: {
   created_at: Date;
   started_at: Date | null;
   finished_at: Date | null;
+  graph_id?: string | null;
+  current_stage?: string | null;
+  stage_state?: unknown;
+  stage_state_version?: number | null;
+  checkpoint_at?: Date | null;
+  revise_count?: number | null;
+  node_execution_count?: number | null;
+  tool_fingerprints?: unknown;
 }): AgentRun {
   return {
     id: row.id,
@@ -88,11 +105,23 @@ function toRun(row: {
     createdAt: row.created_at.toISOString(),
     startedAt: row.started_at?.toISOString() ?? null,
     finishedAt: row.finished_at?.toISOString() ?? null,
+    graphId: row.graph_id ?? null,
+    currentStage: row.current_stage ?? null,
+    stageState: (row.stage_state ?? {}) as Record<string, unknown>,
+    stageStateVersion: Number(row.stage_state_version ?? 1),
+    checkpointAt: row.checkpoint_at?.toISOString() ?? null,
+    reviseCount: Number(row.revise_count ?? 0),
+    nodeExecutionCount: Number(row.node_execution_count ?? 0),
+    toolFingerprints: Array.isArray(row.tool_fingerprints)
+      ? row.tool_fingerprints
+      : [],
   };
 }
 
 const SELECT = `id, owner_id, project_id, kind, status, request, result, error,
-                attempts, created_at, started_at, finished_at`;
+                attempts, created_at, started_at, finished_at,
+                graph_id, current_stage, stage_state, stage_state_version,
+                checkpoint_at, revise_count, node_execution_count, tool_fingerprints`;
 
 /**
  * Submit a run.
@@ -238,6 +267,10 @@ export async function interruptRun(params: {
 /**
  * Resume after an interrupt: verify interrupt id, stash resume value on the
  * request, and re-queue for a worker claim.
+ *
+ * Phase 3 / A5: Graph checkpoint columns (`stage_state`, `current_stage`, …)
+ * are never cleared. For graph-backed runs, `result` keeps non-interrupt
+ * fields; legacy non-graph HITL still nulls `result` as before.
  */
 export async function resumeRun(params: {
   db: DbClient;
@@ -275,7 +308,10 @@ export async function resumeRun(params: {
     `UPDATE agent_runs
         SET status = 'queued',
             request = $3::jsonb,
-            result = NULL,
+            result = CASE
+              WHEN graph_id IS NOT NULL THEN (COALESCE(result, '{}'::jsonb) - 'interrupt')
+              ELSE NULL
+            END,
             error = NULL,
             finished_at = NULL,
             lease_expires_at = NULL
@@ -367,22 +403,67 @@ export async function listRunEvents(params: {
   }));
 }
 
+export type ReapExpiredResult = {
+  /** Legacy non-graph runs fail-wiped. */
+  failed: number;
+  /** Graph-backed runs re-queued with checkpoint preserved (A5). */
+  recovered: number;
+};
+
 /**
- * Fail runs whose worker died.
+ * Handle workers that died mid-run (lease expired).
  *
- * Without this a Lambda killed at its timeout leaves a run on `running`
- * forever, and the caller polls a status that will never change. The lease is
- * what turns "the worker vanished" into an answer.
+ * Phase 3 / A5: runs with `graph_id` are **recoverably re-queued** — checkpoint
+ * columns survive so the next claim resumes at `current_stage`. Legacy runs
+ * without a graph still fail-wipe (prior behaviour).
  */
-export async function reapExpiredRuns(db: DbClient): Promise<number> {
-  const res = await db.query(
+export async function reapExpiredRuns(db: DbClient): Promise<number>;
+export async function reapExpiredRuns(
+  db: DbClient,
+  opts: { detailed: true },
+): Promise<ReapExpiredResult>;
+export async function reapExpiredRuns(
+  db: DbClient,
+  opts?: { detailed?: boolean },
+): Promise<number | ReapExpiredResult> {
+  const recovered = await db.query(
+    `UPDATE agent_runs
+        SET status = 'queued',
+            lease_expires_at = NULL,
+            error = NULL,
+            result = jsonb_set(
+              COALESCE(result, '{}'::jsonb),
+              '{leaseRecovery}',
+              $1::jsonb,
+              true
+            )
+      WHERE status = 'running'
+        AND lease_expires_at < now()
+        AND graph_id IS NOT NULL`,
+    [
+      JSON.stringify({
+        at: new Date().toISOString(),
+        reason: 'lease_expired',
+      }),
+    ],
+  );
+
+  const failed = await db.query(
     `UPDATE agent_runs
         SET status = 'failed',
             error = 'the worker stopped responding (lease expired). It may have hit the ' ||
                     'Lambda execution limit; retry, or split the work into smaller runs.',
             finished_at = now(),
             lease_expires_at = NULL
-      WHERE status = 'running' AND lease_expires_at < now()`,
+      WHERE status = 'running'
+        AND lease_expires_at < now()
+        AND graph_id IS NULL`,
   );
-  return res.rowCount ?? 0;
+
+  const result: ReapExpiredResult = {
+    failed: failed.rowCount ?? 0,
+    recovered: recovered.rowCount ?? 0,
+  };
+  if (opts?.detailed) return result;
+  return result.failed + result.recovered;
 }

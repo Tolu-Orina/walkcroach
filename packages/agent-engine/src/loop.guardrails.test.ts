@@ -425,6 +425,62 @@ describe('parallel-safe tool set', () => {
   });
 });
 
+describe('Phase 2 plan-then-execute routing', () => {
+  it('keeps bare readOnly sticky — does not spawn Planner', async () => {
+    respondWith(textTurn('Findings only.'));
+    const host = makeHost();
+
+    await runAgentLoop({
+      host,
+      prompt: 'summarize the repo layout',
+      readOnly: true,
+      maxIterations: 3,
+      plannerFirstOnIntent: false,
+    });
+
+    expect(
+      host.events.some(
+        (e) =>
+          e.type === 'warning' &&
+          /running Planner subagent/i.test(e.message),
+      ),
+    ).toBe(false);
+    expect(doneEvent(host)).toBeTruthy();
+  });
+
+  it('routes mode:plan through Planner then stops cleanly if submit_plan missing', async () => {
+    // Planner subagent + parent execute both call Bedrock; text-only turns
+    // mean Planner never submit_plan → incomplete (not stuck in plan mode).
+    respondWith(textTurn('I thought about a plan but wrote nothing.'));
+    const host = makeHost();
+
+    await runAgentLoop({
+      host,
+      prompt: 'implement feature X',
+      mode: 'plan',
+      maxIterations: 4,
+      autoApprovePlan: true,
+    });
+
+    expect(
+      host.events.some(
+        (e) =>
+          e.type === 'warning' &&
+          /running Planner subagent/i.test(e.message),
+      ),
+    ).toBe(true);
+    expect(
+      host.events.some(
+        (e) =>
+          e.type === 'warning' &&
+          /without submit_plan/i.test(e.message),
+      ),
+    ).toBe(true);
+    const done = doneEvent(host);
+    expect(done?.reason).toBe('incomplete');
+  });
+});
+
 describe('nudge budgets are bounded', () => {
   it('caps every soft nudge at a small, finite number', () => {
     // Each nudge costs a full model turn. Unbounded retries are the

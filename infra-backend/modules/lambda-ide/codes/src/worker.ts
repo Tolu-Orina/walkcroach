@@ -13,8 +13,10 @@ import {
   interruptRun,
   publishContent,
   recallProjectMemory,
+  runPublicGraph,
   writeMemoryEntry,
   type PublishSource,
+  type PublicGraphDefinition,
 } from '@walkcroach/agent-harness';
 import { createDbClient, type DbClient } from '@walkcroach/db';
 import type { WriteScope } from '@walkcroach/sdk-host';
@@ -49,6 +51,11 @@ export async function runWorker(runId: string): Promise<void> {
     }, HEARTBEAT_MS);
 
     await appendRunEvent({ db, runId, type: 'started', payload: { kind: run.kind } });
+
+    if (run.kind === 'graph.run') {
+      await executeGraphRun(db, runId, run.projectId, run.request);
+      return;
+    }
 
     if (run.kind !== 'content.publish') {
       await completeRun({
@@ -85,6 +92,15 @@ export async function runWorker(runId: string): Promise<void> {
       dryRun: req.dryRun,
       noTarget: req.noTarget,
       answers,
+      runId,
+      onStageEvent: (type, payload) => {
+        void appendRunEvent({
+          db,
+          runId,
+          type,
+          payload,
+        }).catch(() => {});
+      },
       runAgent: createAgentRunner({
         writeScope: req.writeScope,
         memory: memoryBridge(db, run.projectId),
@@ -163,6 +179,91 @@ export async function runWorker(runId: string): Promise<void> {
     if (heartbeat) clearInterval(heartbeat);
     await db.close();
   }
+}
+
+async function executeGraphRun(
+  db: DbClient,
+  runId: string,
+  projectId: string,
+  request: Record<string, unknown>,
+): Promise<void> {
+  const graph = request.graph as PublicGraphDefinition;
+  const input = (request.input as Record<string, unknown> | undefined) ?? {};
+  const writeScope = request.writeScope as WriteScope | undefined;
+
+  const needsAgent =
+    Array.isArray(graph?.nodes) &&
+    graph.nodes.some((n) =>
+      ['plan', 'draft', 'implement', 'revise'].includes(String(n.type)),
+    );
+
+  const result = await runPublicGraph({
+    db,
+    projectId,
+    runId,
+    graph,
+    input,
+    durable: true,
+    runAgent: needsAgent
+      ? createAgentRunner({
+          writeScope: writeScope ?? { mode: 'additive' },
+          memory: memoryBridge(db, projectId),
+          onEvent: (event) => {
+            void appendRunEvent({
+              db,
+              runId,
+              type: event.type,
+              payload: event as unknown as Record<string, unknown>,
+            }).catch(() => {});
+          },
+        })
+      : undefined,
+    onEvent: (type, payload) => {
+      void appendRunEvent({ db, runId, type, payload }).catch(() => {});
+    },
+  });
+
+  const publicResult = {
+    ok: result.ok,
+    contractVersion: result.contractVersion,
+    graphId: result.graphId,
+    nodeExecutionCount: result.nodeExecutionCount,
+    reviseCount: result.reviseCount,
+    visitCounts: result.visitCounts,
+    reason: result.reason,
+    ...(result.error ? { error: result.error } : {}),
+    rememberedId: result.state.rememberedId,
+    criticFindings: result.state.criticFindings,
+    hits: result.state.hits,
+    pipelineOk: result.state.pipelineOk,
+  };
+
+  await appendRunEvent({
+    db,
+    runId,
+    type: 'finished',
+    payload: {
+      ok: result.ok,
+      nodeExecutionCount: result.nodeExecutionCount,
+      visitCounts: result.visitCounts,
+    },
+  });
+
+  await completeRun({
+    db,
+    runId,
+    status: result.ok ? 'succeeded' : 'failed',
+    result: publicResult as unknown as Record<string, unknown>,
+    error: result.error ?? null,
+  });
+
+  metricLog('sdk.graphs.completed', {
+    ok: result.ok,
+    graphId: result.graphId,
+    nodeExecutionCount: result.nodeExecutionCount,
+    reviseCount: result.reviseCount,
+    visitCountKeys: Object.keys(result.visitCounts).length,
+  });
 }
 
 /**

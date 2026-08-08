@@ -15,6 +15,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "test:fitness": "vitest run src/fitness",
     "smoke:memory": "node --import tsx src/smoke-memory.ts",
     "smoke:loop": "node --import tsx src/smoke-loop.ts",
     "local:demo": "node --import tsx src/run-local-demo.ts"

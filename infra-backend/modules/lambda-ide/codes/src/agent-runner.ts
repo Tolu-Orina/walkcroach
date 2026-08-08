@@ -32,8 +32,17 @@ export type RunnerOptions = {
 };
 
 export function createAgentRunner(opts: RunnerOptions): AgentRunner {
-  return async ({ files, workspaceRoot, prompt, context, answers }) => {
+  return async ({
+    files,
+    workspaceRoot,
+    prompt,
+    context,
+    answers,
+    role,
+    approvedPlan,
+  }) => {
     const fs = new MemoryFileSystem({ files });
+    const isPlan = role === 'plan';
 
     const result = await runProgrammatic({
       sandbox: fs,
@@ -42,10 +51,13 @@ export function createAgentRunner(opts: RunnerOptions): AgentRunner {
       context,
       writeScope: opts.writeScope,
       memory: opts.memory ?? null,
-      maxIterations: opts.maxIterations ?? 24,
+      maxIterations: opts.maxIterations ?? (isPlan ? 12 : 24),
       signal: opts.signal,
       onEvent: opts.onEvent,
       answers,
+      mode: isPlan ? 'plan' : 'full',
+      planOnly: isPlan,
+      approvedPlan: isPlan ? undefined : approvedPlan,
     });
 
     return {
@@ -56,6 +68,7 @@ export function createAgentRunner(opts: RunnerOptions): AgentRunner {
       refusals: result.refusals,
       ...(result.inputRequired ? { inputRequired: result.inputRequired } : {}),
       ...(result.error ? { error: result.error } : {}),
+      ...(result.approvedPlan ? { approvedPlan: result.approvedPlan } : {}),
     };
   };
 }
