@@ -60,12 +60,12 @@ export function LandingNav({ showGuest = false, authenticated = false }: Props) 
           <LandingThemeToggle />
           {authenticated ? (
             <Link to="/app/builder" className="lp-btn-primary">
-              Start building
+              Get started
             </Link>
           ) : (
             <>
               <Link to="/signup" className="lp-btn-primary">
-                Start building
+                Get started
               </Link>
               {showGuest && (
                 <Link to="/try" className="lp-btn-secondary">

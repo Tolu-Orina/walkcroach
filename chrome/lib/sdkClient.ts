@@ -2,8 +2,8 @@
  * Cognito-backed `@walkcroach/sdk` client for Chrome (Phase P2 follow-on).
  *
  * Uses Cognito JWT (prefer real access_token) — never apiKey in the extension.
- * Captures / recall / summarize streams stay on the chrome BFF; only project
- * memory list/remember/export go through this client → `/v1/memory/*`.
+ * Captures / Capture Recall streams stay on the chrome BFF (`/chrome/v1/recall`);
+ * only project memory list/remember/export go through this client → `/v1/memory/*`.
  */
 import { WalkCroach } from '@walkcroach/sdk';
 import { loadSession } from './auth';

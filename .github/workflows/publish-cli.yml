@@ -66,6 +66,7 @@ jobs:
           npm run build
           cd ../agent-engine
           npm ci --include=dev
+          npm run eval:gate
           npm run build
           cd ../templates
           npm ci --include=dev

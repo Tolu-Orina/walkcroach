@@ -18,6 +18,8 @@ Source: `web/public/privacy.html`
 | Connector tokens in Secrets Manager, not the browser | `walkcroach/{env}/connectors/*` |
 | Shared Web/Chrome credit pool | `@walkcroach/ledger` + `/me/usage` `sharedPool` |
 | Paid ~$20/mo via Stripe Checkout / Customer Portal | Phase G handlers |
+| Landing primary = memory platform; coding agents secondary | `LandingHero` + `docs/dual-funnel-messaging.md` |
+| Public SDK = memory/content/keys, not hosted coding agent | `packages/sdk` README + product master §0.0 / §7.2 |
 
 ## Claims that MUST NOT appear
 
@@ -29,9 +31,12 @@ Source: `web/public/privacy.html`
 | Credits alone remove hard caps | Caps apply even on paid |
 | Auto-refund of all video credits on any failure | Mid-pipeline Reel/compose failures keep the debit (v1); **pipeline start** failures refund |
 | Background scraping / always-on page upload (Chrome bleed) | Chrome policy only; Web must not inherit |
+| SDK / Developer portal sells “hosted Cursor” or phase-graph coding loop | Dual-funnel: that is IDE/CLI/Desktop only |
+| “Replaces Cursor / Copilot” on landing | Amplify, don’t replace |
 
 ## UI surfaces to re-check before release
 
+- [x] `web/src/features/landing/*` — dual-funnel CTAs (Get started / Coding agents); memory primary
 - [x] `web/src/features/billing/UpgradeModal.tsx` — creatives + caps language (images ≤3/day · video ≤1/72h when studio is live; checkout gated)
 - [x] `web/src/app/SettingsPage.tsx` — billing + connectors copy (hard caps + Secrets Manager; privacy link)
 - [x] `web/src/features/chat/ImageQuotaPill.tsx` — 3/24h and 1/72h (+ error/retry affordance)

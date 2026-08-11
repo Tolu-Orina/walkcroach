@@ -1,6 +1,7 @@
 {
   "name": "@walkcroach/sdk-host",
   "version": "0.1.0",
+  "private": true,
   "type": "module",
   "description": "Programmatic HostAdapter for @walkcroach/agent-engine — the WalkCroach IDE agent loop driven over a sandbox instead of an editor",
   "license": "MIT",

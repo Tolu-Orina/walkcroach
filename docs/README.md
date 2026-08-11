@@ -12,6 +12,11 @@
 | Doc | Use when |
 |-----|----------|
 | [walkcroach-product-master-doc.md](./walkcroach-product-master-doc.md) | **Product master** — six surfaces, maturity, journeys, claims, QA packs (PM/BA/QA) |
+| [dual-funnel-messaging.md](./dual-funnel-messaging.md) | **P0 messaging** — coding vs platform matrix, pitch, Chrome→IDE demo |
+| [memory-contract-p1.md](./memory-contract-p1.md) | **P1 memory contract** — `/v1` canonical, `/ide` deprecation, Capture Recall, APIGW fitness |
+| Developer portal (`/app/developer/*`) | **P2 DX** — Overview quickstart, keys, OpenAPI `/openapi/v1.yaml`, MCP, Ops quotas FAQ |
+| [commercial-metering-p3.md](./commercial-metering-p3.md) | **P3 metering** — SKU A shared pool, soft/hard quotas, invoice explainability, Stripe meter |
+| [coding-wedge-p4.md](./coding-wedge-p4.md) | **P4 coding wedge** — Funnel A store copy, recall provenance, eval:gate on release |
 | [walkcroach-master-doc.md](./walkcroach-master-doc.md) | **Engineering master** — dual loops, versions, migrations, infra, gap IDs |
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | Dual-loop non-goals, contract fitness, revisit triggers |
 | [adr/](./adr/) | ADR-0001 retention · ADR-0002 erase · ADR-0003 engine production bar |

@@ -236,6 +236,36 @@ describe('errors', () => {
     await expect(wc.memory.list({ projectId: PROJECT })).rejects.toBeInstanceOf(ctor as never);
   });
 
+  it('maps 429 + Retry-After to QuotaError.retryAfterMs (P3)', async () => {
+    const { wc, calls } = client(
+      () =>
+        json({ error: 'quota exceeded', code: 'QUOTA_EXCEEDED' }, 429, {
+          'retry-after': '60',
+        }),
+      { retry: { attempts: 1 } },
+    );
+    await expect(wc.memory.list({ projectId: PROJECT })).rejects.toMatchObject({
+      name: 'QuotaError',
+      status: 429,
+      retryable: true,
+      retryAfterMs: 60_000,
+    });
+    expect(calls).toHaveLength(1);
+  });
+
+  it('honours Retry-After when retrying a 429 (P3)', async () => {
+    let n = 0;
+    const { wc, calls } = client(
+      () =>
+        ++n < 2
+          ? json({ error: 'quota exceeded' }, 429, { 'retry-after': '0' })
+          : json({ entries: [] }),
+      { retry: { attempts: 3 } },
+    );
+    await expect(wc.memory.list({ projectId: PROJECT })).resolves.toEqual([]);
+    expect(calls).toHaveLength(2);
+  });
+
   it('does not retry a 500 — the write may already have committed', async () => {
     const { wc, calls } = client(() => json({ error: 'boom' }, 500));
     await expect(wc.memory.remember({ projectId: PROJECT, text: 'x' })).rejects.toThrow(

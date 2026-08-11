@@ -1,10 +1,12 @@
 # WalkCroach IDE
 
-VS Code / Cursor extension (custom webview sidebar) + shared `@walkcroach/agent-engine`.
+VS Code / Cursor extension — a **memory-first coding agent** (you steer; we explore, act, and verify) on shared `@walkcroach/agent-engine`.
+
+Same CockroachDB project memory as Web, Chrome, CLI, Desktop, and the public SDK. This package is the coding-agent funnel, not the public memory SDK.
 
 **Auth:** Sign In opens WalkCroach Web `/connect/ide` (reuses `/signin`). One-time authorization code → IDE BFF token exchange. Same Cognito SPA client as Web/Chrome — no Hosted UI, no second user pool. The OAuth `redirect_uri` uses `vscode.env.uriScheme` (`vscode://`, `cursor://`, or `vscode-insiders://`).
 
-**Ship path:** private VSIX first — see [INSTALL.md](./INSTALL.md).
+**Ship path:** Open VSX + private VSIX — see [INSTALL.md](./INSTALL.md).
 
 ## Prerequisites
 

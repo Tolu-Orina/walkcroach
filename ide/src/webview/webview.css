@@ -40,3 +40,5 @@
 }
 
 .thinking-label{display:block;font-size:.7rem;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--wc-muted);margin-bottom:.35rem}.thinking-body{opacity:.85;max-height:12rem;overflow:auto}.thinking-opaque{margin:0;font-size:1.2rem;color:var(--wc-muted);font-style:italic}
+
+.recall-hits{list-style:none;margin:0.4rem 0 0;padding:0;display:flex;flex-direction:column;gap:0.35rem}.recall-hits li{display:flex;gap:0.5rem;align-items:flex-start;font-size:1.2rem;line-height:1.35}.recall-surface{flex:0 0 auto;font-family:var(--wc-font-mono);font-size:1.05rem;text-transform:lowercase;letter-spacing:0.02em;padding:0.1rem 0.45rem;border-radius:4px;background:color-mix(in srgb, var(--vscode-textLink-foreground, #3d9a8b) 18%, transparent);color:var(--vscode-textLink-foreground, #3d9a8b)}.recall-text{color:var(--wc-muted);min-width:0}

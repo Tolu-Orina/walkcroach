@@ -1,8 +1,8 @@
 /**
- * Phase P2.4 — golden cross-surface memory on the public memory contract.
+ * Phase P2.4 / dual-funnel P1 — golden cross-surface memory on the public contract.
  *
- * Flow: create Web project → remember as `web` → mint SDK key → recall with key
- * → remember as `cli` → remember as `ide` (supersede path) → recall sees surfaces.
+ * Flow: create project → remember as web|chrome|cli|ide|desktop|sdk → mint SDK key
+ * → recall sees every source_surface tag.
  *
  * Uses HTTP only (no package imports) so `@walkcroach/tests` stays lightweight.
  * Requires WALKCROACH_API_URL + ALLOW_DEV_AUTH=true (and SDK routes on that host).
@@ -13,6 +13,15 @@ import { devBearer, resolveSurfaceEnv } from './env.js';
 
 const env = resolveSurfaceEnv();
 const describeLive = env && env.allowDevAuth ? describe : describe.skip;
+
+const ALL_SURFACES = [
+  'web',
+  'chrome',
+  'ide',
+  'cli',
+  'desktop',
+  'sdk',
+] as const;
 
 function apiRoot(base: string): string {
   // Shared GW stage is already `v1` → paths are /memory, /keys.
@@ -29,7 +38,7 @@ function sdkPath(base: string, path: string): string {
   return `${root.replace(/\/$/, '')}/v1${p}`;
 }
 
-describeLive('cross-surface memory golden (P2.4)', () => {
+describeLive('cross-surface memory golden (P2.4 / P1)', () => {
   const surfaces = env!;
   const ownerId = `user:ci-golden-${randomUUID()}`;
   const auth = {
@@ -54,7 +63,7 @@ describeLive('cross-surface memory golden (P2.4)', () => {
     }
   });
 
-  it('web → SDK key → cli → ide remember/recall under 60s', async () => {
+  it('web|chrome|ide|cli|desktop|sdk remember/recall under 60s', async () => {
     const started = Date.now();
     const marker = `golden-${randomUUID().slice(0, 10)}`;
 
@@ -70,17 +79,29 @@ describeLive('cross-surface memory golden (P2.4)', () => {
     const project = (await create.json()) as { id: string };
     createdProjectIds.push(project.id);
 
-    const webWrite = await fetch(sdkPath(surfaces.apiBaseUrl, '/memory/entries'), {
-      method: 'POST',
-      headers: auth,
-      body: JSON.stringify({
-        projectId: project.id,
-        text: `Web chose Syne for display (${marker})`,
-        kind: 'decision',
-        surface: 'web',
-      }),
-    });
-    expect(webWrite.status).toBe(200);
+    const kindBySurface: Record<(typeof ALL_SURFACES)[number], string> = {
+      web: 'decision',
+      chrome: 'capture',
+      ide: 'preference',
+      cli: 'convention',
+      desktop: 'summary',
+      sdk: 'qa',
+    };
+
+    for (const surface of ALL_SURFACES) {
+      if (surface === 'sdk') continue; // written with API key below
+      const write = await fetch(sdkPath(surfaces.apiBaseUrl, '/memory/entries'), {
+        method: 'POST',
+        headers: auth,
+        body: JSON.stringify({
+          projectId: project.id,
+          text: `${surface} remembers ${marker}`,
+          kind: kindBySurface[surface],
+          surface,
+        }),
+      });
+      expect(write.status, `write ${surface}`).toBe(200);
+    }
 
     const minted = await fetch(sdkPath(surfaces.apiBaseUrl, '/keys'), {
       method: 'POST',
@@ -100,61 +121,60 @@ describeLive('cross-surface memory golden (P2.4)', () => {
       'content-type': 'application/json',
     };
 
-    const keyRecall = await fetch(sdkPath(surfaces.apiBaseUrl, '/memory/recall'), {
+    const sdkWrite = await fetch(sdkPath(surfaces.apiBaseUrl, '/memory/entries'), {
       method: 'POST',
       headers: keyAuth,
-      body: JSON.stringify({ projectId: project.id, query: marker, limit: 8 }),
-    });
-    expect(keyRecall.status).toBe(200);
-    const keyHits = (await keyRecall.json()) as {
-      hits: Array<{ text: string; surface: string }>;
-    };
-    expect(
-      keyHits.hits.some((h) => h.text.includes(marker) && h.surface === 'web'),
-    ).toBe(true);
-
-    const cliWrite = await fetch(sdkPath(surfaces.apiBaseUrl, '/memory/entries'), {
-      method: 'POST',
-      headers: auth,
       body: JSON.stringify({
         projectId: project.id,
-        text: `CLI notes ${marker} stays on Cockroach`,
-        kind: 'convention',
-        surface: 'cli',
+        text: `sdk remembers ${marker}`,
+        kind: kindBySurface.sdk,
+        surface: 'sdk',
       }),
     });
-    expect(cliWrite.status).toBe(200);
+    expect(sdkWrite.status).toBe(200);
 
-    const ideWrite = await fetch(sdkPath(surfaces.apiBaseUrl, '/memory/entries'), {
-      method: 'POST',
-      headers: auth,
-      body: JSON.stringify({
-        projectId: project.id,
-        text: `Web chose Syne for display (${marker}) — confirmed in IDE`,
-        kind: 'decision',
-        surface: 'ide',
-      }),
-    });
-    expect(ideWrite.status).toBe(200);
-    const ideBody = (await ideWrite.json()) as { id: string; supersededId?: string | null };
-    expect(ideBody.id).toBeTruthy();
-
-    const finalRecall = await fetch(sdkPath(surfaces.apiBaseUrl, '/memory/recall'), {
+    const keyRecall = await fetch(sdkPath(surfaces.apiBaseUrl, '/memory/recall'), {
       method: 'POST',
       headers: keyAuth,
       body: JSON.stringify({
         projectId: project.id,
         query: marker,
-        limit: 10,
-        surfaces: ['web', 'cli', 'ide', 'desktop', 'chrome'],
+        limit: 20,
+        surfaces: [...ALL_SURFACES],
       }),
     });
-    expect(finalRecall.status).toBe(200);
-    const finalHits = (await finalRecall.json()) as {
-      hits: Array<{ surface: string; text: string }>;
+    expect(keyRecall.status).toBe(200);
+    const keyHits = (await keyRecall.json()) as {
+      hits: Array<{ text: string; surface: string }>;
     };
-    expect(finalHits.hits.some((h) => h.surface === 'ide')).toBe(true);
-    expect(finalHits.hits.some((h) => h.surface === 'cli')).toBe(true);
+
+    const found = new Set(
+      keyHits.hits.filter((h) => h.text.includes(marker)).map((h) => h.surface),
+    );
+    for (const surface of ALL_SURFACES) {
+      expect(found.has(surface), `missing surface ${surface}`).toBe(true);
+    }
+
+    // Supersede path: IDE restates a web decision near the same text.
+    const ideSupersede = await fetch(
+      sdkPath(surfaces.apiBaseUrl, '/memory/entries'),
+      {
+        method: 'POST',
+        headers: auth,
+        body: JSON.stringify({
+          projectId: project.id,
+          text: `web remembers ${marker} — confirmed in IDE`,
+          kind: 'decision',
+          surface: 'ide',
+        }),
+      },
+    );
+    expect(ideSupersede.status).toBe(200);
+    const ideBody = (await ideSupersede.json()) as {
+      id: string;
+      supersededId?: string | null;
+    };
+    expect(ideBody.id).toBeTruthy();
 
     expect(Date.now() - started).toBeLessThan(60_000);
   }, 60_000);

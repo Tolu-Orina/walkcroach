@@ -1,15 +1,26 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getSdkApiBaseUrl, listProjects } from '../../api/client';
+import { CodeBlock } from './CodeBlock';
 
-function CodeBlock({ children }: { children: string }) {
-  return (
-    <pre className="overflow-x-auto rounded-[var(--radius-control)] border border-line bg-ink/50 p-3.5 font-mono text-[12px] leading-relaxed text-paper">
-      <code>{children}</code>
-    </pre>
-  );
-}
+const OPENAPI_PATHS = [
+  ['GET', '/sdk-health', 'Liveness, capabilities, retention window'],
+  ['POST', '/keys', 'Mint API key (Cognito; plaintext once)'],
+  ['GET', '/keys', 'List keys'],
+  ['DELETE', '/keys/{id}', 'Revoke key'],
+  ['GET', '/keys/usage', 'Per-key + by-action usage (SKU A)'],
+  ['POST', '/memory/entries', 'Remember'],
+  ['GET', '/memory/entries', 'List'],
+  ['POST', '/memory/recall', 'Semantic recall'],
+  ['POST', '/memory/diff', 'asOf / diff'],
+  ['POST', '/memory/erase', 'Audited erase'],
+  ['POST', '/content/publish', 'Content publish run'],
+] as const;
 
+/**
+ * Developer portal Docs (dual-funnel P2).
+ * Stranger-complete: quickstart, OpenAPI, MCP hosts, security, FAQ.
+ */
 export function DeveloperDocsPage() {
   const base = getSdkApiBaseUrl();
   const [projectId, setProjectId] = useState<string>('YOUR_PROJECT_ID');
@@ -55,7 +66,6 @@ const hits = await wc.memory.recall({
   query: 'which ORM did we pick?',
 });
 
-// Inject into your system prompt (budget helpers included)
 const memoryBlock = formatHitsForPrompt(hits, { budget: { maxHits: 5 } });`;
 
   const eraseSnippet = `await wc.memory.erase({
@@ -65,12 +75,20 @@ const memoryBlock = formatHitsForPrompt(hits, { budget: { maxHits: 5 } });`;
   exportFirst: true,        // optional bundle returned before tombstone
 });`;
 
+  const pythonStub = `# Python SDK not published yet — HTTP against the OpenAPI base.
+# Example (httpx): POST {base}/v1/memory/recall with Authorization: Bearer wc_live_…
+import os, httpx
+base = os.environ.get("WALKCROACH_BASE_URL", "${base}")
+key = os.environ["WALKCROACH_API_KEY"]
+r = httpx.get(f"{base}/v1/sdk-health")
+print(r.status_code, r.json())`;
+
   const mcpServe = `# Terminal A — local MCP HTTP (loopback only; holds your API key)
 export WALKCROACH_API_KEY=wc_live_…
 export WALKCROACH_BASE_URL=${base}
-npx -y @walkcroach/sdk-mcp serve --port 7801
+npx -y @walkcroach/sdk-mcp serve --port 7801`;
 
-# Terminal B — Claude Code (HTTP transport; stdio is not supported)
+  const mcpClaude = `# Claude Code (HTTP transport; stdio is not supported)
 claude mcp add --transport http walkcroach http://127.0.0.1:7801/mcp`;
 
   const mcpCursor = `// Cursor / VS Code mcp.json (HTTP)
@@ -82,12 +100,23 @@ claude mcp add --transport http walkcroach http://127.0.0.1:7801/mcp`;
   }
 }`;
 
+  const mcpCodex = `# OpenAI Codex / compatible MCP HTTP hosts
+# Point the host at the loopback server from Terminal A:
+#   URL: http://127.0.0.1:7801/mcp
+# Keep WALKCROACH_API_KEY only on the serve process — never in the IDE UI.`;
+
   return (
     <div className="space-y-4">
       <section className="surface space-y-3 p-5">
         <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-mist">
           5-minute quickstart
         </h2>
+        <p className="text-[12px] leading-relaxed text-mist">
+          This portal is the <strong className="font-medium text-paper">memory platform</strong>{' '}
+          product — durable recall via <code className="font-mono text-paper">@walkcroach/sdk</code>{' '}
+          and MCP. It is not a hosted coding agent (that lives in the IDE Extension, CLI, and
+          Desktop IDE).
+        </p>
         <ol className="list-decimal space-y-2 pl-5 text-[12px] leading-relaxed text-mist">
           <li>
             Mint a key on{' '}
@@ -180,7 +209,53 @@ claude mcp add --transport http walkcroach http://127.0.0.1:7801/mcp`;
 
       <section className="surface space-y-3 p-5">
         <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-mist">
-          4. MCP (optional)
+          4. OpenAPI
+        </h2>
+        <p className="text-[12px] leading-relaxed text-mist">
+          Machine-readable contract for{' '}
+          <code className="font-mono text-paper">@walkcroach/sdk</code>. Same file the package
+          ships under <code className="font-mono text-paper">openapi/v1.yaml</code>.
+        </p>
+        <p className="text-[12px]">
+          <a
+            href="/openapi/v1.yaml"
+            className="text-signal hover:underline"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Open / download v1.yaml
+          </a>
+        </p>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[28rem] text-left text-[12px]">
+            <thead>
+              <tr className="border-b border-line text-mist">
+                <th className="py-1.5 pr-3 font-medium">Method</th>
+                <th className="py-1.5 pr-3 font-medium">Path</th>
+                <th className="py-1.5 font-medium">Summary</th>
+              </tr>
+            </thead>
+            <tbody>
+              {OPENAPI_PATHS.map(([method, path, summary]) => (
+                <tr key={`${method}-${path}`} className="border-b border-line/60">
+                  <td className="py-1.5 pr-3 font-mono text-mist">{method}</td>
+                  <td className="py-1.5 pr-3 font-mono text-paper">{path}</td>
+                  <td className="py-1.5 text-mist">{summary}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="text-[11px] text-mist">
+          On the shared gateway the stage is already named <code className="font-mono">v1</code>;
+          public URLs look like{' '}
+          <code className="font-mono text-paper">…/v1/sdk-health</code>.
+        </p>
+      </section>
+
+      <section className="surface space-y-3 p-5">
+        <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-mist">
+          5. MCP (Claude · Cursor · Codex)
         </h2>
         <p className="text-[12px] leading-relaxed text-mist">
           <code className="font-mono text-paper">@walkcroach/sdk-mcp</code> exposes{' '}
@@ -190,7 +265,19 @@ claude mcp add --transport http walkcroach http://127.0.0.1:7801/mcp`;
           loopback; stdio is unsupported.
         </p>
         <CodeBlock>{mcpServe}</CodeBlock>
+        <CodeBlock>{mcpClaude}</CodeBlock>
         <CodeBlock>{mcpCursor}</CodeBlock>
+        <CodeBlock>{mcpCodex}</CodeBlock>
+      </section>
+
+      <section className="surface space-y-3 p-5">
+        <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-mist">
+          6. Python (HTTP stub)
+        </h2>
+        <p className="text-[12px] leading-relaxed text-mist">
+          No first-party Python package yet. Call the same OpenAPI paths with your key.
+        </p>
+        <CodeBlock>{pythonStub}</CodeBlock>
       </section>
 
       <section className="surface space-y-3 p-5">
@@ -200,7 +287,9 @@ claude mcp add --transport http walkcroach http://127.0.0.1:7801/mcp`;
         <ul className="list-disc space-y-2 pl-5 text-[12px] leading-relaxed text-mist">
           <li>
             Never ship <code className="font-mono text-paper">wc_live_…</code> keys to browsers or
-            mobile apps. Use an access token for user-context calls.
+            mobile apps. The TypeScript SDK refuses browser apiKey use unless you set{' '}
+            <code className="font-mono text-paper">allowBrowserApiKey: true</code> (trusted
+            non-page runtimes only). Prefer access tokens for user-context calls.
           </li>
           <li>
             API keys cannot mint or revoke other keys — lifecycle stays behind interactive sign-in
@@ -211,7 +300,8 @@ claude mcp add --transport http walkcroach http://127.0.0.1:7801/mcp`;
             <code className="font-mono text-paper">x-ratelimit-remaining</code> /{' '}
             <code className="font-mono text-paper">x-ratelimit-limit</code> (monthly credit pool) and{' '}
             <code className="font-mono text-paper">x-credits-cost</code>. Exhaustion is{' '}
-            <code className="font-mono text-paper">QuotaError</code> with{' '}
+            <code className="font-mono text-paper">QuotaError</code> / HTTP{' '}
+            <code className="font-mono text-paper">429</code> with{' '}
             <code className="font-mono text-paper">Retry-After</code>. Manage plan under{' '}
             <Link to="/app/settings" className="text-signal hover:underline">
               Settings → Billing
@@ -220,10 +310,70 @@ claude mcp add --transport http walkcroach http://127.0.0.1:7801/mcp`;
           </li>
           <li>
             <code className="font-mono text-paper">remember</code> is synchronous by design
-            (correctness over fire-and-forget). If p95 write latency hurts a hot path, buffer
-            client-side and flush — do not drop the await without an outbox you control.
+            (correctness over fire-and-forget).
           </li>
         </ul>
+      </section>
+
+      <section className="surface space-y-3 p-5">
+        <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-mist">
+          Support FAQ
+        </h2>
+        <dl className="space-y-3 text-[12px] leading-relaxed text-mist">
+          <div>
+            <dt className="font-medium text-paper">I closed the page before copying the key</dt>
+            <dd className="mt-0.5">
+              Plaintext is shown once. Revoke the key on{' '}
+              <Link to="/app/developer/keys" className="text-signal hover:underline">
+                API keys
+              </Link>{' '}
+              and create a new one.
+            </dd>
+          </div>
+          <div>
+            <dt className="font-medium text-paper">403 missing scope</dt>
+            <dd className="mt-0.5">
+              Mint a key that includes the needed scope (
+              <code className="font-mono text-paper">memory:read</code>,{' '}
+              <code className="font-mono text-paper">memory:write</code>, or{' '}
+              <code className="font-mono text-paper">content:run</code>).
+            </dd>
+          </div>
+          <div>
+            <dt className="font-medium text-paper">429 QuotaError</dt>
+            <dd className="mt-0.5">
+              Shared monthly credits are exhausted. Honour{' '}
+              <code className="font-mono text-paper">Retry-After</code>, check{' '}
+              <Link to="/app/developer/ops" className="text-signal hover:underline">
+                Ops
+              </Link>
+              , then{' '}
+              <Link to="/app/settings" className="text-signal hover:underline">
+                upgrade / billing
+              </Link>
+              .
+            </dd>
+          </div>
+          <div>
+            <dt className="font-medium text-paper">asOf failed with retention error</dt>
+            <dd className="mt-0.5">
+              Point-in-time recall is limited to the MVCC window (~25h). Use export/audit for
+              longer provenance — not multi-year asOf.
+            </dd>
+          </div>
+          <div>
+            <dt className="font-medium text-paper">Status / incidents</dt>
+            <dd className="mt-0.5">
+              Check{' '}
+              <Link to="/app/developer/ops" className="text-signal hover:underline">
+                Ops → sdk-health
+              </Link>
+              . Production alarms live in CloudWatch namespace{' '}
+              <code className="font-mono text-paper">WalkCroach/Memory</code>. Email support via
+              your WalkCroach account contact if health stays down after refresh.
+            </dd>
+          </div>
+        </dl>
       </section>
 
       <section className="surface space-y-2 p-5 text-[12px] text-mist">
@@ -232,10 +382,6 @@ claude mcp add --transport http walkcroach http://127.0.0.1:7801/mcp`;
         <p className="pt-1">
           SDK health:{' '}
           <code className="font-mono text-paper">{base}/v1/sdk-health</code>
-          {' '}
-          (ide-local also aliases <code className="font-mono text-paper">/v1/health</code>; on the
-          shared gateway, bare <code className="font-mono text-paper">/health</code> is the agent
-          smoke endpoint)
         </p>
       </section>
     </div>

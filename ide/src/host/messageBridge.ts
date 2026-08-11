@@ -70,6 +70,7 @@ export class MessageBridge {
           name: event.name,
           status: event.status,
           detail: event.detail,
+          hits: event.hits,
         });
         return;
       case 'approval_request': {

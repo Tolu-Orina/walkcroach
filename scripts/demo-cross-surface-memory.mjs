@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Demo: one remember per surface (web, chrome, ide, cli, desktop), then one recall.
- * Phase P2 exit criterion — target under 60s against a local or staging API.
+ * Full multi-surface write/recall (under 60s). For the P0 Chrome→IDE 30s
+ * moat demo, see scripts/demo-chrome-to-ide-30s.mjs and docs/dual-funnel-messaging.md.
  *
  * Usage (ide-api local on :3003 with ALLOW_DEV_AUTH):
  *   ALLOW_DEV_AUTH=true WALKCROACH_IDE_URL=http://localhost:3003 \

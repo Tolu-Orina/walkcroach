@@ -1,7 +1,7 @@
 {
   "name": "@walkcroach/cli",
   "version": "0.3.1",
-  "description": "WalkCroach CLI — a memory-first coding agent in your terminal, sharing one CockroachDB memory layer with the WalkCroach web app, Chrome extension and IDE extension",
+  "description": "You steer; we explore → act → verify. Memory-first coding agent in your terminal — propose→confirm approvals, BYOK Bedrock, shared CockroachDB recall across Web/Chrome/IDE/Desktop (no silent production mutate).",
   "type": "module",
   "license": "MIT",
   "author": "Conqueror Foundation",

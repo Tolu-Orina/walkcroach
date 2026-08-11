@@ -49,6 +49,19 @@ describe('MessageBridge', () => {
     expect((posted[0] as any).name).toBe('read_file');
   });
 
+  it('forwards recall hits on tool_card (P4 provenance)', () => {
+    bridge.onAgentEvent({
+      type: 'tool_card',
+      id: 't2',
+      name: 'recall_project_memory',
+      status: 'done',
+      detail: '1 hit(s) · chrome',
+      hits: [{ sourceSurface: 'chrome', kind: 'decision', text: 'Prefer Drizzle' }],
+    });
+    expect(posted).toHaveLength(1);
+    expect((posted[0] as any).hits[0].sourceSurface).toBe('chrome');
+  });
+
   it('maps approval_request events', () => {
     bridge.onAgentEvent({
       type: 'approval_request',

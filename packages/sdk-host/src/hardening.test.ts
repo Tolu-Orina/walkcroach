@@ -59,4 +59,16 @@ describe('runProgrammatic hardening (P3.8)', () => {
       result.reason,
     );
   });
+
+  it('content-publish style: additive write on empty sandbox succeeds structurally', async () => {
+    const fs = new MemoryFileSystem();
+    const host = new SandboxHostAdapter({
+      sandbox: fs,
+      writeScope: { mode: 'additive' },
+      workspaceRoot: '/workspace',
+    });
+    await host.writeFile('README.md', '# from content publish\n');
+    expect(await fs.readFile('/workspace/README.md')).toContain('content publish');
+    expect(host.refusals).toHaveLength(0);
+  });
 });

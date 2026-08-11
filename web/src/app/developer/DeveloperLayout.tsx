@@ -21,11 +21,16 @@ export function DeveloperLayout() {
           Developer
         </h1>
         <p className="mt-2 max-w-xl text-sm leading-relaxed text-mist">
-          Mint API keys, watch the shared credit pool, and call the same
-          CockroachDB memory layer your Web, Browser Extension, IDE, and CLI
-          already share — via{' '}
+          Memory platform control plane — mint keys, watch the shared credit
+          pool, and call the same CockroachDB graph via{' '}
           <code className="font-mono text-[12px] text-paper">@walkcroach/sdk</code>
-          .
+          . Not a hosted coding agent.{' '}
+          <NavLink
+            to="/app/developer/docs"
+            className="text-signal hover:underline"
+          >
+            Docs & FAQ
+          </NavLink>
         </p>
 
         <nav

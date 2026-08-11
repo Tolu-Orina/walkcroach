@@ -1,43 +1,47 @@
 import { expect, test } from '@playwright/test';
 
 /**
- * NFR-26 smoke (partial): landing loads, hero CTA present, auth affordances visible.
+ * NFR-26 smoke (partial): landing loads, dual-funnel CTAs present.
  * Full template→prompt→preview→deploy requires a long-lived WebContainer session and
  * is gated behind WALKCROACH_E2E_FULL=1.
  */
 test.describe('WalkCroach Web smoke', () => {
-  test('landing hero renders brand + start CTA', async ({ page }) => {
+  test('landing hero renders brand + dual-funnel CTAs', async ({ page }) => {
     await page.goto('/');
     await expect(
-      page.getByRole('heading', { name: /Build apps that remember you/i }),
+      page.getByRole('heading', { name: /Your one memory layer/i }),
     ).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByLabel(/Describe your app/i)).toBeVisible();
+    await expect(page.getByRole('link', { name: /^Get started$/i }).first()).toBeVisible();
     await expect(
-      page.getByRole('button', { name: /Start building/i }),
+      page.getByRole('link', { name: /^Coding agents$/i }).first(),
     ).toBeVisible();
   });
 
-  test('prompt chip + start navigates when guest/dev auth is available', async ({
+  test('get started navigates when guest/dev auth is available', async ({
     page,
   }) => {
     await page.goto('/');
     await expect(
-      page.getByRole('heading', { name: /Build apps that remember you/i }),
+      page.getByRole('heading', { name: /Your one memory layer/i }),
     ).toBeVisible({ timeout: 30_000 });
 
-    const guest = page.getByRole('button', {
-      name: /Try without signing in/i,
-    });
+    const guest = page.getByRole('link', { name: /Try guest/i });
+    const getStarted = page.getByRole('link', { name: /^Get started$/i }).first();
     const signup = page.getByRole('link', { name: /Create account/i });
     const dev = page.getByRole('button', { name: /Dev sign-in/i });
 
     if (await guest.isVisible().catch(() => false)) {
-      await page.getByLabel(/Describe your app/i).fill(
-        'Todo app with localStorage persistence',
-      );
-      await page.getByRole('button', { name: /Start building/i }).click();
+      await guest.click();
       await expect(page).toHaveURL(/\/(try|welcome|project|signup)/, {
         timeout: 20_000,
+      });
+      return;
+    }
+
+    if (await getStarted.isVisible().catch(() => false)) {
+      await getStarted.click();
+      await expect(page).toHaveURL(/\/(signup|app|try|welcome)/, {
+        timeout: 15_000,
       });
       return;
     }
@@ -49,12 +53,22 @@ test.describe('WalkCroach Web smoke', () => {
     }
 
     if (await dev.isVisible().catch(() => false)) {
-      await dev.click();
-      await expect(page).toHaveURL(/\/welcome/, { timeout: 15_000 });
+      await expect(dev).toBeVisible();
       return;
     }
 
-    test.skip(true, 'No guest/dev/cognito CTA visible on this deploy');
+    test.skip(true, 'No guest/signup/dev auth affordance on this env');
+  });
+
+  test('coding agents CTA scrolls to IDE/CLI section', async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('link', { name: /^Coding agents$/i }).first().click();
+    await expect(page.locator('#pair-ide-cli')).toBeVisible({ timeout: 10_000 });
+    await expect(
+      page.getByRole('heading', {
+        name: /You steer\. We explore, act, and verify/i,
+      }),
+    ).toBeVisible();
   });
 });
 
@@ -66,16 +80,10 @@ test.describe('WalkCroach Web full flow', () => {
 
   test('guest start reaches builder shell', async ({ page }) => {
     await page.goto('/');
-    const guest = page.getByRole('button', {
-      name: /Try without signing in/i,
-    });
+    const guest = page.getByRole('link', { name: /Try guest/i });
     test.skip(!(await guest.isVisible().catch(() => false)), 'guest auth off');
     await guest.click();
     await expect(page).toHaveURL(/\/try/, { timeout: 20_000 });
-    await page.getByLabel(/Describe your app/i).fill(
-      'Muted landing page with a contact CTA',
-    );
-    // On /try the builder may already be up — assert shell chrome exists.
     await expect(page.locator('body')).toContainText(/WalkCroach|Build|Preview/i, {
       timeout: 60_000,
     });

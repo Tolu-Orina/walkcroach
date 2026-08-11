@@ -28,8 +28,8 @@ export function LandingFooter() {
             </span>
           </div>
           <p className="mt-4 max-w-md text-sm leading-relaxed text-[var(--lp-footer-muted)]">
-            Agentic Workspace with one memory layer across Web, Browser
-            Extension, IDE Extension, CLI, Desktop IDE, and SDK.
+            One memory layer across six surfaces — and coding agents that
+            amplify how you work, not replace your tools.
           </p>
         </div>
 

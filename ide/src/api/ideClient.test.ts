@@ -94,22 +94,39 @@ describe('deleteLink', () => {
 });
 
 describe('listMemoryEntries', () => {
-  it('returns entries', async () => {
+  it('lists via public /v1/memory/entries (not /ide/v1)', async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse({
         entries: [
-          { id: 'e1', kind: 'decision', text: 'Use UUIDs', sourceSurface: 'web', createdAt: '2025-01' },
+          {
+            id: 'e1',
+            kind: 'decision',
+            text: 'Use UUIDs',
+            surface: 'web',
+            createdAt: '2025-01',
+            relevance: null,
+          },
         ],
       }),
     );
-    const result = await listMemoryEntries('tok', 'p1');
+    const result = await listMemoryEntries('tok', '11111111-2222-3333-4444-555555555555');
     expect(result).toHaveLength(1);
     expect(result[0]!.kind).toBe('decision');
+    expect(result[0]!.sourceSurface).toBe('web');
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringMatching(/\/v1\/memory\/entries/),
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({
+          authorization: 'Bearer tok',
+        }),
+      }),
+    );
   });
 });
 
 describe('updateMemoryEntry', () => {
-  it('sends PATCH', async () => {
+  it('sends legacy PATCH /ide/v1 (deprecated internal)', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({}));
     await updateMemoryEntry('tok', 'e1', 'p1', 'new text');
     expect(fetchMock).toHaveBeenCalledWith(

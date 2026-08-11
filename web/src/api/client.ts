@@ -1263,20 +1263,42 @@ export async function listApiKeys(): Promise<ApiKeySummary[]> {
   return data.keys ?? [];
 }
 
+export type ApiKeyActionUsage = {
+  action: string;
+  count: number;
+  credits: number;
+};
+
+/** Per-key ledger aggregates (SKU A / P3). Legacy counters kept for older UIs. */
 export type ApiKeyUsageRow = {
   keyId: string;
   remember: number;
   recall: number;
   import: number;
+  list?: number;
+  export?: number;
+  diff?: number;
+  erase?: number;
+  audit?: number;
   contentPublish: number;
+  graphRun?: number;
   credits: number;
+  byAction?: ApiKeyActionUsage[];
 };
 
-/** Per-key ledger aggregates for the current billing month (P2.5). */
-export async function listApiKeyUsage(): Promise<{
+export type ApiKeyUsageResponse = {
   period: string;
+  sku?: 'shared_pool';
   keys: ApiKeyUsageRow[];
-}> {
+  byAction?: ApiKeyActionUsage[];
+  invoice?: {
+    model: 'shared_pool';
+    summary: string;
+  };
+};
+
+/** Per-key + by-action ledger aggregates for the current billing month (P3). */
+export async function listApiKeyUsage(): Promise<ApiKeyUsageResponse> {
   const res = await fetch(sdkUrl('/keys/usage'), {
     headers: authHeaders(),
   });

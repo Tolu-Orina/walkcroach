@@ -22,6 +22,7 @@ import { promisify } from 'node:util';
 import { getSecret } from '../lib/config.js';
 import { createProjectMemoryBridge, ideMe } from '../lib/api.js';
 import { EXIT, exitCodeForError } from '../lib/exit-codes.js';
+import { formatMemoryHitsText } from '../lib/memory-format.js';
 import { OutputSink } from '../lib/output.js';
 
 const execFileAsync = promisify(execFile);
@@ -107,15 +108,34 @@ export async function memoryList(opts: {
       limit: opts.limit ?? 10,
     });
 
-    sink.command('memory.list', {
-      local,
-      project: {
-        projectId: me.link.projectId,
-        projectName: me.link.projectName ?? null,
-        query: opts.query?.trim() || null,
-        hits,
-      },
-    });
+    if (opts.json) {
+      sink.command('memory.list', {
+        local,
+        project: {
+          projectId: me.link.projectId,
+          projectName: me.link.projectName ?? null,
+          query: opts.query?.trim() || null,
+          hits,
+        },
+      });
+    } else {
+      const lines: string[] = [];
+      if (local) {
+        lines.push('Local WALKCROACH.md');
+        for (const s of local) {
+          lines.push(`  · ${s.heading} (${s.lines} lines)`);
+        }
+        lines.push('');
+      } else {
+        lines.push('Local WALKCROACH.md: (none)');
+        lines.push('');
+      }
+      lines.push(
+        `Project memory · ${me.link.projectName ?? me.link.projectId}`,
+      );
+      lines.push(formatMemoryHitsText(hits));
+      sink.command('memory.list', lines.join('\n'));
+    }
     return EXIT.OK;
   } catch (err) {
     sink.failure(err);

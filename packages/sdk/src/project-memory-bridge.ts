@@ -2,8 +2,9 @@
  * Adapter from `@walkcroach/sdk` onto the shape first-party coding hosts inject
  * into `@walkcroach/agent-engine` (`ProjectMemoryBridge`).
  *
- * Phase P2: IDE / CLI / Desktop stop hand-rolling `/ide/v1/memory/*` and share
- * one remember/recall/list contract with the public SDK.
+ * Phase P2: IDE / CLI / Desktop use `/v1` via this bridge for remember/recall/list.
+ * Legacy `/ide/v1/memory` PATCH remains internal until 2026-10-11 — see
+ * `docs/memory-contract-p1.md`.
  */
 import { WalkCroach } from './index.js';
 import { normalizeMemoryKind, type MemoryKind } from './vendor/memory-contracts/index.js';

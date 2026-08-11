@@ -57,6 +57,15 @@ export type AgentEvent =
       name: string;
       status: 'pending' | 'running' | 'done' | 'error';
       detail?: string;
+      /**
+       * P4 — memory recall provenance for coding UX chips (IDE / CLI / Desktop).
+       * Only set for `recall_project_memory` success cards.
+       */
+      hits?: Array<{
+        sourceSurface: string;
+        kind?: string;
+        text: string;
+      }>;
     }
   | {
       type: 'approval_request';

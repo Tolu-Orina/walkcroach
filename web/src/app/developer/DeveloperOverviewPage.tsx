@@ -9,9 +9,15 @@ import {
   type UsageSummary,
 } from '../../api/client';
 import { useAuth } from '../../auth/useAuth';
+import { CodeBlock } from './CodeBlock';
 import { CreditPoolBar } from './CreditPoolBar';
 import { planDisplayName } from './usage-format';
 
+/**
+ * Developer portal Overview (dual-funnel P2).
+ * Job: stranger with Cognito can leave this page with a working mental model
+ * and a copy-paste quickstart — without Discord.
+ */
 export function DeveloperOverviewPage() {
   const { user } = useAuth();
   const [health, setHealth] = useState<{
@@ -88,8 +94,84 @@ export function DeveloperOverviewPage() {
     usage.remaining / usage.monthlyCredits < 0.15;
   const noKeys = activeKeys === 0;
 
+  const quickstart = `import { WalkCroach, formatHitsForPrompt } from '@walkcroach/sdk';
+
+const wc = new WalkCroach({
+  apiKey: process.env.WALKCROACH_API_KEY, // wc_live_… — server-side only
+  baseUrl: '${base}',
+});
+
+const { id: projectId } = await wc.projects.ensure();
+
+await wc.memory.remember({
+  projectId,
+  kind: 'decision',
+  text: 'Chose Drizzle over Prisma for edge runtimes',
+  surface: 'my-agent',
+});
+
+const hits = await wc.memory.recall({
+  projectId,
+  query: 'which ORM did we pick?',
+});
+
+const memoryBlock = formatHitsForPrompt(hits, { budget: { maxHits: 5 } });
+console.log(memoryBlock);`;
+
   return (
     <div className="space-y-4">
+      <section className="surface space-y-4 p-5">
+        <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-mist">
+          Start here (under 15 minutes)
+        </h2>
+        <p className="text-[12px] leading-relaxed text-mist">
+          This portal is the <strong className="font-medium text-paper">memory platform</strong>{' '}
+          product. Coding agents (IDE / CLI / Desktop) are a separate funnel.
+        </p>
+        <ol className="list-decimal space-y-2 pl-5 text-sm leading-relaxed text-mist">
+          <li>
+            <Link to="/app/developer/keys" className="text-signal hover:underline">
+              Create an API key
+            </Link>{' '}
+            with <code className="font-mono text-[12px] text-paper">memory:read</code> +{' '}
+            <code className="font-mono text-[12px] text-paper">memory:write</code>. Copy the{' '}
+            <code className="font-mono text-[12px] text-paper">wc_live_…</code> value once.
+          </li>
+          <li>
+            In a <strong className="font-medium text-paper">server</strong> shell:{' '}
+            <code className="font-mono text-[12px] text-paper">
+              export WALKCROACH_API_KEY=wc_live_…
+            </code>{' '}
+            then <code className="font-mono text-[12px] text-paper">npm i @walkcroach/sdk</code>.
+          </li>
+          <li>Paste the TypeScript snippet below and run it (Node 20+).</li>
+          <li>
+            Confirm{' '}
+            <code className="font-mono text-[12px] text-paper">{base}/v1/sdk-health</code>{' '}
+            returns <code className="font-mono text-[12px] text-paper">ok</code>.
+          </li>
+        </ol>
+        <CodeBlock>{quickstart}</CodeBlock>
+        <p className="text-[11px] text-mist">
+          Python client stub is not published yet — use HTTP against the{' '}
+          <Link to="/app/developer/docs" className="text-signal hover:underline">
+            OpenAPI
+          </Link>{' '}
+          until then.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <Link to="/app/developer/keys" className="btn-primary text-xs">
+            {noKeys ? 'Create API key' : 'Manage keys'}
+          </Link>
+          <Link to="/app/developer/docs" className="btn-secondary text-xs">
+            Full docs
+          </Link>
+          <Link to="/app/developer/ops" className="btn-ghost text-xs">
+            Quotas & usage
+          </Link>
+        </div>
+      </section>
+
       <section className="surface space-y-4 p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-mist">
@@ -165,7 +247,7 @@ export function DeveloperOverviewPage() {
 
         <div className="border-t border-line pt-4">
           <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-mist">
-            Credit pool
+            Shared credit pool
           </p>
           {usageError && <p className="text-sm text-ember">{usageError}</p>}
           {!usageError && !usage && (
@@ -186,21 +268,42 @@ export function DeveloperOverviewPage() {
             </p>
           )}
         </div>
+      </section>
 
-        <div className="flex flex-wrap gap-2 pt-1">
-          <Link to="/app/developer/keys" className="btn-primary text-xs">
-            {noKeys ? 'Create API key' : 'Manage keys'}
+      <section className="surface space-y-3 p-5">
+        <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-mist">
+          Pricing honesty
+        </h2>
+        <p className="text-sm leading-relaxed text-mist">
+          There is <strong className="font-medium text-paper">one monthly credit pool</strong> for
+          your account (SKU A). Web/Browser Extension creatives and public SDK memory/content calls
+          debit the <em>same</em> ledger — there is not a separate “developer plan” product.
+        </p>
+        <ul className="list-disc space-y-2 pl-5 text-[12px] leading-relaxed text-mist">
+          <li>
+            <span className="font-medium text-paper">End-user surfaces</span> — App Builder,
+            creatives, Chrome actions (when metered).
+          </li>
+          <li>
+            <span className="font-medium text-paper">Developer API</span> —{' '}
+            <code className="font-mono text-paper">memory_*</code>,{' '}
+            <code className="font-mono text-paper">content_publish</code>,{' '}
+            <code className="font-mono text-paper">graph_run</code> via{' '}
+            <code className="font-mono text-paper">wc_live_</code> keys.
+          </li>
+          <li>
+            <span className="font-medium text-paper">Not platform-metered</span> — BYOK Bedrock
+            tokens on IDE / CLI / Desktop coding agents.
+          </li>
+        </ul>
+        <p className="text-[12px] text-mist">
+          Exhaustion returns HTTP <code className="font-mono text-paper">429</code> with{' '}
+          <code className="font-mono text-paper">Retry-After</code> — see{' '}
+          <Link to="/app/developer/ops" className="text-signal hover:underline">
+            Ops → Invoice & quotas
           </Link>
-          <Link to="/app/developer/ops" className="btn-secondary text-xs">
-            Live usage
-          </Link>
-          <Link to="/app/developer/docs" className="btn-ghost text-xs">
-            Quickstart
-          </Link>
-          <Link to="/app/settings" className="btn-ghost text-xs">
-            Billing
-          </Link>
-        </div>
+          .
+        </p>
       </section>
 
       <section className="surface space-y-3 p-5">
@@ -218,9 +321,6 @@ export function DeveloperOverviewPage() {
             <p className="truncate font-mono text-[11px] text-mist/80">
               {healthError.slice(0, 180)}
             </p>
-            <Link to="/app/developer/ops" className="btn-secondary text-xs">
-              Open Ops
-            </Link>
           </div>
         )}
         {!healthError && !health && (
@@ -238,7 +338,7 @@ export function DeveloperOverviewPage() {
                 <span className="font-mono text-paper">
                   {health.retention.asOfHuman}
                 </span>{' '}
-                (MVCC GC window)
+                (MVCC GC window — not multi-year)
               </p>
             )}
             <ul className="flex flex-wrap gap-1.5">
@@ -257,23 +357,33 @@ export function DeveloperOverviewPage() {
 
       <section className="surface space-y-3 p-5">
         <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-mist">
-          What you can build
+          FAQ shortcuts
         </h2>
-        <ul className="space-y-2.5 text-sm leading-relaxed text-mist">
+        <ul className="space-y-2 text-sm text-mist">
           <li>
-            <span className="font-medium text-paper">Memory client</span> — remember,
-            recall, time-travel, export/import with{' '}
-            <code className="font-mono text-[12px] text-paper">@walkcroach/sdk</code>
+            Lost the plaintext key?{' '}
+            <Link to="/app/developer/keys" className="text-signal hover:underline">
+              Revoke and mint a new one
+            </Link>{' '}
+            — secrets are shown once.
           </li>
           <li>
-            <span className="font-medium text-paper">MCP server</span> — expose the same
-            layer to Claude Code, Cursor, and other MCP hosts via{' '}
-            <code className="font-mono text-[12px] text-paper">@walkcroach/sdk-mcp</code>
+            Hit 429 / QuotaError?{' '}
+            <Link to="/app/developer/ops" className="text-signal hover:underline">
+              Ops quotas
+            </Link>{' '}
+            and{' '}
+            <Link to="/app/settings" className="text-signal hover:underline">
+              Billing
+            </Link>
+            .
           </li>
           <li>
-            <span className="font-medium text-paper">Server-side only keys</span> — never
-            embed <code className="font-mono text-[12px] text-paper">wc_live_…</code> in
-            a browser; use Cognito access tokens for user-context calls
+            Wire Claude / Cursor / Codex?{' '}
+            <Link to="/app/developer/docs" className="text-signal hover:underline">
+              Docs → MCP
+            </Link>
+            .
           </li>
         </ul>
       </section>

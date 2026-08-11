@@ -11,10 +11,7 @@ type Props = {
   showGuest?: boolean;
 };
 
-/**
- * Product-first hero (2025–26 SaaS / devtools pattern).
- * Build intent → App Builder; memory / chat → Open Chat (Phase 6).
- */
+/** Product-first hero — memory headline verbatim; CTAs include coding agents. */
 export function LandingHero({ authenticated = false, showGuest = false }: Props) {
   const reduce = useReducedMotion();
   const desktopHref = desktopDownloadHref();
@@ -44,17 +41,26 @@ export function LandingHero({ authenticated = false, showGuest = false }: Props)
             {authenticated ? (
               <>
                 <Link to="/app/builder" className="lp-btn-primary">
-                  Start building
+                  Get started
                 </Link>
-                <Link to="/app/chat" className="lp-btn-secondary">
-                  Open Chat
+                <a href="#pair-ide-cli" className="lp-btn-secondary">
+                  Coding agents
+                </a>
+                <Link
+                  to="/app/developer"
+                  className="interactive text-sm font-extrabold text-[var(--lp-accent)] underline-offset-4 hover:underline"
+                >
+                  Developer API
                 </Link>
               </>
             ) : (
               <>
                 <Link to="/signup" className="lp-btn-primary">
-                  Start building
+                  Get started
                 </Link>
+                <a href="#pair-ide-cli" className="lp-btn-secondary">
+                  Coding agents
+                </a>
                 {showGuest && (
                   <Link to="/try" className="lp-btn-secondary">
                     Try guest

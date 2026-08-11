@@ -1,7 +1,7 @@
 {
   "name": "walkcroach-ide",
   "displayName": "WalkCroach IDE",
-  "description": "WalkCroach agentic coding assistant — local agent, CockroachDB tools, and optional cross-surface memory via WalkCroach Web.",
+  "description": "You steer; we explore → act → verify. Memory-first coding agent with propose→confirm approvals, BYOK Bedrock, and cross-surface CockroachDB recall (no silent production mutate).",
   "version": "0.2.1",
   "publisher": "walkcroach",
   "private": false,
@@ -193,6 +193,26 @@
           "items": { "type": "string" },
           "default": [],
           "description": "Extra skill directories (absolute paths or paths relative to the workspace root). Merged with default workspace roots and user-global skills."
+        },
+        "walkcroach.ide.phaseGraph": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Gather→Act→Verify tool remasking and phase-local prompts (improves Nova 2 Lite tool selection). Off restores the flat full tool menu."
+        },
+        "walkcroach.ide.forcePlanOnRisk": {
+          "type": "boolean",
+          "default": true,
+          "description": "P3 dual validation: force plan-then-execute for large/risky tasks (multi-file, migrate, refactor, architecture) before Act."
+        },
+        "walkcroach.ide.architectureCritic": {
+          "type": "boolean",
+          "default": true,
+          "description": "P3 dual validation: run a read-only architecture critic after verify (instead of the generic verify-review). Off keeps legacy verify-review."
+        },
+        "walkcroach.ide.toolRank": {
+          "type": "boolean",
+          "default": true,
+          "description": "P4: Titan-rank optional Act tools and prune the schema to ≤12 (keep-always + top hits). Off offers the full Act allowlist."
         }
       }
     }

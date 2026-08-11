@@ -34,6 +34,8 @@ export function assembleSystemBlocks(params: {
   skillsCatalog?: string;
   /** Ranked skill nudge for this turn (dynamic — after catalog cache point). */
   skillsRankNudge?: string;
+  /** Phase-local Tool Usage slice (dynamic — remask boundaries). */
+  phasePrompt?: string;
   rulesMd?: string;
   ruleCatalog?: string;
   /** Phase 2 — approved plan injected as non-negotiable context. */
@@ -56,6 +58,11 @@ export function assembleSystemBlocks(params: {
   if (params.skillsRankNudge?.trim()) {
     blocks.push({ text: params.skillsRankNudge.trim() });
     // No cachePoint — turn-specific ranking must not poison the static catalog cache.
+  }
+
+  if (params.phasePrompt?.trim()) {
+    blocks.push({ text: params.phasePrompt.trim() });
+    // No cachePoint — phase changes across the run.
   }
 
   if (params.walkcroachMd?.trim()) {

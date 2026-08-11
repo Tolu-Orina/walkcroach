@@ -72,9 +72,9 @@ export async function runAgentCommand(opts: RunCommandOpts): Promise<number> {
   let signedIn = Boolean(token);
 
   if (token) {
-    sharedSkills = createSharedSkillsBridge({
+      sharedSkills = createSharedSkillsBridge({
       getToken: () => getSecret(SECRET_KEYS.cognitoAccessToken),
-      sourceSurface: 'desktop',
+      sourceSurface: 'cli',
     });
     try {
       const remote = await gitRemote(cwd);

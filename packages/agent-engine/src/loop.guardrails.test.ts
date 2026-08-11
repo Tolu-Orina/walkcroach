@@ -159,7 +159,13 @@ describe('iteration budget', () => {
     const calls = respondWith(toolTurn('list_dir'), textTurn('All done.'));
     const host = makeHost();
 
-    await runAgentLoop({ host, prompt: 'look around', maxIterations: 10 });
+    await runAgentLoop({
+      host,
+      prompt: 'look around',
+      maxIterations: 10,
+      // Flat-loop budget semantics (phase-graph gather→act adds an extra continue).
+      phaseGraphEnabled: false,
+    });
 
     expect(calls()).toBe(2);
     expect(doneEvent(host)?.reason).not.toBe('max_iterations');

@@ -2,7 +2,7 @@ import type {
   ProjectMemoryBridge,
   SharedSkillsBridge,
 } from '@walkcroach/agent-engine';
-import { createHostMemoryBridge } from '@walkcroach/sdk';
+import { WalkCroach, createHostMemoryBridge } from '@walkcroach/sdk';
 import { getIdeApiBaseUrl } from '../auth/session.js';
 
 export type IdeProject = {
@@ -128,6 +128,10 @@ export async function deleteLink(token: string, linkId: string): Promise<void> {
   await readJson(res);
 }
 
+/**
+ * List project memory via the public `/v1` contract (P1).
+ * Prefer `createProjectMemoryBridge(...).listEntries` in new code.
+ */
 export async function listMemoryEntries(
   token: string,
   projectId: string,
@@ -141,26 +145,31 @@ export async function listMemoryEntries(
     createdAt: string;
   }>
 > {
-  const res = await ideFetch('/ide/v1/memory/entries', {
-    token,
-    query: {
-      projectId,
-      sourceSurface: opts?.sourceSurface,
-      limit: opts?.limit !== undefined ? String(opts.limit) : undefined,
-    },
+  const wc = new WalkCroach({
+    accessToken: token,
+    baseUrl: getIdeApiBaseUrl(),
   });
-  const data = await readJson<{
-    entries: Array<{
-      id: string;
-      kind: string;
-      text: string;
-      sourceSurface: string;
-      createdAt: string;
-    }>;
-  }>(res);
-  return data.entries ?? [];
+  const entries = await wc.memory.list({
+    projectId,
+    limit: opts?.limit,
+    surfaces: opts?.sourceSurface ? [opts.sourceSurface] : undefined,
+  });
+  return entries.map((e) => ({
+    id: e.id,
+    kind: e.kind,
+    text: e.text,
+    sourceSurface: e.surface,
+    createdAt: e.createdAt,
+  }));
 }
 
+/**
+ * In-place edit of an IDE-sourced row via legacy PATCH.
+ *
+ * @deprecated Dual-funnel P1 — internal IDE-only until **2026-10-11**.
+ * Prefer remember/supersede (`createProjectMemoryBridge().mirror`) for new UX.
+ * See `docs/memory-contract-p1.md`.
+ */
 export async function updateMemoryEntry(
   token: string,
   entryId: string,

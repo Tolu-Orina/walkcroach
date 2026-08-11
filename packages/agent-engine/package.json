@@ -17,8 +17,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:fitness": "vitest run src/fitness",
-    "test:coverage": "vitest run --coverage",
     "eval": "vitest run src/eval",
+    "eval:gate": "npm run eval && npm run test:fitness",
     "smoke:ping": "node --import tsx src/smoke-ping.ts",
     "sync:cockroachdb-skills": "node scripts/sync-cockroachdb-skills.mjs"
   },

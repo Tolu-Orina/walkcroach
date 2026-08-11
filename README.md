@@ -1,12 +1,16 @@
 # WalkCroach
 
-Agentic memory-first AI platform — one CockroachDB memory layer across **six surfaces**:
-a web builder, a browser copilot, an IDE extension, a CLI, an SDK, and a native Desktop IDE.
+Agentic memory-first AI platform — one CockroachDB memory layer across **six surfaces**,
+sold as **two funnels** (see [docs/dual-funnel-messaging.md](./docs/dual-funnel-messaging.md)):
+
+1. **Platform / memory** — Web, Browser Extension, public SDK + MCP, Developer portal  
+2. **Coding agents** — IDE Extension, CLI, Desktop IDE (private `@walkcroach/agent-engine`)
 
 | Surface | State |
 |---|---|
 | Web · Chrome · IDE extension · CLI | Shipped |
-| **SDK** (`@walkcroach/sdk`, `sdk-mcp`, `sdk-host`) | Built; agent path not yet run end-to-end |
+| **SDK** (`@walkcroach/sdk`, `@walkcroach/sdk-mcp`) | Published on npm — memory / content / keys client (not a hosted coding agent) |
+| **sdk-host** | Internal programmatic host over agent-engine (content publish worker); not a public package |
 | **Desktop IDE** (Code OSS fork, native agent) | Preview-capable (unsigned Windows) — see [docs/walkcroach-desktop.md](./docs/walkcroach-desktop.md) |
 
 Built for the **CockroachDB × AWS Hackathon — Build with Agentic Memory**.

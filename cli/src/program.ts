@@ -63,7 +63,7 @@ export function buildProgram(): Command {
   program
     .name('walkcroach')
     .description(
-      'WalkCroach CLI — same agent engine as the IDE. Interactive TUI by default on a TTY.',
+      'You steer; we explore → act → verify. Memory-first coding agent (same engine as the IDE) — approvals before writes, BYOK Bedrock, cross-surface recall. Interactive TUI by default on a TTY.',
     )
     .version(CLI_VERSION)
     .option('--json', 'JSON / NDJSON output on every command (FR-D24)', false)
@@ -75,9 +75,14 @@ export function buildProgram(): Command {
     .addHelpText(
       'after',
       `
+Pitch:
+  Propose→confirm before writes. BYOK inference. Audit of agent actions.
+  A decision recorded on Chrome/Web is recallable here (source_surface on every hit).
+
 Examples:
   $ walkcroach run "Add a health route"
   $ walkcroach run --yes --plain "Fix the failing test"   # CI
+  $ walkcroach memory list --query "drizzle"
   $ walkcroach --json doctor
   $ walkcroach auth login
   $ walkcroach link 3f9c…  # connect this folder to a Web project

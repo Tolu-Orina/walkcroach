@@ -4,7 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-WalkCroach — an agentic, memory-first AI platform built for the CockroachDB × AWS Hackathon ("Build with Agentic Memory", deadline Aug 18, 2026). One CockroachDB memory layer is shared across four surfaces: a web app-builder, a Chrome copilot extension, a VS Code/Cursor IDE extension, and a CLI. The thesis: the agent loop cannot build coherently without recalling what it already decided, and every decision is written to CockroachDB before the session ends (see `docs/walkcroach-master-doc.md` for current status and locked architecture facts — don't reopen those without cause).
+WalkCroach — an agentic, memory-first AI platform (CockroachDB × AWS Hackathon: "Build with Agentic Memory"). **One CockroachDB memory layer** is shared across **six surfaces**: Web app-builder, Browser Extension (Chrome), IDE Extension, CLI, public SDK (+ MCP), and Desktop IDE (sibling repo).
+
+**Dual funnel (do not muddle):** (A) coding agents = IDE / CLI / Desktop via private `agent-engine`; (B) platform memory = SDK / MCP / Developer portal / cross-surface recall. See `docs/dual-funnel-messaging.md`.
+
+Thesis: the agent loop cannot build coherently without recalling what it already decided, and every decision is written to CockroachDB before the session ends (see `docs/walkcroach-master-doc.md` for current status and locked architecture facts — don't reopen those without cause).
 
 ## Repo layout and independent install boundaries
 
@@ -14,7 +18,10 @@ walkcroach/
 ├── chrome/                  # Manifest V3 extension (WXT) — own npm project
 ├── ide/                     # VS Code / Cursor extension — own npm project
 ├── cli/                     # CLI, same agent engine as the IDE — own npm project
-├── packages/agent-engine/   # Shared IDE/CLI agent engine — MUST NOT import `vscode`
+├── packages/agent-engine/   # Shared IDE/CLI/Desktop/sdk-host loop — MUST NOT import `vscode` (private)
+├── packages/sdk/            # @walkcroach/sdk — public memory/content/keys client
+├── packages/sdk-mcp/        # MCP server over the memory layer
+├── packages/sdk-host/       # Internal programmatic HostAdapter (content worker)
 ├── packages/templates/      # Project templates shared by Web and the CLI — no browser deps
 ├── infra-backend/           # Terraform + npm workspaces (Lambda BFFs + shared backend packages)
 │   ├── packages/{db,agent-harness}      # CockroachDB client + Lambda-side agent runtime (separate from packages/agent-engine)
@@ -94,7 +101,7 @@ The `cli` module (`cli/src`) consumes the same `@walkcroach/agent-engine` packag
 
 npm workspaces rooted here: `packages/db`, `packages/agent-harness`, and the three Lambda code bundles under `modules/lambda-{agent,chrome,ide}/codes`. `agent-harness` is the Lambda-side counterpart to `packages/agent-engine` — same Bedrock/Nova **2 Lite** model family (extended thinking always on), separate implementation (see `infra-backend/packages/agent-harness/src/bedrock.ts` and `docs/nova-2-lite.md`).
 
-CockroachDB is the system of record for all four surfaces: sessions/messages, project/stack config, memory entries with vector embeddings (C-SPANN index, `VECTOR(1024)` via Titan Embeddings V2), build events, checkpoints, tool invocations, and per-surface auth/link tables (GitHub app, Chrome/IDE auth codes and workspace links). Migrations live in `infra-backend/packages/db/migrations`, applied in order — read `docs/walkcroach-master-doc.md` §5 (schema) before adding new tables so new memory writes land in the right shape.
+CockroachDB is the system of record for all six surfaces: sessions/messages, project/stack config, memory entries with vector embeddings (C-SPANN index, `VECTOR(1024)` via Titan Embeddings V2), build events, checkpoints, tool invocations, and per-surface auth/link tables (GitHub app, Chrome/IDE auth codes and workspace links). Migrations live in `infra-backend/packages/db/migrations`, applied in order — read `docs/walkcroach-master-doc.md` §5 (schema) before adding new tables so new memory writes land in the right shape.
 
 **Sandbox note (Web):** Builder prefers **E2B** cloud sandboxes; **WebContainer** is the in-browser fallback (needs COOP/COEP from `infra-web`).
 

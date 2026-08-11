@@ -39,6 +39,16 @@ export class WorkspacePolicy {
     return this.settings.verify.required && this.hasVerifyRecipes;
   }
 
+  /**
+   * P3 — recipes present ⇒ required when requireWhenConfigured (default true),
+   * else fall back to settings.verify.required.
+   */
+  isVerifyRequired(requireWhenConfigured = true): boolean {
+    if (!this.hasVerifyRecipes) return false;
+    if (requireWhenConfigured) return true;
+    return this.settings.verify.required;
+  }
+
   get maxVerifyNudges(): number {
     return this.settings.verify.maxNudges;
   }

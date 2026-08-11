@@ -51,6 +51,7 @@ jobs:
         working-directory: packages/agent-engine
         run: |
           npm ci
+          npm run eval:gate
           npm run build
 
       - name: Install, typecheck, test

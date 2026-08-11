@@ -74,3 +74,11 @@ export const GOLDEN_TASK_IDS = [
 ] as const;
 
 export type GoldenTaskId = (typeof GOLDEN_TASK_IDS)[number];
+
+/** P5 phase-graph trajectory ids. */
+export const TRAJECTORY_TASK_IDS = [
+  'gather-then-act-write',
+  'verify-required-pass',
+] as const;
+
+export type TrajectoryTaskId = (typeof TRAJECTORY_TASK_IDS)[number];

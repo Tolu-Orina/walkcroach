@@ -13,6 +13,6 @@ describe('SDK_PACKAGE_VERSION', () => {
       ),
     ) as { version: string };
     expect(SDK_PACKAGE_VERSION).toBe(pkg.version);
-    expect(SDK_PACKAGE_VERSION).toBe('0.2.0');
+    expect(SDK_PACKAGE_VERSION).toBe('0.2.1');
   });
 });

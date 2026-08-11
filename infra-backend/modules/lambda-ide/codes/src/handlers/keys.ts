@@ -17,6 +17,10 @@ import {
 } from '../api-keys.js';
 import { jsonResponse } from '../http.js';
 import { metricLog, parseJsonBody } from '../util.js';
+import {
+  aggregateApiKeyUsage,
+  SDK_KEY_USAGE_ACTION_SQL,
+} from './keys-usage.js';
 
 function requireInteractive(
   auth: AuthContext,
@@ -136,8 +140,9 @@ export async function handleRevokeApiKey(
 }
 
 /**
- * GET /v1/keys/usage — per-key memory/content counts from usage_ledger (P2.5).
+ * GET /v1/keys/usage — per-key + by-action aggregates from usage_ledger (P3).
  * Cognito-only. Rows without metadata.keyId (interactive Cognito calls) are omitted.
+ * SKU A: shared monthly pool — response includes invoice explainability metadata.
  */
 export async function handleApiKeyUsage(
   auth: AuthContext,
@@ -159,52 +164,14 @@ export async function handleApiKeyUsage(
               coalesce(sum(credits), 0)::string AS credits
          FROM usage_ledger
         WHERE owner_id = $1
-          AND action_type IN (
-            'memory_remember', 'memory_recall', 'memory_import', 'content_publish'
-          )
+          AND action_type IN (${SDK_KEY_USAGE_ACTION_SQL})
           AND metadata->>'keyId' IS NOT NULL
           AND created_at >= date_trunc('month', now())
         GROUP BY 1, 2`,
       [auth.ownerId],
     );
 
-    const byKey: Record<
-      string,
-      {
-        keyId: string;
-        remember: number;
-        recall: number;
-        import: number;
-        contentPublish: number;
-        credits: number;
-      }
-    > = {};
-
-    for (const r of rows) {
-      const id = r.key_id;
-      if (!byKey[id]) {
-        byKey[id] = {
-          keyId: id,
-          remember: 0,
-          recall: 0,
-          import: 0,
-          contentPublish: 0,
-          credits: 0,
-        };
-      }
-      const n = Number(r.count) || 0;
-      const credits = Number(r.credits) || 0;
-      byKey[id]!.credits += credits;
-      if (r.action_type === 'memory_remember') byKey[id]!.remember = n;
-      else if (r.action_type === 'memory_recall') byKey[id]!.recall = n;
-      else if (r.action_type === 'memory_import') byKey[id]!.import = n;
-      else if (r.action_type === 'content_publish') byKey[id]!.contentPublish = n;
-    }
-
-    return jsonResponse(200, {
-      period: 'month',
-      keys: Object.values(byKey),
-    });
+    return jsonResponse(200, aggregateApiKeyUsage(rows));
   } finally {
     await db.close();
   }

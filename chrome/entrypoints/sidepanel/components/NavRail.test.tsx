@@ -27,14 +27,14 @@ describe('NavRail — semantics', () => {
       .getAllByRole('tab')
       .filter((t) => t.getAttribute('aria-selected') === 'true');
     expect(selected).toHaveLength(1);
-    expect(selected[0]).toHaveAccessibleName(/Recall/);
+    expect(selected[0]).toHaveAccessibleName(/Captures/);
   });
 
   it('gives every tab an accessible name even when the visible label is hidden', () => {
     // Under ~340px CSS hides `.wc-rail__label`; without aria-label the icon-only
     // tabs would announce as unnamed (icons are aria-hidden).
     render(<NavRail active="page" onSelect={() => undefined} />);
-    for (const name of ['Page', 'Recall', 'Saved', 'Account']) {
+    for (const name of ['Page', 'Captures', 'Saved', 'Account']) {
       expect(screen.getByRole('tab', { name })).toHaveAttribute(
         'aria-label',
         name,
@@ -68,7 +68,7 @@ describe('NavRail — roving tabindex', () => {
   it('moves backward with ArrowLeft and ArrowUp', async () => {
     const onSelect = vi.fn();
     render(<NavRail active="recall" onSelect={onSelect} />);
-    screen.getByRole('tab', { name: /Recall/ }).focus();
+    screen.getByRole('tab', { name: /Captures/ }).focus();
     await userEvent.keyboard('{ArrowLeft}');
     expect(onSelect).toHaveBeenLastCalledWith('page');
   });
@@ -96,12 +96,12 @@ describe('NavRail — roving tabindex', () => {
   it('jumps to the first and last tab with Home and End', async () => {
     const onSelect = vi.fn();
     const { rerender } = render(<NavRail active="recall" onSelect={onSelect} />);
-    screen.getByRole('tab', { name: /Recall/ }).focus();
+    screen.getByRole('tab', { name: /Captures/ }).focus();
     await userEvent.keyboard('{Home}');
     expect(onSelect).toHaveBeenLastCalledWith('page');
 
     rerender(<NavRail active="recall" onSelect={onSelect} />);
-    screen.getByRole('tab', { name: /Recall/ }).focus();
+    screen.getByRole('tab', { name: /Captures/ }).focus();
     await userEvent.keyboard('{End}');
     expect(onSelect).toHaveBeenLastCalledWith('account');
   });

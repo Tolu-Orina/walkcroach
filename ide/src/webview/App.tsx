@@ -23,6 +23,8 @@ type ToolCard = {
   name: string;
   status: 'pending' | 'running' | 'done' | 'error';
   detail?: string;
+  /** P4 — recall provenance chips */
+  hits?: Array<{ sourceSurface: string; kind?: string; text: string }>;
 };
 
 type Subagent = {
@@ -117,6 +119,7 @@ type HostMessage =
       name: string;
       status: ToolCard['status'];
       detail?: string;
+      hits?: Array<{ sourceSurface: string; kind?: string; text: string }>;
     }
   | {
       type: 'SUBAGENT';
@@ -414,6 +417,7 @@ export function App() {
               name: msg.name,
               status: msg.status,
               detail: msg.detail,
+              hits: msg.hits,
             };
             if (i < 0) return [...prev, next];
             const copy = [...prev];
@@ -874,8 +878,8 @@ export function App() {
               <p className="empty-brand">WalkCroach</p>
             </div>
             <p className="empty-copy">
-              Chat with an agent in this workspace. Agent can edit; Ask only
-              explores.
+              You steer; we explore → act → verify. Approvals before writes ·
+              BYOK Bedrock · recall shows which surface wrote the memory.
             </p>
             {needsSetup ? (
               <button
@@ -912,6 +916,23 @@ export function App() {
                           {tool.status}
                           {tool.detail ? ` · ${clip(tool.detail, 140)}` : ''}
                         </span>
+                        {tool.hits && tool.hits.length > 0 ? (
+                          <ul
+                            className="recall-hits"
+                            aria-label="Memory recall provenance"
+                          >
+                            {tool.hits.slice(0, 5).map((h, idx) => (
+                              <li key={`${tool.id}-hit-${idx}`}>
+                                <span className="recall-surface">
+                                  {h.sourceSurface}
+                                </span>
+                                <span className="recall-text">
+                                  {clip(h.text, 120)}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null}
                       </li>
                     ))}
                     {(t.subagents ?? []).map((s) => (
@@ -998,6 +1019,23 @@ export function App() {
                           {t.status}
                           {t.detail ? ` · ${clip(t.detail, 140)}` : ''}
                         </span>
+                        {t.hits && t.hits.length > 0 ? (
+                          <ul
+                            className="recall-hits"
+                            aria-label="Memory recall provenance"
+                          >
+                            {t.hits.slice(0, 5).map((h, idx) => (
+                              <li key={`${t.id}-hit-${idx}`}>
+                                <span className="recall-surface">
+                                  {h.sourceSurface}
+                                </span>
+                                <span className="recall-text">
+                                  {clip(h.text, 120)}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null}
                       </li>
                     ))}
                     {subagents.map((s) => (

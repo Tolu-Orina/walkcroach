@@ -13,7 +13,7 @@ const TABS: Array<{
   Icon: (p: { className?: string }) => React.ReactElement;
 }> = [
   { id: 'page', label: 'Page', Icon: IconPage },
-  { id: 'recall', label: 'Recall', Icon: IconRecall },
+  { id: 'recall', label: 'Captures', Icon: IconRecall },
   { id: 'saved', label: 'Saved', Icon: IconSaved },
   { id: 'account', label: 'Account', Icon: IconAccount },
 ];
@@ -22,10 +22,13 @@ const TABS: Array<{
  * Secondary navigation, pinned to the bottom (plan §3.2).
  *
  * Below the content on purpose: the panel's job on open is "act on this page",
- * so Recall / Saved / Account must not compete with it for the first glance.
+ * so Captures / Saved / Account must not compete with it for the first glance.
  * Labels are hidden by CSS under ~340px and returned by a container query —
  * width-driven, so it responds to the panel the user dragged rather than to
  * their monitor.
+ *
+ * `Captures` is Capture Recall (`/chrome/v1/recall`) — page captures only, not
+ * `/v1` project memory (that lives under Saved → Project memory). P1 dual-funnel.
  *
  * `tablist` semantics rather than links: this switches panes in place, and a
  * reader should hear "tab 2 of 4", not "link". Arrow keys move one step;

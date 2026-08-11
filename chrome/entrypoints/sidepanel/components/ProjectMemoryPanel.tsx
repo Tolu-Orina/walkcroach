@@ -40,8 +40,8 @@ export function humanizeMemorySurface(surface: string): string {
 }
 
 /**
- * Linked-project memory via `@walkcroach/sdk` (list + remember).
- * Capture mirror and recall streams stay on the chrome BFF.
+ * Linked-project memory via `@walkcroach/sdk` (list + remember) → `/v1`.
+ * Capture Recall (`/chrome/v1/recall`) stays on the chrome BFF — separate job.
  */
 export function ProjectMemoryPanel({
   projectId,

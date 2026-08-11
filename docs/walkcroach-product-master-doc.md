@@ -1,8 +1,12 @@
 # WalkCroach Product Master Doc
 
 **Audience:** Senior Product Managers, Business Analysts, QA  
-**Compiled:** 2026-08-07  
-**Companion (engineering depth):** [`walkcroach-master-doc.md`](./walkcroach-master-doc.md)
+**Compiled:** 2026-08-11  
+**Companion (engineering depth):** [`walkcroach-master-doc.md`](./walkcroach-master-doc.md)  
+**Messaging (P0):** [`dual-funnel-messaging.md`](./dual-funnel-messaging.md)  
+**Memory contract (P1):** [`memory-contract-p1.md`](./memory-contract-p1.md)  
+**Commercial metering (P3):** [`commercial-metering-p3.md`](./commercial-metering-p3.md) — SKU A shared pool  
+**Coding wedge (P4):** [`coding-wedge-p4.md`](./coding-wedge-p4.md) — Funnel A listings + recall provenance
 
 This document describes **what WalkCroach is, what each surface does, what is ready to sell or demo, what must not be claimed yet, and how to validate it**. It is written from a fresh review of the live codebases (`walkcroach/` and `walkcroach-desktop/`). Older PRDs and phase plans are often outdated — prefer this file and the engineering master doc when they conflict.
 
@@ -30,6 +34,17 @@ Status labels used throughout:
 ## 0. One-page product summary
 
 WalkCroach is an **agentic work platform**: AI that can help people build software, work across the browser, and keep durable project memory — not a single chatbot bolted onto one app.
+
+### 0.0 Dual funnel (P0 — required messaging)
+
+WalkCroach is **one brand, two products**. External copy must pick a primary funnel (see [`dual-funnel-messaging.md`](./dual-funnel-messaging.md)).
+
+| Funnel | Surfaces | Message |
+|---|---|---|
+| **A — Coding agents** | IDE Extension, CLI, Desktop IDE | You steer; we explore → act → verify. Amplify craft. BYOK. Approvals. |
+| **B — Platform / memory** | Web, Browser Extension, SDK, MCP, Developer portal | Your one memory layer. Durable cross-surface memory with provenance. |
+
+**Do not** sell the coding phase graph as the public SDK’s core benefit. **Do not** describe the SDK as a hosted coding agent.
 
 **The product bet:** the same project memory follows the user across six surfaces (Web, Browser Extension, IDE Extension, CLI, SDK, Desktop IDE). An insight captured in Chrome can matter later in the IDE; a decision made while building on the Web can be recalled from the CLI. That shared memory is the moat competitors usually lack.
 
@@ -503,6 +518,8 @@ These are the practical “feature flags” Product/BA/QA hit — even when no U
 | Desktop is dogfood / incomplete vs IDE/CLI | False — production-grade; unsigned preview only |
 | Multi-year memory time travel | Only ~25h operational asOf |
 | SDK = full hosted coding agent for everyone | Misstates the product |
+| Phase graph / explore→act→verify as the public SDK benefit | Coding-runtime story only (funnel A) |
+| “Replaces Cursor / Copilot” | Amplify, don’t replace — composable stack reality |
 | Microsoft Marketplace listing for IDE (unless workflow enabled) | Not enabled |
 | HubSpot connector “live” while UI/code say coming soon | False |
 

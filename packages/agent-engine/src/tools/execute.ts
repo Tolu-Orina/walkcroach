@@ -111,7 +111,7 @@ export type ExecuteToolOptions = {
     name: string;
     prompt: string;
     signal?: AbortSignal;
-    role?: 'planner' | 'default';
+    role?: 'planner' | 'critic' | 'default';
   }) => Promise<string>;
   /** Phase B context */
   mcp?: CockroachMcpClient | null;
@@ -1262,11 +1262,14 @@ async function executeToolBody(
         const subName = str(input.name) || 'subagent';
         const prompt = str(input.prompt);
         const roleRaw = str(input.role).toLowerCase();
+        const { isPlannerSpawnName } = await import('../planner.js');
+        const { isCriticSpawnName } = await import('../architecture-critic.js');
         const role =
-          roleRaw === 'planner' ||
-          (await import('../planner.js')).isPlannerSpawnName(subName)
+          roleRaw === 'planner' || isPlannerSpawnName(subName)
             ? 'planner'
-            : 'default';
+            : roleRaw === 'critic' || isCriticSpawnName(subName)
+              ? 'critic'
+              : 'default';
         host.emit({
           type: 'subagent',
           id,
@@ -1278,7 +1281,12 @@ async function executeToolBody(
           id,
           name,
           status: 'running',
-          detail: role === 'planner' ? `${subName} (planner)` : subName,
+          detail:
+            role === 'planner'
+              ? `${subName} (planner)`
+              : role === 'critic'
+                ? `${subName} (critic)`
+                : subName,
         });
         const summary = await opts.spawnSubagent({
           name: subName,
@@ -1696,7 +1704,29 @@ async function executeToolBody(
                 .join('\n\n')
             : '(no matching project memory)',
         ).text;
-        break;
+        // P4 — structured provenance for coding-surface recall cards (not just model text).
+        {
+          const surfacesSeen = [
+            ...new Set(
+              hits.map((h) => (h.sourceSurface ?? '?').toLowerCase()),
+            ),
+          ];
+          host.emit({
+            type: 'tool_card',
+            id,
+            name,
+            status: 'done',
+            detail: hits.length
+              ? `${hits.length} hit(s) · ${surfacesSeen.join(', ')}`
+              : 'no matches',
+            hits: hits.map((h) => ({
+              sourceSurface: (h.sourceSurface ?? 'unknown').toLowerCase(),
+              kind: h.kind,
+              text: h.text.slice(0, 160),
+            })),
+          });
+          return { toolUseId: id, content, status: 'success' };
+        }
       }
       case 'mirror_project_memory': {
         const pm = opts.projectMemory;

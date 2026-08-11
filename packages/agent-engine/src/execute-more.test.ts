@@ -593,6 +593,14 @@ describe('executeTool — recall_project_memory', () => {
     expect(mockBridge.recall).toHaveBeenCalledWith(
       expect.objectContaining({ query: 'primary keys' }),
     );
+    const doneCard = host.events
+      .filter((e) => e.type === 'tool_card' && e.status === 'done')
+      .at(-1) as {
+      hits?: Array<{ sourceSurface: string; text: string }>;
+      detail?: string;
+    };
+    expect(doneCard?.hits?.[0]?.sourceSurface).toBe('web');
+    expect(doneCard?.detail).toMatch(/web/);
   });
 
   it('errors when not linked', async () => {

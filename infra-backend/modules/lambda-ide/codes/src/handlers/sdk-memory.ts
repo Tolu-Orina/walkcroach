@@ -25,6 +25,7 @@ import {
   recallProjectMemoryAsOf,
   RetentionWindowError,
   writeMemoryEntryDetailed,
+  MEMORY_KINDS,
   type MemoryKind,
 } from '@walkcroach/agent-harness';
 import { createDbClient } from '@walkcroach/db';
@@ -35,14 +36,8 @@ import { creditHeaders, jsonResponse } from '../http.js';
 import { isUuid, metricLog, parseJsonBody } from '../util.js';
 import { assertOwnsProject } from './me.js';
 
-const ALLOWED_KINDS = new Set<MemoryKind>([
-  'decision',
-  'preference',
-  'convention',
-  'summary',
-  'capture',
-  'qa',
-]);
+/** Single source: `@walkcroach/memory-contracts` via harness re-export (P1). */
+const ALLOWED_KINDS = new Set<MemoryKind>(MEMORY_KINDS);
 
 /** Free-form, but bounded — this lands in an indexed column and in metrics. */
 const SURFACE_RE = /^[a-z0-9][a-z0-9._-]{0,62}$/i;

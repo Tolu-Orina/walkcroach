@@ -6,17 +6,17 @@ import {
   getUsage,
   listApiKeys,
   listApiKeyUsage,
+  type ApiKeyActionUsage,
   type ApiKeySummary,
   type ApiKeyUsageRow,
   type UsageSummary,
 } from '../../api/client';
 import { CreditPoolBar } from './CreditPoolBar';
-import { costRows, planDisplayName } from './usage-format';
+import { actionDisplayName, costRows, planDisplayName } from './usage-format';
 
 /**
- * Actionable ops view (Phase D / P5.3 depth).
- * Live: credit pool, ledger costs, per-key SDK usage, sdk-health.
- * CloudWatch remains a documented pointer — no metrics proxy yet.
+ * Actionable ops view (Phase D / P3 commercial metering).
+ * Live: credit pool, invoice explainability, by-action + per-key SDK usage, soft/hard quotas.
  */
 export function DeveloperOpsPage() {
   const base = getSdkApiBaseUrl();
@@ -27,6 +27,9 @@ export function DeveloperOpsPage() {
   const [retention, setRetention] = useState<string | null>(null);
   const [keys, setKeys] = useState<ApiKeySummary[]>([]);
   const [keyUsage, setKeyUsage] = useState<ApiKeyUsageRow[] | null>(null);
+  const [byAction, setByAction] = useState<ApiKeyActionUsage[]>([]);
+  const [invoiceSummary, setInvoiceSummary] = useState<string | null>(null);
+  const [sku, setSku] = useState<string | null>(null);
   const [keyUsageError, setKeyUsageError] = useState<string | null>(null);
   const [period, setPeriod] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -72,11 +75,18 @@ export function DeveloperOpsPage() {
     }
 
     if (keyUsageRes.status === 'fulfilled') {
-      setKeyUsage(keyUsageRes.value.keys);
-      setPeriod(keyUsageRes.value.period);
+      const ku = keyUsageRes.value;
+      setKeyUsage(ku.keys);
+      setByAction(ku.byAction ?? []);
+      setInvoiceSummary(ku.invoice?.summary ?? null);
+      setSku(ku.sku ?? ku.invoice?.model ?? null);
+      setPeriod(ku.period);
       setKeyUsageError(null);
     } else {
       setKeyUsage(null);
+      setByAction([]);
+      setInvoiceSummary(null);
+      setSku(null);
       setPeriod(null);
       setKeyUsageError(
         keyUsageRes.reason instanceof Error
@@ -99,13 +109,25 @@ export function DeveloperOpsPage() {
   }, [load]);
 
   const aggregates = (() => {
-    const sum = { remember: 0, recall: 0, import: 0, publish: 0, credits: 0 };
+    const sum = {
+      remember: 0,
+      recall: 0,
+      import: 0,
+      list: 0,
+      export: 0,
+      publish: 0,
+      graph: 0,
+      credits: 0,
+    };
     if (!keyUsage) return sum;
     for (const r of keyUsage) {
       sum.remember += r.remember ?? 0;
       sum.recall += r.recall ?? 0;
       sum.import += r.import ?? 0;
+      sum.list += r.list ?? 0;
+      sum.export += r.export ?? 0;
       sum.publish += r.contentPublish ?? 0;
+      sum.graph += r.graphRun ?? 0;
       sum.credits += r.credits ?? 0;
     }
     return sum;
@@ -122,11 +144,13 @@ export function DeveloperOpsPage() {
     usage.monthlyCredits > 0 &&
     usage.remaining / usage.monthlyCredits < 0.15;
 
+  const maxActionCredits = Math.max(1, ...byAction.map((a) => a.credits));
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-[12px] text-mist">
-          Live usage against the shared credit ledger and SDK key aggregates.
+          Live usage against the shared credit ledger and SDK key aggregates (SKU A).
         </p>
         <button
           type="button"
@@ -199,6 +223,7 @@ export function DeveloperOpsPage() {
           {usage && (
             <span className="font-mono text-[11px] text-mist">
               {planDisplayName(usage.plan)}
+              {sku ? ` · ${sku}` : ''}
             </span>
           )}
         </div>
@@ -211,7 +236,7 @@ export function DeveloperOpsPage() {
             <CreditPoolBar usage={usage} />
             {lowCredits && (
               <p className="text-[12px] text-ember">
-                Under 15% remaining.{' '}
+                Soft warning: under 15% remaining.{' '}
                 <Link to="/app/settings" className="text-signal hover:underline">
                   Open billing
                 </Link>
@@ -219,6 +244,46 @@ export function DeveloperOpsPage() {
             )}
           </>
         )}
+      </section>
+
+      <section className="surface space-y-3 p-5">
+        <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-mist">
+          Invoice explainability
+        </h2>
+        <p className="text-[12px] leading-relaxed text-mist">
+          {invoiceSummary ??
+            'One monthly credit pool (SKU A) covers Web/Chrome creatives and SDK /v1 calls. API-key burn is the subset tagged with keyId in the ledger. IDE/CLI/Desktop BYOK Bedrock is not billed through this pool.'}
+        </p>
+        {usage && (
+          <dl className="space-y-2 text-sm">
+            <div className="flex justify-between gap-4">
+              <dt className="text-mist">Plan allotment this month</dt>
+              <dd className="font-mono text-[12px] text-paper">
+                {usage.monthlyCredits} credits
+              </dd>
+            </div>
+            <div className="flex justify-between gap-4">
+              <dt className="text-mist">Pool used / remaining</dt>
+              <dd className="font-mono text-[12px] text-paper">
+                {usage.used ??
+                  Math.max(0, usage.monthlyCredits - usage.remaining)}{' '}
+                used · {usage.remaining} left
+              </dd>
+            </div>
+            <div className="flex justify-between gap-4">
+              <dt className="text-mist">API-key attributed (subset)</dt>
+              <dd className="font-mono text-[12px] text-paper">
+                {aggregates.credits} credits
+              </dd>
+            </div>
+          </dl>
+        )}
+        <p className="text-[12px] leading-relaxed text-mist">
+          Stripe meter <code className="font-mono text-paper">walkcroach_credits</code> is
+          best-effort and idempotent on <code className="font-mono text-paper">usage_ledger.id</code>.
+          Flat plan allotment is what you pay for unless a metered Price is attached to your
+          subscription.
+        </p>
       </section>
 
       <section className="surface space-y-3 p-5">
@@ -242,6 +307,55 @@ export function DeveloperOpsPage() {
                   {row.label}
                 </span>
                 <span className="font-medium text-paper">{row.credits} cr</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="surface space-y-3 p-5">
+        <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-mist">
+          Usage by action
+          {period ? (
+            <span className="ml-2 font-mono text-[10px] font-normal tracking-normal text-mist/70">
+              {period} · API keys
+            </span>
+          ) : null}
+        </h2>
+        {keyUsageError && (
+          <p className="text-sm text-ember" role="alert">
+            Could not load key usage: {keyUsageError}
+          </p>
+        )}
+        {!keyUsageError && keyUsage === null && (
+          <p className="text-sm text-mist">Loading action usage…</p>
+        )}
+        {keyUsage && byAction.length === 0 && (
+          <p className="text-[12px] text-mist">
+            No key-attributed actions this month yet.
+          </p>
+        )}
+        {byAction.length > 0 && (
+          <ul className="space-y-2">
+            {byAction.map((row) => (
+              <li key={row.action} className="text-[12px]">
+                <div className="mb-1 flex justify-between gap-3">
+                  <span className="text-paper">{actionDisplayName(row.action)}</span>
+                  <span className="font-mono text-mist">
+                    {row.count}× · {row.credits} cr
+                  </span>
+                </div>
+                <div
+                  className="h-1.5 overflow-hidden rounded-full bg-ink/50"
+                  role="presentation"
+                >
+                  <div
+                    className="h-full rounded-full bg-signal/70"
+                    style={{
+                      width: `${Math.max(4, (row.credits / maxActionCredits) * 100)}%`,
+                    }}
+                  />
+                </div>
               </li>
             ))}
           </ul>
@@ -276,9 +390,10 @@ export function DeveloperOpsPage() {
                 </dd>
               </div>
               <div className="flex justify-between gap-4">
-                <dt className="text-mist">Content publish</dt>
+                <dt className="text-mist">List / export / publish / graph</dt>
                 <dd className="font-mono text-[12px] text-paper">
-                  {aggregates.publish}
+                  {aggregates.list} / {aggregates.export} / {aggregates.publish}{' '}
+                  / {aggregates.graph}
                 </dd>
               </div>
               <div className="flex justify-between gap-4">
@@ -300,14 +415,16 @@ export function DeveloperOpsPage() {
               </p>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[28rem] text-left text-[12px]">
+                <table className="w-full min-w-[36rem] text-left text-[12px]">
                   <thead>
                     <tr className="border-b border-line text-mist">
                       <th className="py-1.5 pr-3 font-medium">Key</th>
                       <th className="py-1.5 pr-3 font-medium">Remember</th>
                       <th className="py-1.5 pr-3 font-medium">Recall</th>
-                      <th className="py-1.5 pr-3 font-medium">Import</th>
+                      <th className="py-1.5 pr-3 font-medium">List</th>
+                      <th className="py-1.5 pr-3 font-medium">Export</th>
                       <th className="py-1.5 pr-3 font-medium">Publish</th>
+                      <th className="py-1.5 pr-3 font-medium">Graph</th>
                       <th className="py-1.5 font-medium">Credits</th>
                     </tr>
                   </thead>
@@ -324,10 +441,16 @@ export function DeveloperOpsPage() {
                           {row.recall}
                         </td>
                         <td className="py-1.5 pr-3 font-mono text-mist">
-                          {row.import}
+                          {row.list ?? 0}
+                        </td>
+                        <td className="py-1.5 pr-3 font-mono text-mist">
+                          {row.export ?? 0}
                         </td>
                         <td className="py-1.5 pr-3 font-mono text-mist">
                           {row.contentPublish}
+                        </td>
+                        <td className="py-1.5 pr-3 font-mono text-mist">
+                          {row.graphRun ?? 0}
                         </td>
                         <td className="py-1.5 font-mono text-paper">
                           {row.credits}
@@ -351,6 +474,67 @@ export function DeveloperOpsPage() {
             Governance policy
           </Link>
         </div>
+      </section>
+
+      <section className="surface space-y-3 p-5">
+        <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-mist">
+          Soft / hard quotas · 429 · Retry-After
+        </h2>
+        <p className="text-[12px] leading-relaxed text-mist">
+          Meterable <code className="font-mono text-paper">/v1</code> calls debit the shared
+          monthly credit pool (SKU A — same pool as Web/Chrome creatives). There is no separate
+          developer-only product.
+        </p>
+        <ul className="list-disc space-y-2 pl-5 text-[12px] leading-relaxed text-mist">
+          <li>
+            <strong className="font-medium text-paper">Soft:</strong> UI warns when remaining &lt;
+            15% of the monthly allotment (Overview, Ops, CreditPoolBar).
+          </li>
+          <li>
+            <strong className="font-medium text-paper">Hard:</strong> exhaustion → HTTP{' '}
+            <code className="font-mono text-paper">429</code>, body{' '}
+            <code className="font-mono text-paper">code: QUOTA_EXCEEDED</code>, header{' '}
+            <code className="font-mono text-paper">Retry-After</code> (seconds). The TypeScript
+            SDK surfaces this as <code className="font-mono text-paper">QuotaError</code> and
+            honours Retry-After on retries.
+          </li>
+          <li>
+            Success responses include{' '}
+            <code className="font-mono text-paper">x-ratelimit-limit</code>,{' '}
+            <code className="font-mono text-paper">x-ratelimit-remaining</code>, and{' '}
+            <code className="font-mono text-paper">x-credits-cost</code>.
+          </li>
+          <li>
+            Per-key request rate limits beyond the credit pool are not a separate product control
+            yet — treat credit burn as the primary throttle. Scopes + Cognito-only minting remain
+            the abuse floor.
+          </li>
+        </ul>
+        <p className="text-[12px] text-mist">
+          FAQ:{' '}
+          <Link to="/app/developer/docs" className="text-signal hover:underline">
+            Docs → Support FAQ
+          </Link>
+          . Billing:{' '}
+          <Link to="/app/settings" className="text-signal hover:underline">
+            Settings
+          </Link>
+          . Model:{' '}
+          <code className="font-mono text-paper">docs/commercial-metering-p3.md</code>.
+        </p>
+      </section>
+
+      <section className="surface space-y-2 p-5">
+        <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-mist">
+          Status contact
+        </h2>
+        <p className="text-[12px] leading-relaxed text-mist">
+          If <code className="font-mono text-paper">sdk-health</code> stays down after Refresh,
+          verify API base <code className="font-mono text-paper">{base}</code>, then check
+          CloudWatch <code className="font-mono text-paper">WalkCroach/Memory</code>. Account /
+          billing questions: Settings. Product questions that are not answered by Docs FAQ:
+          reply on your WalkCroach signup email thread.
+        </p>
       </section>
 
       <section className="surface space-y-2 p-5">

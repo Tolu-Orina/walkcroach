@@ -67,10 +67,27 @@ check('describes itself in more than a sentence fragment', () => {
   assert(Array.isArray(pkg.keywords) && pkg.keywords.length >= 3, 'add at least 3 keywords');
 });
 
+check('P4 coding-wedge pitch is in the marketplace short description', () => {
+  const d = String(pkg.description).toLowerCase();
+  assert(
+    d.includes('you steer') && (d.includes('explore') || d.includes('verify')),
+    'description must lead with Funnel A pitch (You steer; explore → act → verify)',
+  );
+  assert(
+    d.includes('byok') || d.includes('approve'),
+    'description must mention BYOK or approvals (Org trust)',
+  );
+});
+
 check('ships a README, which becomes the listing body', () => {
   const readme = join(root, 'README.md');
   assert(existsSync(readme), 'README.md is missing');
   assert(statSync(readme).size > 500, 'README.md is too short to be a listing');
+  const body = readFileSync(readme, 'utf8').toLowerCase();
+  assert(
+    body.includes('you steer') && body.includes('verify'),
+    'README must carry Funnel A Dev pitch',
+  );
 });
 
 console.log('\nbuilt artifact');

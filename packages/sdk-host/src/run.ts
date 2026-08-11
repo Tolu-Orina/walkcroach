@@ -121,6 +121,11 @@ export async function runProgrammatic(req: RunRequest): Promise<RunResult> {
       // Sub-agents are allowed: they keep exploratory noise out of the main
       // context window, which matters more without a human to steer.
       subagentsEnabled: true,
+      // Phase graph default-on in agent-engine. Keep Planner/critic off here:
+      // programmatic runs auto-approve and have no UI — extra nested loops are
+      // pure Bedrock cost. Callers can opt in via future RunRequest fields.
+      forcePlanOnRisk: false,
+      architectureCriticEnabled: false,
       // Phase 1: thrash escalate / nudge exhaustion must fail-closed (no UI).
       // Phase 2: present_plan auto-approves.
       boundedExecutor: { interactive: false },

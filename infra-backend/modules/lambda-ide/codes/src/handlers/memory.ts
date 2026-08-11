@@ -6,6 +6,7 @@ import {
   updateMemoryEntryText,
   writeMemoryEntryDetailed,
   RetentionWindowError,
+  MEMORY_KINDS,
   type MemoryKind,
 } from '@walkcroach/agent-harness';
 import { createDbClient } from '@walkcroach/db';
@@ -14,14 +15,8 @@ import { jsonResponse } from '../http.js';
 import { isUuid, metricLog, parseJsonBody } from '../util.js';
 import { assertOwnsProject } from './me.js';
 
-const ALLOWED_KINDS = new Set<MemoryKind>([
-  'decision',
-  'preference',
-  'convention',
-  'summary',
-  'capture',
-  'qa',
-]);
+/** Single source: `@walkcroach/memory-contracts` via harness re-export (P1). */
+const ALLOWED_KINDS = new Set<MemoryKind>(MEMORY_KINDS);
 
 async function resolveLinkedProject(
   auth: AuthContext,
@@ -289,6 +284,10 @@ export async function handleListMemoryEntries(
 /**
  * PATCH /ide/v1/memory/entries/:id
  * Body: { projectId, text }
+ *
+ * @deprecated Dual-funnel P1 — **internal IDE-only** until 2026-10-11.
+ * Not on the public OpenAPI `/v1` contract. First-party list UX uses `/v1`;
+ * prefer remember/supersede for edits. See `docs/memory-contract-p1.md`.
  */
 export async function handleUpdateMemoryEntry(
   auth: AuthContext,

@@ -23,6 +23,7 @@ phases:
         cd ../agent-engine
         npm ci --include=dev
         npm run typecheck
+        npm run eval:gate
         npm run test
         npm run build
       - |

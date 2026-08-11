@@ -75,6 +75,10 @@ describe('eval golden tasks', () => {
       includePhaseB: false,
       subagentsEnabled: false,
       maxIterations: 8,
+      // Pre–P6 outcome golden: flat tool menu (phase-graph covered by trajectory evals).
+      phaseGraphEnabled: false,
+      forcePlanOnRisk: false,
+      architectureCriticEnabled: false,
     });
 
     expect(host.files.get('hello.ts')).toContain('hello');
@@ -123,6 +127,9 @@ describe('eval golden tasks', () => {
       includePhaseB: false,
       subagentsEnabled: false,
       maxIterations: 8,
+      phaseGraphEnabled: false,
+      forcePlanOnRisk: false,
+      architectureCriticEnabled: false,
     });
 
     expect(host.files.get('bug.ts')).toContain('return a + b;');
@@ -180,6 +187,9 @@ describe('eval golden tasks', () => {
       includePhaseB: false,
       subagentsEnabled: false,
       maxIterations: 12,
+      phaseGraphEnabled: false,
+      forcePlanOnRisk: false,
+      architectureCriticEnabled: false,
     });
 
     const done = host.events.find((e) => e.type === 'done');

@@ -2,11 +2,15 @@
 
 Typed client for the **WalkCroach agentic memory layer** — durable, tenant-scoped, provenance-preserving memory backed by CockroachDB.
 
-One memory layer already spans four first-party surfaces: a web app builder, a Chrome copilot, a VS Code/Cursor extension, and a CLI. This package makes it a fifth: your own agent, reading and writing the same memory those surfaces use.
+**This is the public platform product (funnel B).** It is not a hosted coding agent and does not ship `@walkcroach/agent-engine`. Coding agents live in the IDE Extension, CLI, and Desktop IDE.
+
+One memory layer already spans six first-party surfaces: Web, Browser Extension, IDE Extension, CLI, Desktop IDE, and this SDK (plus MCP). Your agents read and write the same graph those surfaces use.
 
 ```bash
 npm install @walkcroach/sdk
 ```
+
+Get a key from **WalkCroach Web → Developer → API keys**, or mint one with a signed-in session (see below). Messaging rules: [docs/dual-funnel-messaging.md](../../docs/dual-funnel-messaging.md).
 
 ## Quick start
 

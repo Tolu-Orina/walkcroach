@@ -45,16 +45,16 @@ export const SURFACE_PAIRS: {
   },
   {
     id: 'pair-ide-cli',
-    eyebrow: 'Code where you work',
-    title: 'Stay in the editor — or the terminal.',
+    eyebrow: 'Coding agents',
+    title: 'You steer. We explore, act, and verify.',
     support:
-      'IDE Extension and CLI share the same authenticated memory and connect flows as Web, without leaving your toolchain.',
+      'IDE Extension and CLI are local coding agents (BYOK) that share the same project memory — amplify your craft, don’t replace your editor.',
     surfaces: [
       {
         id: 'ide',
         name: 'IDE Extension',
         blurb:
-          'VS Code and Cursor extension with PKCE connect — continue from Web without pasting tokens.',
+          'VS Code and Cursor extension with approvals, project link, and recall from Chrome or Web.',
         image: '/marketing/surface-ide.png',
         imageAlt: 'WalkCroach IDE Extension in the editor',
         href: '/connect/ide',
@@ -64,7 +64,7 @@ export const SURFACE_PAIRS: {
         id: 'cli',
         name: 'CLI',
         blurb:
-          'Terminal workflow for prompts and deploys. Sign in through Web, then work from the shell.',
+          'Same agent engine in the terminal — approvals before writes, scriptable for CI.',
         image: '/marketing/surface-cli.png',
         imageAlt: 'WalkCroach CLI terminal experience',
         href: '/connect/cli',
@@ -74,16 +74,16 @@ export const SURFACE_PAIRS: {
   },
   {
     id: 'pair-desktop-sdk',
-    eyebrow: 'Long sessions & builders',
-    title: 'Desktop IDE depth. SDK reach.',
+    eyebrow: 'Desktop depth · platform SDK',
+    title: 'Code locally. Expose memory to your agents.',
     support:
-      'Desktop IDE hosts long-running agent sessions. The SDK exposes the same memory layer to your own products.',
+      'Desktop IDE runs long coding sessions on the private agent engine. The public SDK is the memory layer for your own products — not a hosted coding loop.',
     surfaces: [
       {
         id: 'desktop',
         name: 'Desktop IDE',
         blurb:
-          'Native shell for extended builder sessions — same memory graph, local-first agent host. Windows preview builds are unsigned.',
+          'Native coding agent host — same memory graph, local-first. Windows preview builds are unsigned.',
         image: '/marketing/surface-desktop.png',
         imageAlt: 'WalkCroach Desktop IDE workspace',
         href: desktopHref,
@@ -94,7 +94,7 @@ export const SURFACE_PAIRS: {
         id: 'sdk',
         name: 'SDK',
         blurb:
-          'Typed client for memory, keys, and health — mint keys in Developer and call the shared graph.',
+          'Typed memory, keys, and health client — mint keys in Developer and call the shared graph from your code.',
         image: '/marketing/surface-sdk.png',
         imageAlt: 'WalkCroach SDK and API modules',
         href: '/app/developer',

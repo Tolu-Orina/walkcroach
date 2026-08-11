@@ -10,6 +10,7 @@ export type ToolCard = {
   name: string;
   status: 'pending' | 'running' | 'done' | 'error';
   detail?: string;
+  hits?: Array<{ sourceSurface: string; kind?: string; text: string }>;
 };
 
 export type TuiProps = {
@@ -59,6 +60,7 @@ export function TuiApp(props: TuiProps): React.ReactElement {
               name: event.name,
               status: event.status,
               detail: event.detail,
+              hits: event.hits,
             };
             if (i < 0) return [...prev, next];
             const copy = [...prev];
@@ -121,7 +123,7 @@ export function TuiApp(props: TuiProps): React.ReactElement {
         <Text bold color="cyan">
           WalkCroach
         </Text>
-        <Text dimColor>  Phase D CLI</Text>
+        <Text dimColor>  You steer · explore → act → verify</Text>
       </Box>
       <Text dimColor>
         Auth: {props.signedIn ? 'signed in' : 'signed out'}
@@ -178,13 +180,20 @@ export function TuiApp(props: TuiProps): React.ReactElement {
         <Box flexDirection="column" marginTop={1}>
           <Text bold>Tools</Text>
           {tools.slice(-8).map((t) => (
-            <Text key={t.id}>
-              {'  '}
-              <Text color={statusColor(t.status)}>{t.status}</Text>
-              {'  '}
-              {t.name}
-              {t.detail ? <Text dimColor> — {clip(t.detail, 60)}</Text> : null}
-            </Text>
+            <Box key={t.id} flexDirection="column">
+              <Text>
+                {'  '}
+                <Text color={statusColor(t.status)}>{t.status}</Text>
+                {'  '}
+                {t.name}
+                {t.detail ? <Text dimColor> — {clip(t.detail, 60)}</Text> : null}
+              </Text>
+              {(t.hits ?? []).slice(0, 3).map((h, idx) => (
+                <Text key={`${t.id}-hit-${idx}`} dimColor>
+                  {'    '}[{h.sourceSurface}] {clip(h.text, 80)}
+                </Text>
+              ))}
+            </Box>
           ))}
         </Box>
       ) : null}

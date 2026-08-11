@@ -1113,13 +1113,13 @@ export function App() {
     if (tab === 'recall') {
       return {
         value: recallQ,
-        placeholder: 'What did I save about…',
-        label: 'Search your saved captures',
-        submitLabel: 'Recall',
+        placeholder: 'What did I capture about…',
+        label: 'Search page captures',
+        submitLabel: 'Search captures',
         disabled: !session,
         onChange: setRecallQ,
         onSubmit: () => void onRecall(),
-        // Recall exists only to be queried, and arriving here is a deliberate
+        // Capture Recall exists only to be queried, and arriving here is a deliberate
         // navigation — so the caret belongs in the field.
         autoFocus: true,
         webSearch: undefined,
@@ -1441,8 +1441,9 @@ export function App() {
                   <EmptyState title="Nothing read yet">
                     Pick an action above and the result appears here. WalkCroach
                     reads this page at that moment — not before. Anything you
-                    save is findable in <strong>Recall</strong>, on every
-                    WalkCroach surface.
+                    save is findable in <strong>Captures</strong> (page
+                    captures) and in <strong>Saved → Project memory</strong> when
+                    linked — and on every WalkCroach surface.
                   </EmptyState>
                 )}
 
@@ -1479,7 +1480,7 @@ export function App() {
           </div>
         )}
 
-        {/* ── Recall ── */}
+        {/* ── Capture Recall (page captures via chrome BFF — not /v1 project memory) ── */}
         {!loading && session && tab === 'recall' && (
           <div
             id="wc-pane-recall"
@@ -1487,16 +1488,19 @@ export function App() {
             aria-labelledby="wc-tab-recall"
             className="wc-section wc-pane"
           >
-            <h2 className="wc-section__title">Recall</h2>
+            <h2 className="wc-section__title">Capture Recall</h2>
             <p className="wc-muted wc-small">
-              Search what you saved
+              Search page captures you saved in Chrome
               {activeWsName ? ` in “${activeWsName}”` : ' across all workspaces'}
-              .
+              . Cross-surface project memory lives under{' '}
+              <strong>Saved</strong>.
             </p>
             {!recallAttempted && !streamText && !streaming && (
-              <EmptyState title="Your memory, across surfaces">
-                Anything you save from Chrome is recallable here — and in
-                WalkCroach Web, if the workspace is linked to a project.
+              <EmptyState title="Search your captures">
+                This tab searches Chrome page captures only — not the shared
+                project memory graph. Link a workspace and open{' '}
+                <strong>Saved → Project memory</strong> for decisions and
+                preferences across surfaces.
               </EmptyState>
             )}
             {recallAttempted && !streaming && !streamText && (

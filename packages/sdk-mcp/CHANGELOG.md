@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-08-11
+
+### Changed
+- Depends on `@walkcroach/sdk` `^0.2.1` (semver-compatible with 0.2.0 API).
+
 ## [0.2.0] — 2026-08-07
 
 ### Changed

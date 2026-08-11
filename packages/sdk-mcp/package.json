@@ -1,6 +1,6 @@
 {
   "name": "@walkcroach/sdk-mcp",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "description": "MCP server (2026-07-28) exposing the WalkCroach agentic memory layer to any compliant host",
   "license": "MIT",
@@ -37,7 +37,7 @@
   },
   "keywords": ["mcp", "model-context-protocol", "agent-memory", "cockroachdb"],
   "dependencies": {
-    "@walkcroach/sdk": "^0.2.0"
+    "@walkcroach/sdk": "^0.2.1"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",

@@ -9,7 +9,8 @@ import { SURFACE_PAIRS } from './surfaces';
 
 /**
  * WalkCroach platform landing — Meridian Slate.
- * Job: introduce the shared memory layer across all product surfaces.
+ * Primary funnel: memory platform (B). Secondary: coding agents (A).
+ * See docs/dual-funnel-messaging.md.
  */
 export function LandingPageView() {
   const { status, cognitoEnabled, devAuthAllowed } = useAuth();

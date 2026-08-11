@@ -18,4 +18,4 @@ export const PRODUCTION_API_ORIGIN = `https://${PRODUCTION_API_HOST}`;
 export const PRODUCTION_API_BASE_URL = `${PRODUCTION_API_ORIGIN}/v1`;
 
 /** Must match package.json version — used in User-Agent. */
-export const SDK_PACKAGE_VERSION = '0.2.0';
+export const SDK_PACKAGE_VERSION = '0.2.1';

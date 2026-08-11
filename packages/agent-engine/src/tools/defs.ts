@@ -406,8 +406,8 @@ export const PHASE_A_TOOLS: ToolDef[] = [
         role: {
           type: 'string',
           description:
-            'Optional role. "planner" runs the Phase-2 Planner (submit_plan only write). Default: explore summary.',
-          enum: ['planner', 'default'],
+            'Optional role. "planner" = Phase-2 Planner (submit_plan). "critic" = architecture critic (read-only review). Default: explore summary.',
+          enum: ['planner', 'critic', 'default'],
         },
       },
       required: ['name', 'prompt'],
@@ -547,7 +547,7 @@ export const PHASE_C_TOOLS: ToolDef[] = [
   {
     name: 'recall_project_memory',
     description:
-      'Vector-search the shared WalkCroach project memory (Web, Chrome, IDE, Desktop). Use when prior decisions/preferences from any surface would help. Optional sourceSurfaces filter: web | chrome | ide | desktop.',
+      'Vector-search the shared WalkCroach project memory (Web, Chrome, IDE, CLI, Desktop, SDK). Use when prior decisions/preferences from any surface would help. Optional sourceSurfaces filter: web | chrome | ide | cli | desktop | sdk.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -572,7 +572,7 @@ export const PHASE_C_TOOLS: ToolDef[] = [
   {
     name: 'mirror_project_memory',
     description:
-      'Write a distilled decision/preference/convention into shared CockroachDB project memory (source_surface set by the host: ide or desktop). Prefer short bullets, not raw chat.',
+      'Write a distilled decision/preference/convention into shared CockroachDB project memory (source_surface set by the host: ide | cli | desktop). Prefer short bullets, not raw chat.',
     inputSchema: {
       type: 'object',
       properties: {

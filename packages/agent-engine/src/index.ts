@@ -526,5 +526,70 @@ export {
   type SkillRankCandidate,
 } from './skill-rank.js';
 export {
+  remaskToolsForPhase,
+  resolvePhaseAllowlist,
+  classifyStartPhase,
+  shouldEnablePhaseGraph,
+  shouldExitGather,
+  isTrivialTask,
+  assertPhaseAllowlistInvariants,
+  GATHER_TOOL_ALLOWLIST,
+  ACT_TOOL_CORE,
+  VERIFY_TOOL_ALLOWLIST,
+  type AgentPhase,
+} from './phase-graph.js';
+export {
+  formatPhasePrompt,
+  buildGatherToActPrompt,
+  buildActToVerifyPrompt,
+  buildVerifyToActPrompt,
+} from './phase-prompts.js';
+export {
+  classifyPhaseFailure,
+  recordPhaseFailure,
+  recordGatherReadFile,
+  beginVerifyToActRetry,
+  buildDivergentNudge,
+  buildClassifiedVerifyToActPrompt,
+  buildGatherReadThrashPrompt,
+  buildVerifyRetryCapPrompt,
+  emptyPhaseTransitionState,
+  DEFAULT_MAX_VERIFY_TO_ACT,
+  DEFAULT_GATHER_SAME_PATH_READS,
+  DEFAULT_DIVERGENT_STREAK,
+  type PhaseFailureClass,
+  type PhaseTransitionState,
+} from './failure-taxonomy.js';
+export {
+  looksLikeRiskyOrLargeTask,
+  shouldForcePlanThenExecute,
+  type ForcePlanOpts,
+} from './plan-gate.js';
+export {
+  CRITIC_ROLE,
+  CRITIC_TOOL_ALLOWLIST,
+  CRITIC_SYSTEM_PROMPT,
+  MAX_ARCHITECTURE_CRITIQUES,
+  buildArchitectureCriticPrompt,
+  shouldRunArchitectureCritic,
+  isCriticSpawnName,
+  isCriticToolName,
+} from './architecture-critic.js';
+export {
+  ACT_TOOL_KEEP_ALWAYS,
+  ACT_TOOL_RANK_BUDGET,
+  DEFAULT_TOOL_RANK_TOP_K,
+  DEFAULT_TOOL_RANK_MIN_SCORE,
+  TOOLS_VECTORS_REL_PATH,
+  rankTools,
+  mergeActAllowlistWithRank,
+  splitActAllowlistForRank,
+  candidatesFromToolNames,
+  toolKeywordBoost,
+  assertActToolBudget,
+  type ToolRankCandidate,
+  type ToolRankHit,
+} from './tool-rank.js';
+export {
   normalizeLocalRepoKey,
 } from './repo-key.js';

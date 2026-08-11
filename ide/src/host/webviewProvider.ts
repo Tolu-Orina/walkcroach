@@ -470,8 +470,8 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
 
     let entries;
     try {
+      // P4 — show cross-surface memory (moat), not IDE-only mirrors.
       entries = await listMemoryEntries(token, this.linkedProjectId, {
-        sourceSurface: 'ide',
         limit: 50,
       });
     } catch (err) {
@@ -482,7 +482,7 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
 
     if (!entries.length) {
       void vscode.window.showInformationMessage(
-        'No IDE-mirrored memory entries yet.',
+        'No project memory entries yet. Capture one in Chrome/Web or mirror from the agent.',
       );
       return;
     }
@@ -490,13 +490,20 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
     const picked = await vscode.window.showQuickPick(
       entries.map((e) => ({
         label: e.kind,
-        description: e.createdAt,
+        description: e.sourceSurface,
         detail: e.text.slice(0, 200),
         entry: e,
       })),
-      { title: 'IDE-mirrored memory (select to edit)' },
+      { title: 'Project memory (all surfaces — select an IDE entry to edit)' },
     );
     if (!picked) return;
+
+    if (picked.entry.sourceSurface !== 'ide') {
+      void vscode.window.showInformationMessage(
+        `Read-only here (source_surface=${picked.entry.sourceSurface}). Edit on the originating surface or supersede via the agent.`,
+      );
+      return;
+    }
 
     const next = await vscode.window.showInputBox({
       title: 'Edit memory entry',
@@ -507,6 +514,8 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
     if (next === undefined || next === picked.entry.text) return;
 
     try {
+      // P1: list is /v1; in-place PATCH remains internal IDE-only until 2026-10-11
+      // (docs/memory-contract-p1.md). Prefer supersede via bridge.mirror for new UX.
       await updateMemoryEntry(
         token,
         picked.entry.id,
@@ -1384,6 +1393,13 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
         true,
       );
       const skillRoots = skillCfg.get<string[]>('skillRoots', []) ?? [];
+      const phaseGraphEnabled = skillCfg.get<boolean>('phaseGraph', true);
+      const forcePlanOnRisk = skillCfg.get<boolean>('forcePlanOnRisk', true);
+      const architectureCriticEnabled = skillCfg.get<boolean>(
+        'architectureCritic',
+        true,
+      );
+      const toolRankEnabled = skillCfg.get<boolean>('toolRank', true);
       await this.withBedrockSecretEnv(async () => {
         await runAgentLoop({
           host: this.host,
@@ -1403,6 +1419,12 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
           reasoningEffort: bedrockOpts.reasoningEffort,
           skillRoots,
           includeUserGlobalSkills,
+          phaseGraphEnabled: loopMode === 'plan' ? false : phaseGraphEnabled,
+          forcePlanOnRisk: loopMode === 'plan' ? false : forcePlanOnRisk,
+          architectureCriticEnabled:
+            loopMode === 'plan' ? false : architectureCriticEnabled,
+          toolRankEnabled: loopMode === 'plan' ? false : toolRankEnabled,
+          requireVerifyWhenConfigured: true,
           officialSkillsJsonPath: path.join(
             this.context.extensionPath,
             'dist',

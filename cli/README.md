@@ -2,13 +2,15 @@
 
 A memory-first coding agent in your terminal.
 
-`walkcroach` runs the same agent engine as the WalkCroach VS Code extension, and
-shares one CockroachDB memory layer with the web app, the Chrome extension and
-the IDE — so a decision recorded in one surface is available in the others.
+You steer; we explore, act, and verify. `walkcroach` runs the same private agent
+engine as the WalkCroach IDE extension, with approvals before writes and **BYOK**
+Bedrock inference. It shares one CockroachDB memory layer with Web, Chrome, IDE,
+Desktop, and the public SDK — so a decision recorded on one surface is available
+in the others.
 
 - **Interactive TUI** on a terminal, plain streaming when piped, NDJSON with `--json`
 - **Approvals before writes** — `--yes` auto-approves safe local tools only, and never ccloud, MCP writes or infra commands
-- **BYOK** — inference runs on your own AWS credentials; nothing is metered
+- **BYOK** — inference runs on your own AWS credentials; coding turns are not platform-metered (project memory API calls still use your account entitlements when linked)
 - **No telemetry.** Not opt-out, not anonymised. See below.
 
 ## Install
@@ -18,13 +20,10 @@ npm install -g @walkcroach/cli
 walkcroach doctor
 ```
 
+Published as [`@walkcroach/cli`](https://www.npmjs.com/package/@walkcroach/cli) on npm.
 Requires Node 20+. Credentials go to your OS keychain when one is available;
 `@napi-rs/keyring` is an optional dependency, so a platform without a prebuilt
 binary installs and runs normally on the file backend.
-
-> Not yet published. Until the first release, install the tarball produced by
-> CI (`npm install -g ./walkcroach-cli-<version>.tgz`) — the verification gate
-> is the same either way. See `VERSIONING.md`.
 
 ### From a clone
 

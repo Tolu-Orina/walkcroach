@@ -109,6 +109,13 @@ export class OutputSink {
         process.stderr.write(
           `  · ${event.name} [${event.status}]${event.detail ? ` — ${event.detail}` : ''}\n`,
         );
+        if (event.hits?.length) {
+          for (const h of event.hits.slice(0, 5)) {
+            process.stderr.write(
+              `      [${h.sourceSurface}] ${h.text.slice(0, 100)}\n`,
+            );
+          }
+        }
         return;
       case 'approval_request':
         process.stderr.write(formatApprovalPreview(event.request));

@@ -34,6 +34,45 @@ import {
   mergeRemoteSkillHits,
   rankSkills,
 } from './skill-rank.js';
+import {
+  DEFAULT_TOOL_RANK_TOP_K,
+  candidatesFromToolNames,
+  mergeActAllowlistWithRank,
+  rankTools,
+  splitActAllowlistForRank,
+} from './tool-rank.js';
+import {
+  assertPhaseAllowlistInvariants,
+  classifyStartPhase,
+  recordGatherTools,
+  resolvePhaseAllowlist,
+  shouldEnablePhaseGraph,
+  shouldExitGather,
+  type AgentPhase,
+  type GatherProgress,
+} from './phase-graph.js';
+import {
+  buildActToVerifyPrompt,
+  buildGatherToActPrompt,
+  formatPhasePrompt,
+} from './phase-prompts.js';
+import {
+  beginVerifyToActRetry,
+  buildClassifiedVerifyToActPrompt,
+  buildDivergentNudge,
+  buildGatherReadThrashPrompt,
+  buildVerifyRetryCapPrompt,
+  classifyPhaseFailure,
+  clearGatherReadStreaks,
+  clearPhaseFailures,
+  emptyPhaseTransitionState,
+  readFilePathFromInput,
+  recordGatherReadFile,
+  recordPhaseFailure,
+  DEFAULT_MAX_VERIFY_TO_ACT,
+  type PhaseFailureClass,
+  type PhaseTransitionState,
+} from './failure-taxonomy.js';
 import { TelemetrySink } from './telemetry.js';
 import { attachEnvExporters } from './telemetry-exporters.js';
 import { resolvePermissionMode } from './permission-mode.js';
@@ -94,8 +133,18 @@ import {
   PLANNER_TOOL_ALLOWLIST,
   assertPlannerSchemaHasNoWriteTools,
   buildPlannerUserPrompt,
-  looksLikePlanningTask,
 } from './planner.js';
+import {
+  shouldForcePlanThenExecute,
+} from './plan-gate.js';
+import {
+  CRITIC_SYSTEM_PROMPT,
+  CRITIC_TOOL_ALLOWLIST,
+  MAX_ARCHITECTURE_CRITIQUES,
+  buildArchitectureCriticPrompt,
+  shouldRunArchitectureCritic,
+} from './architecture-critic.js';
+import { REVIEW_OK_MARKER, isReviewOk } from './review-markers.js';
 
 export const DEFAULT_MAX_ITERATIONS = 24;
 export const DEFAULT_MAX_SUBAGENTS = 3;
@@ -112,7 +161,8 @@ export const MAX_VERIFY_REVIEWS = 1;
 /** Stop-hook re-prompts when a blocking Stop script exits non-zero. */
 export const MAX_STOP_HOOK_NUDGES = 2;
 
-export const REVIEW_OK_MARKER = 'REVIEW_OK';
+export { REVIEW_OK_MARKER, isReviewOk };
+export { MAX_ARCHITECTURE_CRITIQUES };
 
 /** Tools safe to run concurrently within one assistant tool turn. */
 export const PARALLEL_SAFE_TOOLS = new Set([
@@ -134,7 +184,7 @@ export const CONTINUE_PROMPT =
 export const ACT_NUDGE_PROMPT =
   'You stopped before finishing. The user asked for concrete work (create/scaffold/start/fix). Call todo_write if helpful, then write_file / edit_file / apply_patch / run_terminal now. Use ask_user only if a real decision blocks you. Do not re-list the whole workspace.';
 
-/** Soft verify gate: mutating action work without a successful verify recipe. */
+  /** Soft verify gate: mutating action work without a successful verify recipe. */
 export function buildVerifyNudgePrompt(commands: string[]): string {
   const list = commands.map((c) => `- \`${c}\``).join('\n');
   return [
@@ -145,6 +195,9 @@ export function buildVerifyNudgePrompt(commands: string[]): string {
   ].join('\n');
 }
 
+/** At most this many Verify→Act bounces per top-level run (P2). */
+export { DEFAULT_MAX_VERIFY_TO_ACT };
+
 export function buildVerifyReviewPrompt(task: string): string {
   return [
     'You are a read-only reviewer. Inspect the workspace for issues from the just-completed task.',
@@ -153,15 +206,6 @@ export function buildVerifyReviewPrompt(task: string): string {
     `If the work looks acceptable, reply with exactly ${REVIEW_OK_MARKER} on the first line, then a one-sentence note.`,
     'If there are problems, reply with REVIEW_ISSUES: then a short bullet list of what to fix. Do not write files.',
   ].join('\n');
-}
-
-export function isReviewOk(summary: string): boolean {
-  const first = summary.trim().split(/\r?\n/)[0]?.trim() ?? '';
-  return (
-    first === REVIEW_OK_MARKER ||
-    first.startsWith(`${REVIEW_OK_MARKER} `) ||
-    first.startsWith(`${REVIEW_OK_MARKER}:`)
-  );
 }
 
 export type RunLoopParams = {
@@ -242,8 +286,10 @@ export type RunLoopParams = {
   autoApprovePlan?: boolean;
   /** Phase 2 — Planner subagent only. */
   plannerMode?: boolean;
-  /** Phase 2 — schema-level tool allowlist (Planner). */
+  /** Phase 2 — schema-level tool allowlist (Planner / Critic). */
   toolAllowlist?: readonly string[];
+  /** Override the assembled system prompt (Planner / Critic). */
+  systemPromptOverride?: string;
   onPlanSubmitted?: (planPath: string) => void;
   /**
    * When true (default), prompts that lookLikePlanningTask run Planner→present
@@ -274,6 +320,36 @@ export type RunLoopParams = {
    * Hard infra/critical gates still apply under bypassPermissions.
    */
   permissionMode?: import('./permission-mode.js').PermissionMode;
+  /**
+   * P0/P1 — phase graph (Gather/Act/Verify remask + phase prompts).
+   * Default ON when unset. Pass false for the flat full tool menu.
+   * Always off for Planner allowlist, readOnly, and nested subagents.
+   */
+  phaseGraphEnabled?: boolean;
+  /**
+   * P3 — force plan-then-execute for large/risky tasks (multi-file, migrate,
+   * refactor, architecture). Default ON when unset (IDE parity).
+   * sdk-host / non-interactive callers may pass false to skip Planner cost.
+   */
+  forcePlanOnRisk?: boolean;
+  /**
+   * P3 — when `.walkcroach/verify.json` has recipes, require verify after
+   * mutating work even if settings.verify.required is false. Default true.
+   */
+  requireVerifyWhenConfigured?: boolean;
+  /**
+   * P3 — run architecture-critic subagent after verify (instead of generic
+   * verify-review). IDE: walkcroach.ide.architectureCritic (default true).
+   * When false, keep legacy verify-review.
+   */
+  architectureCriticEnabled?: boolean;
+  /**
+   * P4 — Titan-rank optional Act tools and prune schema to ≤12.
+   * IDE: walkcroach.ide.toolRank (default true when phaseGraph on).
+   */
+  toolRankEnabled?: boolean;
+  /** P4 — max ranked extras beyond keep-always (default 3). */
+  toolRankTopK?: number;
   /** Compaction threshold (message count). Default DEFAULT_COMPACT_THRESHOLD. */
   compactThreshold?: number;
   /** Messages kept after compaction. Default DEFAULT_COMPACT_KEEP_RECENT. */
@@ -401,11 +477,19 @@ export async function runAgentLoop(params: RunLoopParams): Promise<void> {
       return;
     }
 
-    // Planning-intent heuristic: plan-then-execute once when no plan yet.
+    // Planning-intent + P3 risk gate → plan-then-execute once when no plan yet.
     if (
-      !params.approvedPlan &&
-      looksLikePlanningTask(prompt) &&
-      (params.plannerFirstOnIntent ?? true)
+      shouldForcePlanThenExecute({
+        prompt,
+        approvedPlan: params.approvedPlan,
+        // Default ON with phase graph (unless caller opts out).
+        forcePlanOnRisk:
+          params.forcePlanOnRisk ??
+          (params.phaseGraphEnabled === false ? false : true),
+        plannerFirstOnIntent: params.plannerFirstOnIntent,
+        readOnly: params.readOnly,
+        depth: params.depth,
+      })
     ) {
       await runPlanThenExecute(params);
       return;
@@ -490,7 +574,18 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
     });
   };
 
-  host.emit({ type: 'phase', phase: 'gather' });
+  const phaseGraphActive = shouldEnablePhaseGraph({
+    phaseGraphEnabled: params.phaseGraphEnabled,
+    depth,
+    readOnly: params.readOnly,
+    plannerMode: params.plannerMode,
+    toolAllowlist: params.toolAllowlist,
+  });
+
+  // Soft UI bootstrap — skipped when phase graph will emit the real start phase.
+  if (!phaseGraphActive) {
+    host.emit({ type: 'phase', phase: 'gather' });
+  }
 
   const telemetry = new TelemetrySink();
   attachEnvExporters(telemetry);
@@ -648,51 +743,169 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
     }
   }
 
-  const system = assembleSystemBlocks({
-    walkcroachMd,
-    skillsCatalog: offerLoadSkill ? skills.catalogText() : undefined,
-    skillsRankNudge,
-    rulesMd: workspaceConfig.rulesMd || undefined,
-    ruleCatalog: formatRuleCatalog(workspaceConfig.ruleCatalog) || undefined,
-    approvedPlan: params.approvedPlan,
-    systemPromptOverride: params.plannerMode
-      ? PLANNER_SYSTEM_PROMPT
-      : undefined,
-  });
-  const tools = (
-    params.toolAllowlist
-      ? toBedrockTools({
-          allowlist: params.toolAllowlist,
-        })
-      : params.readOnly
+  const remaskOptsBase = {
+    includeSubagents: subagentsEnabled,
+    includePhaseB,
+    includePhaseC,
+    includeSharedSkills,
+    includeExtendedAct: true as const,
+  };
+
+  /** P4 — ranked optional Act tool names; null = no prune (full allowlist). */
+  let actRankedExtras: string[] | null = null;
+  const toolRankEnabled =
+    (params.toolRankEnabled ?? phaseGraphActive) && phaseGraphActive;
+  if (
+    toolRankEnabled &&
+    params.prompt.trim() &&
+    params.prompt !== CONTINUE_PROMPT
+  ) {
+    try {
+      const fullAct = resolvePhaseAllowlist({
+        phase: 'act',
+        ...remaskOptsBase,
+      });
+      const { optional } = splitActAllowlistForRank(fullAct);
+      if (optional.length > 0) {
+        const hits = await rankTools({
+          query: params.prompt,
+          tools: candidatesFromToolNames(optional),
+          embed: (t) => embedText(t, params.client),
+          topK: params.toolRankTopK ?? DEFAULT_TOOL_RANK_TOP_K,
+          workspaceRoot: host.getWorkspaceRoot(),
+        });
+        actRankedExtras = hits.map((h) => h.name);
+        host.emit({
+          type: 'telemetry',
+          name: 'tool_rank',
+          detail: `extras=${actRankedExtras.join(',') || '(none)'}`,
+          counters: {
+            tool_rank_extras: actRankedExtras.length,
+            tool_rank_optional_pool: optional.length,
+          },
+        });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      actRankedExtras = null;
+      host.emit({
+        type: 'warning',
+        message: `Tool ranking skipped: ${message}`,
+      });
+    }
+  }
+
+  function buildSystemForPhase(phase: AgentPhase | null) {
+    return assembleSystemBlocks({
+      walkcroachMd,
+      skillsCatalog: offerLoadSkill ? skills.catalogText() : undefined,
+      skillsRankNudge,
+      phasePrompt:
+        phaseGraphActive && phase ? formatPhasePrompt(phase) : undefined,
+      rulesMd: workspaceConfig.rulesMd || undefined,
+      ruleCatalog: formatRuleCatalog(workspaceConfig.ruleCatalog) || undefined,
+      approvedPlan: params.approvedPlan,
+      systemPromptOverride: params.systemPromptOverride
+        ? params.systemPromptOverride
+        : params.plannerMode
+          ? PLANNER_SYSTEM_PROMPT
+          : undefined,
+    });
+  }
+
+  function buildLegacyTools() {
+    return (
+      params.toolAllowlist
         ? toBedrockTools({
-            includeSubagents: false,
-            // Phase B required so load_skill exists before the RO name filter.
-            includePhaseB: true,
-            includePhaseC: Boolean(params.projectMemory),
-          }).filter((t) =>
-            [
-              'read_file',
-              'list_dir',
-              'search',
-              'glob',
-              'semantic_search',
-              'ask_user',
-              'recall_project_memory',
-              'load_rule',
-              'load_skill',
-            ].includes(t.toolSpec?.name ?? ''),
-          )
-        : toBedrockTools({
-            includeSubagents: subagentsEnabled,
-            includePhaseB,
-            includePhaseC,
-            includeSharedSkills,
+            allowlist: params.toolAllowlist,
           })
-  ) as import('@aws-sdk/client-bedrock-runtime').ToolConfiguration['tools'];
+        : params.readOnly
+          ? toBedrockTools({
+              includeSubagents: false,
+              includePhaseB: true,
+              includePhaseC: Boolean(params.projectMemory),
+            }).filter((t) =>
+              [
+                'read_file',
+                'list_dir',
+                'search',
+                'glob',
+                'semantic_search',
+                'ask_user',
+                'recall_project_memory',
+                'load_rule',
+                'load_skill',
+              ].includes(t.toolSpec?.name ?? ''),
+            )
+          : toBedrockTools({
+              includeSubagents: subagentsEnabled,
+              includePhaseB,
+              includePhaseC,
+              includeSharedSkills,
+            })
+    ) as import('@aws-sdk/client-bedrock-runtime').ToolConfiguration['tools'];
+  }
+
+  const phaseRef: { current: AgentPhase } = { current: 'act' };
+  let gatherProgress: GatherProgress = { toolTurns: 0, exploratoryHits: 0 };
+  let verifyAttempts = 0;
+  let phaseTx: PhaseTransitionState = emptyPhaseTransitionState();
+  /** Ref so nested `runOneTool` assignments stay visible to CFA (same pattern as phaseRef). */
+  const lastVerifyFailureRef: {
+    current: {
+      failureClass: PhaseFailureClass;
+      excerpt: string;
+    } | null;
+  } = { current: null };
+  /** Pending Gather→Act user prompt to inject after the current tool batch. */
+  let pendingGatherForceActPrompt: string | null = null;
+  let system = buildSystemForPhase(null);
+  let tools = buildLegacyTools();
+
+  function enterPhase(next: AgentPhase, reason: string): void {
+    host.emit({ type: 'phase', phase: next });
+    if (!phaseGraphActive) {
+      phaseRef.current = next;
+      return;
+    }
+    let allowlist = resolvePhaseAllowlist({ phase: next, ...remaskOptsBase });
+    if (next === 'act' && actRankedExtras !== null) {
+      allowlist = mergeActAllowlistWithRank({
+        fullAllowlist: allowlist,
+        rankedOptionalNames: actRankedExtras,
+        maxExtras: params.toolRankTopK ?? DEFAULT_TOOL_RANK_TOP_K,
+      });
+    }
+    assertPhaseAllowlistInvariants(next, allowlist);
+    phaseRef.current = next;
+    tools = toBedrockTools({ allowlist }) as typeof tools;
+    system = buildSystemForPhase(next);
+    telemetry.emit('walkcroach.phase_graph.enter', {
+      phase: next,
+      reason,
+      tools: allowlist.length,
+      tool_rank: next === 'act' && actRankedExtras !== null,
+    });
+    host.emit({
+      type: 'telemetry',
+      name: 'phase_graph_enter',
+      detail: `${next}:${reason}:tools=${allowlist.length}`,
+    });
+  }
 
   if (params.plannerMode && params.toolAllowlist) {
     assertPlannerSchemaHasNoWriteTools(params.toolAllowlist);
+  }
+
+  if (phaseGraphActive) {
+    const start = classifyStartPhase({
+      prompt: params.prompt,
+      actionBias,
+      hasApprovedPlan: Boolean(params.approvedPlan?.trim()),
+    });
+    enterPhase(start, 'classify');
+  } else {
+    host.emit({ type: 'phase', phase: 'act' });
   }
 
   const prior = params.priorMessages?.length
@@ -729,8 +942,6 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
   const actionPrompt = prompt;
   const isAction = () => shouldTreatAsActionTask(actionPrompt, actionBias);
 
-  host.emit({ type: 'phase', phase: 'act' });
-
   const MUTATING_TOOLS = new Set([
     'write_file',
     'edit_file',
@@ -747,7 +958,11 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
   let todoWriteNudgesUsed = 0;
   let todoProgressNudgesUsed = 0;
   let verifyReviewsUsed = 0;
+  let architectureCritiquesUsed = 0;
   let stopHookNudgesUsed = 0;
+  const requireVerifyWhenConfigured = params.requireVerifyWhenConfigured ?? true;
+  const architectureCriticEnabled =
+    params.architectureCriticEnabled ?? phaseGraphActive;
 
   async function streamOneTurn(): Promise<ConverseTurnResult> {
     prepareMessagesInPlace(messages, {
@@ -860,6 +1075,23 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
             thrashFingerprint = thrash.fingerprint;
           } else {
             boundedState = breakThrashLoop(thrash.state, thrash.fingerprint);
+            // P2: Gather thrash → Act edge instead of hard stop.
+            if (phaseGraphActive && phaseRef.current === 'gather') {
+              pendingGatherForceActPrompt = [
+                '[Phase transition: Gather → Act]',
+                thrash.message,
+                'Identical exploration calls are looping. Write/edit tools are now available — change strategy or ask_user.',
+              ].join('\n');
+              const msg =
+                'Thrash loop in Gather — harness will enter Act. Do not repeat the same read/search.';
+              return {
+                toolResult: {
+                  toolUseId: tool.toolUseId,
+                  content: [{ text: msg }],
+                  status: 'error',
+                },
+              };
+            }
             stuckLoopStop = true;
             const msg =
               'Thrash loop broken by user. Do not repeat the same tool call; change strategy.';
@@ -873,6 +1105,24 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
           }
         } else {
           boundedState = breakThrashLoop(thrash.state, thrash.fingerprint);
+          if (phaseGraphActive && phaseRef.current === 'gather') {
+            pendingGatherForceActPrompt = [
+              '[Phase transition: Gather → Act]',
+              thrash.message,
+              'Non-interactive thrash escalate in Gather — entering Act instead of aborting.',
+            ].join('\n');
+            return {
+              toolResult: {
+                toolUseId: tool.toolUseId,
+                content: [
+                  {
+                    text: 'Thrash in Gather — harness will enter Act. Change strategy.',
+                  },
+                ],
+                status: 'error',
+              },
+            };
+          }
           stuckLoopStop = true;
           const msg = [
             thrash.message,
@@ -902,6 +1152,24 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
           type: 'warning',
           message: `Blocked identical failing tool retry (${tool.name})`,
         });
+        if (phaseGraphActive && phaseRef.current === 'gather') {
+          pendingGatherForceActPrompt = [
+            '[Phase transition: Gather → Act]',
+            `Identical failing \`${tool.name}\` blocked in Gather.`,
+            'Write/edit tools are now available — change strategy.',
+          ].join('\n');
+          return {
+            toolResult: {
+              toolUseId: tool.toolUseId,
+              content: [
+                {
+                  text: `${gate.message}\n\n[SYSTEM] Gather identical-failure → Act.`,
+                },
+              ],
+              status: 'error',
+            },
+          };
+        }
         stuckLoopStop = true;
         return {
           toolResult: {
@@ -1015,6 +1283,78 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
 
     if (MUTATING_TOOLS.has(tool.name) && exec.status === 'success') {
       didMutatingWork = true;
+      if (phaseGraphActive) {
+        phaseTx = clearGatherReadStreaks(phaseTx);
+        phaseTx = clearPhaseFailures(phaseTx);
+      }
+    }
+
+    if (tool.name === 'verify') {
+      verifyAttempts += 1;
+    }
+
+    // P2 — Gather same-path read thrash.
+    if (
+      phaseGraphActive &&
+      phaseRef.current === 'gather' &&
+      tool.name === 'read_file' &&
+      exec.status === 'success'
+    ) {
+      const path = readFilePathFromInput(tool.input);
+      if (path) {
+        const tracked = recordGatherReadFile(phaseTx, path);
+        phaseTx = tracked.state;
+        if (tracked.forceAct && !pendingGatherForceActPrompt) {
+          pendingGatherForceActPrompt = buildGatherReadThrashPrompt(
+            tracked.path,
+            tracked.count,
+          );
+        }
+      }
+    }
+
+    // P2 — Classify verify/shell failures for Verify→Act.
+    if (
+      phaseGraphActive &&
+      phaseRef.current === 'verify' &&
+      exec.status !== 'success' &&
+      (tool.name === 'verify' ||
+        tool.name === 'run_terminal' ||
+        tool.name === 'await_terminal')
+    ) {
+      const failureClass =
+        classifyPhaseFailure({
+          toolName: tool.name,
+          status: exec.status,
+          content: exec.content,
+        }) ?? 'other';
+      lastVerifyFailureRef.current = {
+        failureClass,
+        excerpt: exec.content.slice(0, 1500),
+      };
+    }
+
+    // P2 — Divergent nudge on repeated same-class Act failures.
+    if (
+      phaseGraphActive &&
+      phaseRef.current === 'act' &&
+      exec.status !== 'success'
+    ) {
+      const failureClass = classifyPhaseFailure({
+        toolName: tool.name,
+        status: exec.status,
+        content: exec.content,
+      });
+      if (failureClass) {
+        const recorded = recordPhaseFailure(phaseTx, failureClass);
+        phaseTx = recorded.state;
+        if (recorded.divergent) {
+          exec = {
+            ...exec,
+            content: `${exec.content}\n\n${buildDivergentNudge(failureClass, recorded.streak)}`,
+          };
+        }
+      }
     }
 
     if (tool.name === 'todo_write' && exec.status === 'success') {
@@ -1215,12 +1555,75 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
       }
 
       if (!result.toolUses.length) {
+        // P1 — Gather end-turn → Act (before act-stall nudge).
+        if (
+          phaseGraphActive &&
+          phaseRef.current === 'gather' &&
+          i < maxIterations - 1 &&
+          shouldExitGather(gatherProgress, { endTurn: true })
+        ) {
+          enterPhase('act', 'gather_end_turn');
+          messages.push({
+            role: 'user',
+            content: [{ text: buildGatherToActPrompt(isAction()) }],
+          });
+          continue;
+        }
+
+        // P2 — Verify end-turn without success → Act (capped + classified).
+        if (
+          phaseGraphActive &&
+          phaseRef.current === 'verify' &&
+          !policy.didVerify &&
+          verifyAttempts > 0 &&
+          i < maxIterations - 1
+        ) {
+          const prior = lastVerifyFailureRef.current;
+          const failureClass = prior?.failureClass ?? 'other';
+          const recorded = recordPhaseFailure(phaseTx, failureClass);
+          phaseTx = recorded.state;
+          const retry = beginVerifyToActRetry(phaseTx);
+          phaseTx = retry.state;
+          if (!retry.allowed) {
+            host.emit({
+              type: 'warning',
+              message: `Verify→Act retry budget exhausted (${retry.max}).`,
+            });
+            messages.push({
+              role: 'user',
+              content: [{ text: buildVerifyRetryCapPrompt(retry.max) }],
+            });
+            continue;
+          }
+          enterPhase('act', 'verify_failed');
+          messages.push({
+            role: 'user',
+            content: [
+              {
+                text: buildClassifiedVerifyToActPrompt({
+                  failureClass,
+                  divergent: recorded.divergent,
+                  streak: recorded.streak,
+                  retries: retry.retries,
+                  maxRetries: retry.max,
+                  excerpt: prior?.excerpt,
+                }),
+              },
+            ],
+          });
+          lastVerifyFailureRef.current = null;
+          continue;
+        }
+
         const stalledAction =
           !params.readOnly &&
           isAction() &&
           !didMutatingWork &&
           actionPrompt !== CONTINUE_PROMPT;
         if (stalledAction && !actNudgeUsed && i < maxIterations - 1) {
+          if (phaseGraphActive && phaseRef.current !== 'act') {
+            enterPhase('act', 'act_nudge');
+          }
           actNudgeUsed = true;
           host.emit({
             type: 'warning',
@@ -1284,7 +1687,9 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
         }
 
         const needsVerify =
-          actionMutating && policy.verifyRequired && !policy.didVerify;
+          actionMutating &&
+          policy.isVerifyRequired(requireVerifyWhenConfigured) &&
+          !policy.didVerify;
         if (
           needsVerify &&
           verifyNudgesUsed < policy.verifyPromptCap &&
@@ -1298,60 +1703,137 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
               ? `Verify still required — hard gate (${verifyNudgesUsed}/${policy.verifyPromptCap})…`
               : 'Changes made but not verified — nudging the agent to run verify…',
           });
-          host.emit({ type: 'phase', phase: 'verify' });
-          messages.push({
-            role: 'user',
-            content: [
-              { text: buildVerifyNudgePrompt(policy.verify.commands) },
-            ],
-          });
-          continue;
-        }
-
-        // Adversarial read-only review before declaring success after mutations.
-        if (
-          actionMutating &&
-          !needsVerify &&
-          depth === 0 &&
-          verifyReviewsUsed < MAX_VERIFY_REVIEWS &&
-          i < maxIterations - 1
-        ) {
-          verifyReviewsUsed += 1;
-          host.emit({
-            type: 'warning',
-            message: 'Running read-only verify review…',
-          });
-          host.emit({ type: 'phase', phase: 'verify' });
-          const review = await runSubagent({
-            host,
-            name: 'verify-review',
-            prompt: buildVerifyReviewPrompt(actionPrompt),
-            signal,
-            depth: depth + 1,
-            region: params.region,
-            client: params.client,
-            modelId: params.modelId,
-            sharedSkills: params.sharedSkills,
-            officialSkillsJsonPath: params.officialSkillsJsonPath,
-            skillRoots: params.skillRoots,
-            includeUserGlobalSkills: params.includeUserGlobalSkills,
-            attachments: params.attachments,
-          });
-          if (!isReviewOk(review)) {
+          if (phaseGraphActive) {
+            enterPhase('verify', 'verify_nudge');
             messages.push({
               role: 'user',
               content: [
                 {
                   text: [
-                    'Verify review found issues before marking the task done:',
-                    review,
-                    '',
-                    'Fix the issues (write_file / edit_file / apply_patch / run_terminal), update todos, then continue.',
-                  ].join('\n'),
+                    buildActToVerifyPrompt(),
+                    buildVerifyNudgePrompt(policy.verify.commands),
+                  ].join('\n\n'),
                 },
               ],
             });
-            continue;
+          } else {
+            host.emit({ type: 'phase', phase: 'verify' });
+            messages.push({
+              role: 'user',
+              content: [
+                { text: buildVerifyNudgePrompt(policy.verify.commands) },
+              ],
+            });
+          }
+          continue;
+        }
+
+        // P3 — Architecture critic (preferred) or legacy verify-review.
+        if (
+          actionMutating &&
+          !needsVerify &&
+          depth === 0 &&
+          i < maxIterations - 1
+        ) {
+          if (
+            shouldRunArchitectureCritic({
+              enabled: architectureCriticEnabled,
+              depth,
+              actionMutating,
+              critiquesUsed: architectureCritiquesUsed,
+            })
+          ) {
+            architectureCritiquesUsed += 1;
+            host.emit({
+              type: 'warning',
+              message: 'Running architecture critic…',
+            });
+            host.emit({ type: 'phase', phase: 'verify' });
+            const freshMeta = (await host.gatherMeta?.(signal)) ?? {};
+            const critique = await runSubagent({
+              host,
+              name: 'architecture-critic',
+              prompt: buildArchitectureCriticPrompt({
+                task: actionPrompt,
+                gitStatus: freshMeta.gitStatus ?? meta.gitStatus,
+              }),
+              signal,
+              depth: depth + 1,
+              role: 'critic',
+              region: params.region,
+              client: params.client,
+              modelId: params.modelId,
+              sharedSkills: params.sharedSkills,
+              officialSkillsJsonPath: params.officialSkillsJsonPath,
+              skillRoots: params.skillRoots,
+              includeUserGlobalSkills: params.includeUserGlobalSkills,
+              attachments: params.attachments,
+            });
+            host.emit({
+              type: 'telemetry',
+              name: 'architecture_critic',
+              detail: isReviewOk(critique) ? 'ok' : 'must_fix',
+            });
+            if (!isReviewOk(critique)) {
+              if (phaseGraphActive && phaseRef.current !== 'act') {
+                enterPhase('act', 'critic_must_fix');
+              }
+              messages.push({
+                role: 'user',
+                content: [
+                  {
+                    text: [
+                      'Architecture critic found must-fix issues before marking the task done:',
+                      critique,
+                      '',
+                      'Fix the issues (write_file / edit_file / apply_patch / run_terminal), update todos, then continue.',
+                    ].join('\n'),
+                  },
+                ],
+              });
+              continue;
+            }
+          } else if (
+            !architectureCriticEnabled &&
+            verifyReviewsUsed < MAX_VERIFY_REVIEWS
+          ) {
+            verifyReviewsUsed += 1;
+            host.emit({
+              type: 'warning',
+              message: 'Running read-only verify review…',
+            });
+            host.emit({ type: 'phase', phase: 'verify' });
+            const review = await runSubagent({
+              host,
+              name: 'verify-review',
+              prompt: buildVerifyReviewPrompt(actionPrompt),
+              signal,
+              depth: depth + 1,
+              region: params.region,
+              client: params.client,
+              modelId: params.modelId,
+              sharedSkills: params.sharedSkills,
+              officialSkillsJsonPath: params.officialSkillsJsonPath,
+              skillRoots: params.skillRoots,
+              includeUserGlobalSkills: params.includeUserGlobalSkills,
+              attachments: params.attachments,
+            });
+            if (!isReviewOk(review)) {
+              messages.push({
+                role: 'user',
+                content: [
+                  {
+                    text: [
+                      'Verify review found issues before marking the task done:',
+                      review,
+                      '',
+                      'Fix the issues (write_file / edit_file / apply_patch / run_terminal), update todos, then continue.',
+                    ].join('\n'),
+                  },
+                ],
+              });
+              continue;
+            }
           }
         }
 
@@ -1433,6 +1915,92 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
         content: toolResults,
       });
 
+      if (phaseGraphActive && phaseRef.current === 'gather') {
+        gatherProgress = recordGatherTools(
+          gatherProgress,
+          result.toolUses.map((t) => t.name),
+        );
+
+        if (pendingGatherForceActPrompt && i < maxIterations - 1 && !stuckLoopStop) {
+          const promptText = pendingGatherForceActPrompt;
+          pendingGatherForceActPrompt = null;
+          enterPhase('act', 'gather_read_thrash');
+          messages.push({
+            role: 'user',
+            content: [{ text: promptText }],
+          });
+        } else if (
+          shouldExitGather(gatherProgress) &&
+          i < maxIterations - 1 &&
+          !stuckLoopStop
+        ) {
+          enterPhase('act', 'gather_budget');
+          messages.push({
+            role: 'user',
+            content: [{ text: buildGatherToActPrompt(isAction()) }],
+          });
+        }
+      }
+
+      // P2 — Immediate Verify→Act after failed verify/shell in Verify phase.
+      const verifyFail = lastVerifyFailureRef.current;
+      if (
+        phaseGraphActive &&
+        phaseRef.current === 'verify' &&
+        verifyFail &&
+        !policy.didVerify &&
+        i < maxIterations - 1 &&
+        !stuckLoopStop
+      ) {
+        const failureClass = verifyFail.failureClass;
+        const recorded = recordPhaseFailure(phaseTx, failureClass);
+        phaseTx = recorded.state;
+        const retry = beginVerifyToActRetry(phaseTx);
+        phaseTx = retry.state;
+        if (!retry.allowed) {
+          host.emit({
+            type: 'warning',
+            message: `Verify→Act retry budget exhausted (${retry.max}).`,
+          });
+          messages.push({
+            role: 'user',
+            content: [{ text: buildVerifyRetryCapPrompt(retry.max) }],
+          });
+        } else {
+          enterPhase('act', 'verify_tool_failed');
+          messages.push({
+            role: 'user',
+            content: [
+              {
+                text: buildClassifiedVerifyToActPrompt({
+                  failureClass,
+                  divergent: recorded.divergent,
+                  streak: recorded.streak,
+                  retries: retry.retries,
+                  maxRetries: retry.max,
+                  excerpt: verifyFail.excerpt,
+                }),
+              },
+            ],
+          });
+        }
+        lastVerifyFailureRef.current = null;
+      }
+
+      // Successful verify while masked in Verify → allow Done path next turn.
+      if (
+        phaseGraphActive &&
+        phaseRef.current === 'verify' &&
+        policy.didVerify
+      ) {
+        phaseTx = clearPhaseFailures(phaseTx);
+        host.emit({
+          type: 'telemetry',
+          name: 'phase_graph_verify_ok',
+          detail: `attempts=${verifyAttempts}`,
+        });
+      }
+
       if (stuckLoopStop) {
         host.emit({ type: 'phase', phase: 'verify' });
         emitObserveSummary();
@@ -1463,7 +2031,7 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
       !params.readOnly &&
       didMutatingWork &&
       isAction() &&
-      policy.verifyRequired &&
+      policy.isVerifyRequired(requireVerifyWhenConfigured) &&
       !policy.didVerify;
     persistSession(params, messages);
     host.emit({
@@ -1636,7 +2204,7 @@ async function runSubagent(params: {
   prompt: string;
   signal?: AbortSignal;
   depth: number;
-  role?: 'planner' | 'default';
+  role?: 'planner' | 'critic' | 'default';
   region?: string;
   client?: import('@aws-sdk/client-bedrock-runtime').BedrockRuntimeClient;
   modelId?: string;
@@ -1664,12 +2232,15 @@ async function runSubagent(params: {
   });
 
   const isPlanner = params.role === 'planner';
+  const isCritic = params.role === 'critic';
 
   await runFullLoop({
     host: wrapping,
     prompt: isPlanner
       ? params.prompt
-      : `[Sub-agent: ${params.name}]\n${params.prompt}\n\nReturn a concise summary of findings. Do not write files.`,
+      : isCritic
+        ? params.prompt
+        : `[Sub-agent: ${params.name}]\n${params.prompt}\n\nReturn a concise summary of findings. Do not write files.`,
     signal: params.signal,
     mode: 'full',
     readOnly: true,
@@ -1677,7 +2248,7 @@ async function runSubagent(params: {
     subagentsEnabled: false,
     includePhaseB: false,
     depth: params.depth,
-    maxIterations: isPlanner ? 12 : 8,
+    maxIterations: isPlanner ? 12 : isCritic ? 10 : 8,
     projectMemory: isPlanner ? params.projectMemory : undefined,
     sharedSkills: params.sharedSkills,
     officialSkillsJsonPath: params.officialSkillsJsonPath,
@@ -1688,9 +2259,16 @@ async function runSubagent(params: {
     client: params.client,
     modelId: params.modelId,
     plannerMode: isPlanner,
-    toolAllowlist: isPlanner ? PLANNER_TOOL_ALLOWLIST : undefined,
+    toolAllowlist: isPlanner
+      ? PLANNER_TOOL_ALLOWLIST
+      : isCritic
+        ? CRITIC_TOOL_ALLOWLIST
+        : undefined,
+    systemPromptOverride: isCritic ? CRITIC_SYSTEM_PROMPT : undefined,
     onPlanSubmitted: params.onPlanSubmitted,
     plannerFirstOnIntent: false,
+    forcePlanOnRisk: false,
+    architectureCriticEnabled: false,
     boundedExecutor: { interactive: false },
   });
 

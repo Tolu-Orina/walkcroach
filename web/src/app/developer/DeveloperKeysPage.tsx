@@ -274,7 +274,10 @@ export function DeveloperKeysPage() {
         <p className="text-[12px] leading-relaxed text-mist">
           Keys are server-side credentials. The SDK refuses to accept them in a
           browser unless you explicitly opt in — use them from Node, workers, or
-          CI.
+          CI. Plaintext is shown <strong className="font-medium text-paper">once</strong> after
+          create; if you lose it, revoke and mint again. Per-key usage for this month
+          appears on each row below (from{' '}
+          <code className="font-mono text-paper">/v1/keys/usage</code>).
         </p>
       </section>
 
@@ -338,6 +341,9 @@ export function DeveloperKeysPage() {
                     <p className="mt-1 font-mono text-[11px] text-mist">
                       This month: {usageByKey[key.id]!.remember} remember ·{' '}
                       {usageByKey[key.id]!.recall} recall ·{' '}
+                      {usageByKey[key.id]!.list ?? 0} list ·{' '}
+                      {usageByKey[key.id]!.contentPublish} publish ·{' '}
+                      {usageByKey[key.id]!.graphRun ?? 0} graph ·{' '}
                       {usageByKey[key.id]!.credits} credits
                     </p>
                   ) : (

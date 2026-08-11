@@ -80,6 +80,21 @@ describe('OutputSink — text mode', () => {
     expect(out).toContain('read_file');
   });
 
+  it('writes recall provenance lines under tool_card (P4)', () => {
+    const sink = new OutputSink('text');
+    sink.event({
+      type: 'tool_card',
+      id: 't2',
+      name: 'recall_project_memory',
+      status: 'done',
+      detail: '1 hit(s) · chrome',
+      hits: [{ sourceSurface: 'chrome', text: 'Prefer Drizzle' }],
+    });
+    const out = stderrSpy.mock.calls.map((c) => c[0] as string).join('');
+    expect(out).toContain('[chrome]');
+    expect(out).toContain('Prefer Drizzle');
+  });
+
   it('writes error result to stderr', () => {
     const sink = new OutputSink('text');
     sink.result(false, { error: 'boom' });

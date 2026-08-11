@@ -19,6 +19,7 @@ const COST_LABELS: Record<string, string> = {
   memory_erase: 'Memory erase',
   memory_audit: 'Memory audit',
   content_publish: 'Content publish',
+  graph_run: 'Graph run',
   agent_turn: 'Agent turn',
   generate_image: 'Image gen',
   render_pptx: 'Deck render',
@@ -27,6 +28,10 @@ const COST_LABELS: Record<string, string> = {
   connector_read: 'Connector read',
   connector_write: 'Connector write',
 };
+
+export function actionDisplayName(action: string): string {
+  return COST_LABELS[action] ?? action.replace(/_/g, ' ');
+}
 
 /** Prefer SDK/memory rows; fall back to full cost map. */
 export function costRows(
@@ -43,6 +48,7 @@ export function costRows(
     'memory_audit',
     'memory_import',
     'content_publish',
+    'graph_run',
     'agent_turn',
   ];
   const rows: Array<{ key: string; label: string; credits: number }> = [];
