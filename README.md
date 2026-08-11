@@ -1,22 +1,79 @@
-# WalkCroach
+<p align="center">
+  <img src="./docs/assets/walkcroach-readme-banner.png" alt="WalkCroach" width="520" />
+</p>
 
-WalkCroach is an agentic work platform with one CockroachDB memory graph shared across six surfaces: Web, Chrome extension, IDE extension, CLI, Desktop IDE, and the public SDK / MCP packages.
+<h1 align="center">One memory layer for agentic work across six surfaces</h1>
 
-A decision or capture on one surface can be recalled on another. That shared memory is the product core.
+<p align="center"><em>Shared CockroachDB memory for Web, Chrome, IDE, CLI, Desktop, and SDK</em></p>
+
+<p align="center">
+  Build and ship with agents that remember project context. Capture in the browser,
+  decide in the IDE, automate from the CLI, or call the same memory graph from the
+  public SDK. Provenance stays attached; the graph follows the account.
+</p>
+
+<p align="center">
+  Web · Chrome · IDE · CLI · Desktop · SDK / MCP
+</p>
+<p align="center">
+  Shared memory · Approvals · BYOK · OpenAPI <code>/v1</code> · MCP tools
+</p>
+<p align="center">
+  CockroachDB · AWS Bedrock · MIT · Self-hostable surfaces
+</p>
+
+<p align="center"><strong>Built for durable agent memory on CockroachDB and AWS</strong></p>
+
+<p align="center">
+  <a href="https://github.com/Tolu-Orina/walkcroach/stargazers"><img src="https://img.shields.io/github/stars/Tolu-Orina/walkcroach?style=flat-square&label=stars&color=C6A500" alt="GitHub stars" /></a>
+  <a href="https://github.com/Tolu-Orina/walkcroach/network/members"><img src="https://img.shields.io/github/forks/Tolu-Orina/walkcroach?style=flat-square&label=forks&color=6E56CF" alt="GitHub forks" /></a>
+  <a href="https://github.com/Tolu-Orina/walkcroach/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Tolu-Orina/walkcroach?style=flat-square&color=C6A500" alt="License: MIT" /></a>
+  <a href="https://www.npmjs.com/package/@walkcroach/sdk"><img src="https://img.shields.io/npm/v/@walkcroach/sdk?style=flat-square&label=sdk&color=2f6b4f" alt="npm @walkcroach/sdk" /></a>
+  <a href="https://www.npmjs.com/package/@walkcroach/cli"><img src="https://img.shields.io/npm/v/@walkcroach/cli?style=flat-square&label=cli&color=2f6b4f" alt="npm @walkcroach/cli" /></a>
+  <a href="https://www.npmjs.com/package/@walkcroach/sdk-mcp"><img src="https://img.shields.io/npm/v/@walkcroach/sdk-mcp?style=flat-square&label=sdk-mcp&color=2f6b4f" alt="npm @walkcroach/sdk-mcp" /></a>
+  <a href="https://open-vsx.org/extension/walkcroach/walkcroach-ide"><img src="https://img.shields.io/open-vsx/v/walkcroach/walkcroach-ide?style=flat-square&label=Open%20VSX&color=1F6FEB" alt="Open VSX" /></a>
+  <a href="https://chrome.google.com/webstore/detail/oljdeopppkgfjeoobgochpddchlhmeaj"><img src="https://img.shields.io/badge/Chrome-0.6.2-4285F4?style=flat-square&logo=googlechrome&logoColor=white" alt="Chrome 0.6.2" /></a>
+  <img src="https://img.shields.io/badge/node-%3E%3D22-2f6b4f?style=flat-square&logo=nodedotjs&logoColor=white" alt="Node 22+" />
+</p>
+
+<p align="center">
+  <a href="https://github.com/Tolu-Orina/walkcroach/actions/workflows/publish-sdk.yml"><img src="https://github.com/Tolu-Orina/walkcroach/actions/workflows/publish-sdk.yml/badge.svg" alt="Publish SDK" /></a>
+  <a href="https://github.com/Tolu-Orina/walkcroach/actions/workflows/publish-cli.yml"><img src="https://github.com/Tolu-Orina/walkcroach/actions/workflows/publish-cli.yml/badge.svg" alt="Publish CLI" /></a>
+  <a href="https://github.com/Tolu-Orina/walkcroach/actions/workflows/publish-ide.yml"><img src="https://github.com/Tolu-Orina/walkcroach/actions/workflows/publish-ide.yml/badge.svg" alt="Publish IDE" /></a>
+  <a href="https://github.com/Tolu-Orina/walkcroach/actions/workflows/publish-chrome.yml"><img src="https://github.com/Tolu-Orina/walkcroach/actions/workflows/publish-chrome.yml/badge.svg" alt="Publish Chrome" /></a>
+</p>
+
+<p align="center">
+  <a href="https://walkcroach.rinegansolutions.com"><img src="https://img.shields.io/badge/Website-walkcroach.rinegansolutions.com-1a2a22?style=for-the-badge" alt="Website" /></a>
+  <a href="https://walkcroach.rinegansolutions.com/app/developer"><img src="https://img.shields.io/badge/Docs-Developer%20portal-1F6FEB?style=for-the-badge" alt="Developer portal" /></a>
+  <a href="https://open-vsx.org/extension/walkcroach/walkcroach-ide"><img src="https://img.shields.io/badge/IDE-Open%20VSX-2f6b4f?style=for-the-badge" alt="Open VSX" /></a>
+  <a href="https://github.com/Tolu-Orina/walkcroach/releases"><img src="https://img.shields.io/badge/Releases-GitHub-6E56CF?style=for-the-badge" alt="Releases" /></a>
+</p>
+
+```bash
+npx @walkcroach/cli@latest auth login
+npx @walkcroach/cli@latest run "explain this repo"
+```
+
+```bash
+npm install @walkcroach/sdk
+```
+
+## What this is
+
+WalkCroach is an agentic work platform: coding agents you steer locally, plus a hosted platform for browser work, app building, and public memory APIs. All of it shares one CockroachDB memory layer.
+
+`sdk-host` is an internal programmatic host over `agent-engine`. It is not a public package. `@walkcroach/agent-engine` stays private.
 
 | Surface | Distribution | Version (in tree) |
 |---|---|---|
-| Web (App Builder + developer portal) | Hosted | private `0.1.0` |
-| Chrome extension | Chrome Web Store | `0.6.2` |
+| Web (App Builder + developer portal) | [walkcroach.rinegansolutions.com](https://walkcroach.rinegansolutions.com) | private `0.1.0` |
+| Chrome extension | [Chrome Web Store](https://chrome.google.com/webstore/detail/oljdeopppkgfjeoobgochpddchlhmeaj) | `0.6.2` |
 | IDE extension | [Open VSX](https://open-vsx.org/extension/walkcroach/walkcroach-ide) | `0.2.1` |
 | CLI | npm `@walkcroach/cli` | `0.3.1` |
 | SDK | npm `@walkcroach/sdk` | `0.2.1` |
 | SDK MCP | npm `@walkcroach/sdk-mcp` | `0.2.1` |
 | Desktop IDE (Code OSS fork) | Unsigned Windows preview | see [docs/walkcroach-desktop.md](./docs/walkcroach-desktop.md) |
-
-`sdk-host` is an internal programmatic host over `agent-engine`. It is not a public package. `@walkcroach/agent-engine` stays private.
-
-Production hosts (owned zone `rinegansolutions.com`):
 
 | Role | URL |
 |---|---|
@@ -100,25 +157,17 @@ Run history: [Actions](https://github.com/Tolu-Orina/walkcroach/actions).
 
 ## Install (consumers)
 
-Try the coding agent without building from source:
-
-```bash
-npx @walkcroach/cli@latest auth login
-npx @walkcroach/cli@latest run "explain this repo"
-```
-
-IDE extension: install `walkcroach.walkcroach-ide` from
+CLI quick start is at the top of this README. IDE: install `walkcroach.walkcroach-ide` from
 [Open VSX](https://open-vsx.org/extension/walkcroach/walkcroach-ide), or from the
 `.vsix` on [Releases](https://github.com/Tolu-Orina/walkcroach/releases).
 
 CLI and IDE sign in against the same WalkCroach account as the web app and share
 the same CockroachDB memory layer.
 
-SDK:
+SDK (and optional MCP):
 
 ```bash
 npm install @walkcroach/sdk
-# optional MCP server:
 npm install @walkcroach/sdk-mcp
 ```
 
