@@ -15,6 +15,7 @@ export type ProviderId =
   | 'google_calendar'
   | 'gmail'
   | 'google_sheets'
+  | 'google_drive'
   | 'slack'
   | 'stripe'
   | 'hubspot';
@@ -117,6 +118,26 @@ export const PROVIDERS: Record<ProviderId, ProviderDef> = {
     clientIdEnv: 'GOOGLE_OAUTH_CLIENT_ID',
     clientSecretEnv: 'GOOGLE_OAUTH_CLIENT_SECRET',
     disclosure: 'Read and append rows in spreadsheets you choose.',
+  },
+  /**
+   * Chat Attach → Google Drive. `drive.file` is least privilege: only files the
+   * user opens or creates with WalkCroach (via the Google Picker), never the
+   * whole drive. This is an attachment source, not an agent write tool — there
+   * are no Drive actions in `actions.ts`.
+   */
+  google_drive: {
+    id: 'google_drive',
+    label: 'Google Drive',
+    tier: 1,
+    authorizeUrl: GOOGLE_AUTH,
+    tokenUrl: GOOGLE_TOKEN,
+    scopes: ['https://www.googleapis.com/auth/drive.file'],
+    usePkce: true,
+    extraAuthParams: GOOGLE_AUTH_PARAMS,
+    clientIdEnv: 'GOOGLE_OAUTH_CLIENT_ID',
+    clientSecretEnv: 'GOOGLE_OAUTH_CLIENT_SECRET',
+    disclosure:
+      'Pick files from Google Drive to attach in chat. WalkCroach can only access files you select — not your whole drive.',
   },
   slack: {
     id: 'slack',

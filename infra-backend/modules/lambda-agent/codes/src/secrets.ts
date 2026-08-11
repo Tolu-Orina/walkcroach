@@ -69,6 +69,8 @@ export async function ensureRuntimeSecrets(): Promise<void> {
     chrome_device_signing_key?: string;
     google_oauth_client_id?: string;
     google_oauth_client_secret?: string;
+    /** Browser-restricted key for Google Picker (Drive attach). */
+    google_api_key?: string;
     slack_oauth_client_id?: string;
     slack_oauth_client_secret?: string;
     stripe_oauth_client_id?: string;
@@ -119,6 +121,7 @@ export async function ensureRuntimeSecrets(): Promise<void> {
     secret.google_oauth_client_secret,
     'GOOGLE_OAUTH_CLIENT_SECRET',
   );
+  applySecret('google_api_key', secret.google_api_key, 'GOOGLE_API_KEY');
   applySecret(
     'slack_oauth_client_id',
     secret.slack_oauth_client_id,

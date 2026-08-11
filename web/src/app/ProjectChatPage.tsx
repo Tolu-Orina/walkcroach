@@ -205,6 +205,7 @@ export function ProjectChatPage() {
             </p>
             <div className="mt-auto w-full shrink-0 pt-10">
               <ChatComposer
+                projectId={projectId}
                 webSearch={webSearch}
                 onWebSearchChange={setWebSearch}
                 onSend={(msg, files) => void sendPrompt(msg, files)}
@@ -281,6 +282,7 @@ export function ProjectChatPage() {
           <div className="shrink-0 border-t border-line bg-ink/90 px-4 py-4 backdrop-blur-sm sm:px-8">
             <div className="mx-auto max-w-3xl">
               <ChatComposer
+                projectId={projectId}
                 webSearch={webSearch}
                 onWebSearchChange={setWebSearch}
                 onSend={(msg, files) => void sendPrompt(msg, files)}

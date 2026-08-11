@@ -19,11 +19,13 @@ import {
   getConnector,
   getProvider,
   hashState,
+  importDriveFiles,
   isProviderId,
   listConnectors,
   listRuns,
   markRunDeclined,
   recordProposal,
+  resolveConnectorAccessToken,
   revokeConnector,
   secretRefFor,
   storeTokens,
@@ -414,6 +416,118 @@ export async function handleListConnectorRuns(
       error: r.error,
       createdAt: r.created_at,
       executedAt: r.executed_at,
+    })),
+  });
+}
+
+/**
+ * POST /connectors/google_drive/picker-session
+ * Short-lived access token + public client id + Picker API key for the browser.
+ */
+export async function handleGoogleDrivePickerSession(
+  db: DbClient,
+  auth: AuthContext,
+): Promise<RestResult> {
+  const resolved = await resolveConnectorAccessToken(
+    db,
+    auth.ownerId,
+    'google_drive',
+  );
+  if (!resolved.ok) {
+    const status =
+      resolved.code === 'not_connected'
+        ? 404
+        : resolved.code === 'provider'
+          ? 503
+          : 401;
+    return jsonResponse(status, {
+      error: resolved.error,
+      code: resolved.code,
+      connectUrl: connectUrl(),
+    });
+  }
+
+  const apiKey =
+    process.env.GOOGLE_API_KEY?.trim() ||
+    process.env.GOOGLE_PICKER_API_KEY?.trim() ||
+    '';
+  if (!apiKey) {
+    return jsonResponse(503, {
+      error:
+        'Google Drive picker is not configured on this deployment (missing GOOGLE_API_KEY).',
+      code: 'picker_not_configured',
+      connectUrl: connectUrl(),
+    });
+  }
+
+  const expiresIn = Math.max(
+    60,
+    Math.floor(((resolved.tokens.expiresAt ?? Date.now() + 3_600_000) - Date.now()) / 1000),
+  );
+
+  return jsonResponse(200, {
+    accessToken: resolved.tokens.accessToken,
+    expiresIn,
+    clientId: resolved.clientId,
+    apiKey,
+    connectUrl: connectUrl(),
+  });
+}
+
+/**
+ * POST /connectors/google_drive/import
+ * Downloads picked Drive files server-side and returns chat attachment payloads.
+ */
+export async function handleGoogleDriveImport(
+  db: DbClient,
+  auth: AuthContext,
+  body: { fileIds?: unknown },
+): Promise<RestResult> {
+  const fileIds = Array.isArray(body.fileIds)
+    ? body.fileIds.filter((id): id is string => typeof id === 'string')
+    : [];
+
+  const resolved = await resolveConnectorAccessToken(
+    db,
+    auth.ownerId,
+    'google_drive',
+  );
+  if (!resolved.ok) {
+    const status =
+      resolved.code === 'not_connected'
+        ? 404
+        : resolved.code === 'provider'
+          ? 503
+          : 401;
+    return jsonResponse(status, {
+      error: resolved.error,
+      code: resolved.code,
+      connectUrl: connectUrl(),
+    });
+  }
+
+  const imported = await importDriveFiles({
+    tokens: resolved.tokens,
+    fileIds,
+  });
+  if ('error' in imported) {
+    const status = imported.code === 'limit' ? 413 : 400;
+    return jsonResponse(status, {
+      error: imported.error,
+      code: imported.code,
+    });
+  }
+
+  return jsonResponse(200, {
+    attachments: imported.attachments.map((a) => ({
+      name: a.name,
+      mime: a.mime,
+      size: a.size,
+      textPreview: a.textPreview,
+      contentText: a.contentText,
+      contentBase64: a.contentBase64,
+      source: 'google_drive' as const,
+      sourceId: a.sourceId,
     })),
   });
 }

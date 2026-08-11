@@ -10,28 +10,35 @@ type AuthCardProps = {
   footer?: ReactNode;
 };
 
+/**
+ * Auth forms live under the SPA viewport lock (html/body overflow:hidden).
+ * This scrollport + my-auto centering keeps tall forms reachable on mobile
+ * without unlocking document scroll (chat panes depend on that lock).
+ */
 export function AuthCard({ title, subtitle, children, footer }: AuthCardProps) {
   return (
     <AppShell marketing>
-      <div className="prose-marketing flex min-h-[calc(100vh-4.25rem)] items-center justify-center px-4 py-12">
-        <div className="wc-enter glass-strong glass-hairline w-full max-w-md p-7 sm:p-9">
-          <div className="mb-7 flex flex-col items-center text-center">
-            <BrandLogo to="/" showWordmark={false} className="mb-4" />
-            <h1 className="font-display text-[1.75rem] font-extrabold tracking-tight text-paper">
-              {title}
-            </h1>
-            {subtitle && (
-              <p className="mt-2 max-w-sm text-sm leading-relaxed text-mist">
-                {subtitle}
-              </p>
+      <div className="prose-marketing flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-4 py-10 sm:py-12">
+        <div className="mx-auto my-auto w-full max-w-md">
+          <div className="wc-enter glass-strong glass-hairline w-full p-7 sm:p-9">
+            <div className="mb-7 flex flex-col items-center text-center">
+              <BrandLogo to="/" showWordmark={false} className="mb-4" />
+              <h1 className="font-display text-[1.75rem] font-extrabold tracking-tight text-paper">
+                {title}
+              </h1>
+              {subtitle && (
+                <p className="mt-2 max-w-sm text-sm leading-relaxed text-mist">
+                  {subtitle}
+                </p>
+              )}
+            </div>
+            {children}
+            {footer && (
+              <div className="mt-7 border-t border-line/70 pt-5 text-center">
+                {footer}
+              </div>
             )}
           </div>
-          {children}
-          {footer && (
-            <div className="mt-7 border-t border-line/70 pt-5 text-center">
-              {footer}
-            </div>
-          )}
         </div>
       </div>
     </AppShell>

@@ -10,6 +10,7 @@ import { runToolResultStream, type ToolResultBody } from './handlers/toolResult.
 import { handleRest } from './handlers/rest.js';
 import { ensureRuntimeSecrets } from './secrets.js';
 import { CORS_HEADERS } from './http.js';
+import { bridgeBedrockEnv } from './util.js';
 
 function writeHttp(
   responseStream: NodeJS.WritableStream,
@@ -42,6 +43,7 @@ async function streamHandler(
 ): Promise<void> {
   try {
     await ensureRuntimeSecrets();
+    bridgeBedrockEnv();
     const req = normalizeEvent(event);
 
     if (req.method === 'OPTIONS') {

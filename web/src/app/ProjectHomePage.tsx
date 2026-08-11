@@ -11,6 +11,7 @@ import {
   listProjectMemory,
   listProjectSessions,
   patchProject,
+  reindexProjectDocument,
 } from '../api/client';
 import type {
   ProjectDetail,
@@ -28,6 +29,7 @@ import {
 import { builderWorkspacePath } from '../lib/builderRoutes';
 import { promoteProjectToAppBuilder } from '../lib/promoteToAppBuilder';
 import { rememberBuilderProject } from '../lib/lastBuilderProject';
+import { rememberKnowledgeProject } from '../lib/lastKnowledgeProject';
 
 /**
  * Project home — chat compilation + knowledge container (ADR-0004).
@@ -153,7 +155,9 @@ export function ProjectHomePage() {
       setDocuments(docs);
       if (created.ingestStatus === 'failed') {
         setError(
-          'Document saved, but RAG indexing failed. It may not appear in semantic search until re-uploaded.',
+          created.ingestError
+            ? `Document saved, but RAG indexing failed: ${created.ingestError}`
+            : 'Document saved, but RAG indexing failed. Use Reindex on the document, or try again.',
         );
       }
     } catch (err) {
@@ -178,7 +182,9 @@ export function ProjectHomePage() {
       setDocuments(docs);
       if (created.ingestStatus === 'failed') {
         setError(
-          'Document saved, but RAG indexing failed. It may not appear in semantic search until re-uploaded.',
+          created.ingestError
+            ? `Document saved, but RAG indexing failed: ${created.ingestError}`
+            : 'Document saved, but RAG indexing failed. Use Reindex on the document, or try again.',
         );
       }
     } catch (err) {
@@ -199,9 +205,30 @@ export function ProjectHomePage() {
     }
   };
 
+  const reindexDocument = async (id: string) => {
+    if (!projectId) return;
+    setError(null);
+    try {
+      const updated = await reindexProjectDocument(projectId, id);
+      setDocuments((prev) =>
+        prev.map((d) => (d.id === id ? { ...d, ...updated } : d)),
+      );
+      if (updated.ingestStatus === 'failed') {
+        setError(
+          updated.ingestError
+            ? `Reindex failed: ${updated.ingestError}`
+            : 'Reindex failed. Check Bedrock / Titan access and try again.',
+        );
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   const startChat = async () => {
     if (!projectId) return;
     try {
+      rememberKnowledgeProject(projectId);
       const session = await createSession(projectId, 'chat');
       navigate(`/app/projects/${projectId}/chat/${session.id}`);
     } catch (err) {
@@ -475,13 +502,25 @@ export function ProjectHomePage() {
                       · {new Date(d.createdAt).toLocaleString()}
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => void removeDocument(d.id)}
-                    className="interactive shrink-0 text-xs text-ember/90 hover:text-ember"
-                  >
-                    Remove
-                  </button>
+                  <div className="flex shrink-0 items-center gap-3">
+                    {d.hasText &&
+                      !(d.ingestStatus === 'ok' || (d.chunkCount ?? 0) > 0) && (
+                        <button
+                          type="button"
+                          onClick={() => void reindexDocument(d.id)}
+                          className="interactive text-xs font-medium text-signal hover:underline"
+                        >
+                          Reindex
+                        </button>
+                      )}
+                    <button
+                      type="button"
+                      onClick={() => void removeDocument(d.id)}
+                      className="interactive text-xs text-ember/90 hover:text-ember"
+                    >
+                      Remove
+                    </button>
+                  </div>
                 </li>
               ))}
             </ul>

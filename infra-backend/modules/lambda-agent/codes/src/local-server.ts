@@ -8,10 +8,12 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadEnv } from '@walkcroach/db';
 import { handleLocalRequest } from './local-app.js';
+import { bridgeBedrockEnv } from './util.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // WalkCroach repo root: modules/lambda-agent/codes/src → ../../../../..
 loadEnv(join(__dirname, '..', '..', '..', '..', '..'));
+bridgeBedrockEnv();
 // Local-only: accept Bearer dev:user:* / dev:anon:* unless explicitly disabled.
 process.env.ALLOW_DEV_AUTH ??= 'true';
 

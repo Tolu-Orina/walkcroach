@@ -45,6 +45,15 @@ describe('coming-soon providers', () => {
     expect(slack?.comingSoon).toBeUndefined();
   });
 
+  it('lists google_drive when Google credentials are present', () => {
+    const drive = listableProviders(creds).find((p) => p.id === 'google_drive');
+    expect(drive).toBeDefined();
+    expect(drive?.connectable).toBe(true);
+    expect(drive?.scopes).toEqual([
+      'https://www.googleapis.com/auth/drive.file',
+    ]);
+  });
+
   it('omits an unconfigured provider entirely rather than showing it', () => {
     // Absent credentials is a different state from coming-soon: temporary and
     // environmental, so the provider is hidden rather than announced.

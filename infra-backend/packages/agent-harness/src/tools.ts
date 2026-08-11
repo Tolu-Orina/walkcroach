@@ -226,7 +226,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: 'generate_creative_brief',
     description:
-      'Paid-only. Draft a structured slide deck brief with Nova 2 Lite (title, slides, bullets). Emits a ConfirmCard for the user before render_pptx. Call load_skill("walkcroach-pptx") first.',
+      'Paid-only. Draft a structured slide deck brief with Nova 2 Lite (title, slides, bullets). Emits a ConfirmCard for the user before render_pptx. Prefer load_skill("walkcroach-pptx") first when available; if load_skill fails, still draft the brief — never refuse for a missing skill.',
     kind: 'server',
     profiles: ['chat', 'project_chat'],
     inputSchema: {
@@ -274,7 +274,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: 'generate_flyer_brief',
     description:
-      'Paid-only. Draft a one-page flyer brief with Nova 2 Lite, including a short visual philosophy (walkcroach-creative-philosophy). Emits a ConfirmCard before render_flyer. Call load_skill("walkcroach-flyer") first.',
+      'Paid-only. Draft a one-page flyer brief with Nova 2 Lite, including a short visual philosophy (walkcroach-creative-philosophy). Emits a ConfirmCard before render_flyer. Prefer load_skill("walkcroach-flyer") first when available; if it fails, still draft the brief.',
     kind: 'server',
     profiles: ['chat', 'project_chat'],
     inputSchema: {
@@ -323,7 +323,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: 'generate_video_brief',
     description:
-      'Paid-only. Draft a ≤30s Video Studio brief for one Nova Reel MULTI_SHOT_AUTOMATED job (durationSeconds=30) plus Polly script. Emits a ConfirmCard. Costs 270 credits on confirm; 1 video / 72h. Call load_skill("walkcroach-video-studio") first.',
+      'Paid-only. Draft a ≤30s Video Studio brief for one Nova Reel MULTI_SHOT_AUTOMATED job (durationSeconds=30) plus Polly script. Emits a ConfirmCard. Costs 270 credits on confirm; 1 video / 72h. Prefer load_skill("walkcroach-video-studio") first when available; if it fails, still draft the brief.',
     kind: 'server',
     profiles: ['chat', 'project_chat'],
     inputSchema: {

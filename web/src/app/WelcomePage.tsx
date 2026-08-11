@@ -76,7 +76,7 @@ export function WelcomePage() {
 
   const finishWelcome = () => {
     markWelcomeComplete();
-    navigate('/app/chat', { replace: true });
+    navigate('/app/resume', { replace: true });
   };
 
   return (
@@ -98,18 +98,18 @@ export function WelcomePage() {
               type="button"
               onClick={() => {
                 markWelcomeComplete();
-                navigate('/app/chat');
+                navigate('/app/resume');
               }}
               className="btn-ghost text-sm"
             >
-              Skip to chat
+              Skip
             </button>
             <button
               type="button"
               onClick={() => (isLast ? finishWelcome() : setStep(step + 1))}
               className="btn-primary text-sm"
             >
-              {isLast ? 'Open Chat' : 'Next'}
+              {isLast ? 'Continue' : 'Next'}
             </button>
           </div>
         </div>

@@ -42,20 +42,6 @@ function IconFolder() {
   );
 }
 
-function IconCode() {
-  return (
-    <svg viewBox="0 0 24 24" className="h-[1.15rem] w-[1.15rem]" fill="none" aria-hidden>
-      <path
-        d="m8 7-4 5 4 5M16 7l4 5-4 5M13 5l-2 14"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
 function IconApps() {
   return (
     <svg viewBox="0 0 24 24" className="h-[1.15rem] w-[1.15rem]" fill="none" aria-hidden>
@@ -171,7 +157,6 @@ const NAV_ITEMS: RailItem[] = [
   { to: '/app/chat', label: 'Chat', end: true, icon: <IconChat /> },
   { to: '/app/projects', label: 'Projects', icon: <IconFolder /> },
   { to: '/app/builder', label: 'App Builder', icon: <IconBuilder /> },
-  { to: '/app/code', label: 'Code', icon: <IconCode /> },
   { to: '/app/apps', label: 'Apps', icon: <IconApps /> },
   { to: '/app/developer', label: 'Developer', icon: <IconDeveloper /> },
 ];
@@ -426,52 +411,49 @@ function EcosystemRail() {
             expanded ? 'px-3' : 'flex flex-col items-center gap-1'
           }`}
         >
-          <NavLink
-            to="/app/settings"
-            title="Profile & settings"
-            aria-label="Profile & settings"
-            className={({ isActive }) =>
-              `interactive flex items-center gap-3 rounded-[var(--radius-control)] transition ${
-                expanded ? 'h-12 px-2' : 'h-10 w-10 justify-center'
-              } ${
-                isActive
-                  ? 'bg-raised text-paper'
-                  : 'text-mist hover:bg-panel hover:text-paper'
-              }`
-            }
-          >
-            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-panel ring-1 ring-line">
-              <IconProfile />
-            </span>
-            {expanded && (
-              <span className="min-w-0 flex-1 text-left">
-                <span className="block truncate text-sm font-semibold text-paper">
-                  {displayName}
-                </span>
-                <span className="block truncate text-[11px] text-mist">
-                  Settings
-                </span>
-              </span>
-            )}
-          </NavLink>
-          <button
-            type="button"
-            title="Sign out"
-            aria-label="Sign out"
-            onClick={() => void signOut()}
-            className={`interactive flex items-center gap-3 rounded-[var(--radius-control)] text-mist transition hover:bg-panel hover:text-paper ${
-              expanded ? 'mt-1 h-10 w-full px-2.5' : 'mt-1 h-10 w-10 justify-center'
+          <div
+            className={`flex items-center ${
+              expanded ? 'gap-1' : 'flex-col gap-1'
             }`}
           >
-            <span className="grid shrink-0 place-items-center">
-              <IconSignOut />
-            </span>
-            {expanded && (
-              <span className="truncate font-sans text-sm font-medium tracking-tight">
-                Sign out
+            <NavLink
+              to="/app/settings"
+              title="Profile & settings"
+              aria-label="Profile & settings"
+              className={({ isActive }) =>
+                `interactive flex min-w-0 items-center gap-3 rounded-[var(--radius-control)] transition ${
+                  expanded ? 'h-12 flex-1 px-2' : 'h-10 w-10 justify-center'
+                } ${
+                  isActive
+                    ? 'bg-raised text-paper'
+                    : 'text-mist hover:bg-panel hover:text-paper'
+                }`
+              }
+            >
+              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-panel ring-1 ring-line">
+                <IconProfile />
               </span>
-            )}
-          </button>
+              {expanded && (
+                <span className="min-w-0 flex-1 text-left">
+                  <span className="block truncate text-sm font-semibold text-paper">
+                    {displayName}
+                  </span>
+                  <span className="block truncate text-[11px] text-mist">
+                    Settings
+                  </span>
+                </span>
+              )}
+            </NavLink>
+            <button
+              type="button"
+              title="Sign out"
+              aria-label="Sign out"
+              onClick={() => void signOut()}
+              className="interactive grid h-10 w-10 shrink-0 place-items-center rounded-[var(--radius-control)] text-mist transition hover:bg-panel hover:text-paper"
+            >
+              <IconSignOut />
+            </button>
+          </div>
         </div>
       </aside>
     </>

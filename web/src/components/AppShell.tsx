@@ -148,7 +148,11 @@ export function AppShell({
 
       <main
         className={`min-h-0 flex-1 ${
-          wide || marketing ? 'flex w-full flex-col' : 'mx-auto w-full max-w-6xl'
+          marketing
+            ? 'flex w-full min-h-0 flex-col overflow-y-auto'
+            : wide
+              ? 'flex w-full flex-col'
+              : 'mx-auto w-full max-w-6xl'
         }`}
       >
         {children}

@@ -457,7 +457,7 @@ export function SettingsPage() {
               Workflow connectors
             </p>
             <p className="mt-0.5 text-[12px] leading-relaxed text-mist">
-              Gmail, Calendar, Sheets, Slack, Stripe, HubSpot — OAuth tokens in
+              Gmail, Calendar, Sheets, Drive, Slack, Stripe, HubSpot — OAuth tokens in
               Secrets Manager only.
             </p>
           </div>

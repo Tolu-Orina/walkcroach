@@ -41,6 +41,7 @@ export type ProjectDocument = {
   hasText: boolean;
   chunkCount?: number;
   ingestStatus?: 'ok' | 'failed' | 'skipped';
+  ingestError?: string;
 };
 
 export type ProjectMemoryEntry = {

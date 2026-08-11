@@ -39,6 +39,7 @@ import { DeveloperOpsPage } from './developer/DeveloperOpsPage';
 import { DeveloperDocsPage } from './developer/DeveloperDocsPage';
 import { DeveloperGovernancePage } from './developer/DeveloperGovernancePage';
 import { WelcomePage } from './WelcomePage';
+import { ResumePage } from './ResumePage';
 
 function LegacyProjectRedirect() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -211,7 +212,8 @@ export function AppRoutes() {
           </ProtectedRoute>
         }
       >
-        <Route index element={<Navigate to="chat" replace />} />
+        <Route index element={<Navigate to="resume" replace />} />
+        <Route path="resume" element={<ResumePage />} />
         <Route path="chat/:chatId?" element={<ChatHomePage />} />
         <Route path="projects" element={<DashboardGate />} />
         <Route path="projects/:projectId" element={<ProjectHomePage />} />

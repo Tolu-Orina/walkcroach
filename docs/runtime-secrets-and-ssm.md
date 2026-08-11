@@ -47,8 +47,9 @@ Providers only appear in Settings → Connections when **both** client id and se
 
 | JSON key | Maps to env | Provider |
 |---|---|---|
-| `google_oauth_client_id` | `GOOGLE_OAUTH_CLIENT_ID` | Calendar, Gmail, Sheets (shared Google app) |
+| `google_oauth_client_id` | `GOOGLE_OAUTH_CLIENT_ID` | Calendar, Gmail, Sheets, **Drive** (shared Google app) |
 | `google_oauth_client_secret` | `GOOGLE_OAUTH_CLIENT_SECRET` | |
+| `google_api_key` | `GOOGLE_API_KEY` | Browser-restricted Google Picker key (Drive attach). Enable Drive API + Picker API on the Cloud project. |
 | `slack_oauth_client_id` | `SLACK_OAUTH_CLIENT_ID` | Slack |
 | `slack_oauth_client_secret` | `SLACK_OAUTH_CLIENT_SECRET` | |
 | `stripe_oauth_client_id` | `STRIPE_OAUTH_CLIENT_ID` | **Connect** OAuth (user’s Stripe account for balance/payments tools) |

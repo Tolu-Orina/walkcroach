@@ -1,12 +1,12 @@
 import { useState, type FormEvent } from 'react';
 import { Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { cognitoErrorMessage } from '../../auth/cognito-idp';
-import { hasCompletedWelcome } from '../../auth/session';
 import {
   clearPendingSignup,
   readPendingSignup,
 } from '../../auth/signup-pending';
 import { useAuth } from '../../auth/useAuth';
+import { postAuthDestination } from '../../lib/postAuthDestination';
 import {
   AuthCard,
   AuthError,
@@ -51,7 +51,7 @@ export function VerifyEmailPage() {
       if (password) {
         await loginWithPassword(email, password);
         clearPendingSignup();
-        navigate(hasCompletedWelcome() ? '/app/chat' : '/welcome', { replace: true });
+        navigate(postAuthDestination(), { replace: true });
         return;
       }
 

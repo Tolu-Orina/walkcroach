@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { CognitoAuthError, cognitoErrorMessage } from '../../auth/cognito-idp';
-import { hasCompletedWelcome } from '../../auth/session';
+import { postAuthDestination } from '../../lib/postAuthDestination';
 import { stashPendingSignup } from '../../auth/signup-pending';
 import { useAuth } from '../../auth/useAuth';
 import {
@@ -21,13 +21,7 @@ export function SignInPage() {
   const [busy, setBusy] = useState(false);
 
   const verified = params.get('verified') === '1';
-  const nextParam = params.get('next');
-  const next =
-    nextParam && nextParam.startsWith('/')
-      ? nextParam
-      : hasCompletedWelcome()
-        ? '/app/chat'
-        : '/welcome';
+  const next = postAuthDestination(params.get('next'));
 
   if (status === 'authenticated') {
     return <Navigate to={next} replace />;

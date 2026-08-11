@@ -10,6 +10,7 @@ import {
 } from '@walkcroach/agent-harness';
 import { requireAuth, type AuthContext } from '../auth.js';
 import { jsonResponse } from '../http.js';
+import { metricLog } from '../util.js';
 import {
   handleCreateCheckpoint,
   handleExportProject,
@@ -88,6 +89,8 @@ import {
   handleDeclineConnectorRun,
   handleDisconnectConnectorWeb,
   handleExecuteConnectorRun,
+  handleGoogleDriveImport,
+  handleGoogleDrivePickerSession,
   handleListConnectorRuns,
   handleListConnectorsWeb,
   handleProposeConnectorAction,
@@ -184,6 +187,64 @@ function mapProjectDetail(row: ProjectRow) {
 
 function isProjectsListPath(path: string): boolean {
   return path === '/projects' || /\/projects\/?$/.test(path);
+}
+
+type IngestResult = {
+  chunkCount: number;
+  ingestStatus: 'ok' | 'failed' | 'skipped';
+  ingestError?: string;
+};
+
+async function tryEmbedProjectDocument(params: {
+  db: ReturnType<typeof createDbClient>;
+  documentId: string;
+  projectId: string;
+  text: string;
+}): Promise<IngestResult> {
+  try {
+    const ingested = await embedProjectDocument(params);
+    if (ingested.chunkCount > 0) {
+      metricLog('ProjectDocIngest', {
+        status: 'ok',
+        documentId: params.documentId,
+        projectId: params.projectId,
+        chunkCount: ingested.chunkCount,
+      });
+      return { chunkCount: ingested.chunkCount, ingestStatus: 'ok' };
+    }
+    metricLog('ProjectDocIngest', {
+      status: 'failed',
+      reason: 'zero_chunks',
+      documentId: params.documentId,
+      projectId: params.projectId,
+    });
+    return {
+      chunkCount: 0,
+      ingestStatus: 'failed',
+      ingestError: 'Indexing produced no chunks. Try again or check document text.',
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(
+      JSON.stringify({
+        metric: 'ProjectDocIngest',
+        status: 'failed',
+        documentId: params.documentId,
+        projectId: params.projectId,
+        error: message.slice(0, 500),
+      }),
+    );
+    metricLog('ProjectDocIngest', {
+      status: 'failed',
+      documentId: params.documentId,
+      projectId: params.projectId,
+    });
+    return {
+      chunkCount: 0,
+      ingestStatus: 'failed',
+      ingestError: message.slice(0, 280),
+    };
+  }
 }
 
 export async function handleRest(
@@ -689,11 +750,86 @@ export async function handleRest(
     /\/projects\/([^/]+)\/documents\/?$/,
   );
   const documentsProjectId = documentsListMatch?.[1];
+  const documentReindexMatch = path.match(
+    /\/projects\/([^/]+)\/documents\/([^/]+)\/reindex\/?$/,
+  );
   const documentItemMatch = path.match(
     /\/projects\/([^/]+)\/documents\/([^/]+)\/?$/,
   );
   const documentItemProjectId = documentItemMatch?.[1];
   const documentId = documentItemMatch?.[2];
+
+  if (
+    method === 'POST' &&
+    documentReindexMatch?.[1] &&
+    documentReindexMatch[2]
+  ) {
+    const reindexProjectId = documentReindexMatch[1];
+    const reindexDocId = documentReindexMatch[2];
+    const authResult = await requireAuth(headers);
+    if ('error' in authResult) {
+      return jsonResponse(authResult.status, { error: authResult.error });
+    }
+    const db = createDbClient();
+    try {
+      const project = await assertProjectOwner(
+        db,
+        reindexProjectId,
+        authResult,
+      );
+      if (!project) {
+        return jsonResponse(404, { error: 'project not found' });
+      }
+      const { rows } = await db.query<{
+        id: string;
+        name: string;
+        mime: string;
+        byte_size: string | number;
+        created_at: Date;
+        text_content: string | null;
+      }>(
+        `SELECT id, name, mime, byte_size, created_at, text_content
+         FROM project_documents
+         WHERE id = $1::uuid AND project_id = $2::uuid`,
+        [reindexDocId, reindexProjectId],
+      );
+      const row = rows[0];
+      if (!row) {
+        return jsonResponse(404, { error: 'document not found' });
+      }
+      const textContent = row.text_content ?? '';
+      if (!textContent.trim()) {
+        return jsonResponse(422, {
+          error: 'This document has no text content to index.',
+          code: 'no_text',
+          ingestStatus: 'skipped',
+        });
+      }
+      const ingest = await tryEmbedProjectDocument({
+        db,
+        documentId: row.id,
+        projectId: reindexProjectId,
+        text: textContent,
+      });
+      await db.query(
+        `UPDATE projects SET updated_at = now() WHERE id = $1::uuid`,
+        [reindexProjectId],
+      );
+      return jsonResponse(200, {
+        id: row.id,
+        name: row.name,
+        mime: row.mime,
+        byteSize: Number(row.byte_size) || 0,
+        createdAt: row.created_at.toISOString(),
+        hasText: true,
+        chunkCount: ingest.chunkCount,
+        ingestStatus: ingest.ingestStatus,
+        ingestError: ingest.ingestError,
+      });
+    } finally {
+      await db.close();
+    }
+  }
 
   if (method === 'GET' && documentsProjectId && !documentId) {
     const authResult = await requireAuth(headers);
@@ -804,19 +940,17 @@ export async function handleRest(
       let ingestStatus: 'ok' | 'failed' | 'skipped' = textContent.trim()
         ? 'failed'
         : 'skipped';
+      let ingestError: string | undefined;
       if (textContent.trim()) {
-        try {
-          const ingested = await embedProjectDocument({
-            db,
-            documentId: row.id,
-            projectId: documentsProjectId,
-            text: textContent,
-          });
-          chunkCount = ingested.chunkCount;
-          ingestStatus = chunkCount > 0 ? 'ok' : 'failed';
-        } catch {
-          ingestStatus = 'failed';
-        }
+        const ingest = await tryEmbedProjectDocument({
+          db,
+          documentId: row.id,
+          projectId: documentsProjectId,
+          text: textContent,
+        });
+        chunkCount = ingest.chunkCount;
+        ingestStatus = ingest.ingestStatus;
+        ingestError = ingest.ingestError;
       }
       return jsonResponse(201, {
         id: row.id,
@@ -827,6 +961,7 @@ export async function handleRest(
         hasText: Boolean(textContent.trim()),
         chunkCount,
         ingestStatus,
+        ingestError,
       });
     } finally {
       await db.close();
@@ -862,6 +997,60 @@ export async function handleRest(
         [documentItemProjectId],
       );
       return jsonResponse(200, { ok: true, id: documentId });
+    } finally {
+      await db.close();
+    }
+  }
+
+  if (method === 'GET' && documentItemProjectId && documentId) {
+    const authResult = await requireAuth(headers);
+    if ('error' in authResult) {
+      return jsonResponse(authResult.status, { error: authResult.error });
+    }
+    const db = createDbClient();
+    try {
+      const project = await assertProjectOwner(
+        db,
+        documentItemProjectId,
+        authResult,
+      );
+      if (!project) {
+        return jsonResponse(404, { error: 'project not found' });
+      }
+      const { rows } = await db.query<{
+        id: string;
+        name: string;
+        mime: string;
+        byte_size: string | number;
+        created_at: Date;
+        text_content: string | null;
+      }>(
+        `SELECT id, name, mime, byte_size, created_at, text_content
+         FROM project_documents
+         WHERE id = $1::uuid AND project_id = $2::uuid`,
+        [documentId, documentItemProjectId],
+      );
+      const row = rows[0];
+      if (!row) {
+        return jsonResponse(404, { error: 'document not found' });
+      }
+      const textContent = row.text_content ?? '';
+      if (!textContent.trim()) {
+        return jsonResponse(422, {
+          error: 'This document has no text content to attach.',
+          code: 'no_text',
+        });
+      }
+      return jsonResponse(200, {
+        id: row.id,
+        name: row.name,
+        mime: row.mime,
+        byteSize: Number(row.byte_size) || 0,
+        createdAt: row.created_at.toISOString(),
+        textContent: textContent.slice(0, 2_000_000),
+        textPreview: textContent.slice(0, 20_000),
+        hasText: true,
+      });
     } finally {
       await db.close();
     }
@@ -1631,6 +1820,46 @@ export async function handleRest(
     const db = createDbClient();
     try {
       return await handleConnectorOauthCallback(db, authResult, body);
+    } finally {
+      await db.close();
+    }
+  }
+
+  if (
+    method === 'POST' &&
+    (path === '/connectors/google_drive/picker-session' ||
+      path.endsWith('/connectors/google_drive/picker-session'))
+  ) {
+    const authResult = await requireAuth(headers);
+    if ('error' in authResult) {
+      return jsonResponse(authResult.status, { error: authResult.error });
+    }
+    const db = createDbClient();
+    try {
+      return await handleGoogleDrivePickerSession(db, authResult);
+    } finally {
+      await db.close();
+    }
+  }
+
+  if (
+    method === 'POST' &&
+    (path === '/connectors/google_drive/import' ||
+      path.endsWith('/connectors/google_drive/import'))
+  ) {
+    const authResult = await requireAuth(headers);
+    if ('error' in authResult) {
+      return jsonResponse(authResult.status, { error: authResult.error });
+    }
+    let body: { fileIds?: unknown } = {};
+    try {
+      body = JSON.parse(rawBody || '{}') as typeof body;
+    } catch {
+      return jsonResponse(400, { error: 'invalid_json' });
+    }
+    const db = createDbClient();
+    try {
+      return await handleGoogleDriveImport(db, authResult, body);
     } finally {
       await db.close();
     }

@@ -253,6 +253,22 @@ export async function listProjectDocuments(
   return data.documents ?? [];
 }
 
+export type ProjectDocumentDetail = ProjectDocument & {
+  textContent: string;
+  textPreview: string;
+};
+
+export async function getProjectDocument(
+  projectId: string,
+  documentId: string,
+): Promise<ProjectDocumentDetail> {
+  const res = await fetch(
+    `${API_URL}/projects/${projectId}/documents/${encodeURIComponent(documentId)}`,
+    { headers: authHeaders() },
+  );
+  return parseJson(res);
+}
+
 export async function createProjectDocument(
   projectId: string,
   input: { name: string; mime?: string; textContent: string },
@@ -262,6 +278,20 @@ export async function createProjectDocument(
     headers: authHeaders(),
     body: JSON.stringify(input),
   });
+  return parseJson(res);
+}
+
+export async function reindexProjectDocument(
+  projectId: string,
+  documentId: string,
+): Promise<ProjectDocument> {
+  const res = await fetch(
+    `${API_URL}/projects/${projectId}/documents/${encodeURIComponent(documentId)}/reindex`,
+    {
+      method: 'POST',
+      headers: authHeaders(),
+    },
+  );
   return parseJson(res);
 }
 
@@ -1215,6 +1245,60 @@ export async function disconnectConnector(provider: string): Promise<void> {
     { method: 'DELETE', headers: authHeaders() },
   );
   await parseJson(res);
+}
+
+export type DrivePickerSession = {
+  accessToken: string;
+  expiresIn: number;
+  clientId: string;
+  apiKey: string;
+  connectUrl: string;
+};
+
+export async function createGoogleDrivePickerSession(): Promise<DrivePickerSession> {
+  const res = await fetch(`${API_URL}/connectors/google_drive/picker-session`, {
+    method: 'POST',
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    let code = '';
+    let message = text || `${res.status} ${res.statusText}`;
+    try {
+      const body = JSON.parse(text) as { error?: string; code?: string };
+      code = body.code ?? '';
+      message = body.error ?? message;
+    } catch {
+      /* raw text */
+    }
+    const err = new Error(message) as Error & { code?: string; status?: number };
+    err.code = code || (res.status === 404 ? 'not_connected' : undefined);
+    err.status = res.status;
+    throw err;
+  }
+  return res.json() as Promise<DrivePickerSession>;
+}
+
+export type DriveImportedAttachment = {
+  name: string;
+  mime: string;
+  size: number;
+  textPreview: string;
+  contentText?: string;
+  contentBase64?: string;
+  source: 'google_drive';
+  sourceId: string;
+};
+
+export async function importGoogleDriveFiles(
+  fileIds: string[],
+): Promise<{ attachments: DriveImportedAttachment[] }> {
+  const res = await fetch(`${API_URL}/connectors/google_drive/import`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ fileIds }),
+  });
+  return parseJson(res);
 }
 
 export async function executeConnectorRun(

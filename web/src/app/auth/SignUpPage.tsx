@@ -16,7 +16,7 @@ export function SignUpPage() {
   const [busy, setBusy] = useState(false);
 
   if (status === 'authenticated') {
-    return <Navigate to="/app/chat" replace />;
+    return <Navigate to="/app/resume" replace />;
   }
 
   const onSubmit = async (e: FormEvent) => {

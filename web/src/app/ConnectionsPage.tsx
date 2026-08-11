@@ -68,7 +68,7 @@ export function ConnectionsPage() {
         Connections
       </h1>
       <p className="mt-2 text-sm text-mist">
-        Connect Gmail, Calendar, Sheets, Slack, Stripe, or HubSpot. Tokens stay
+        Connect Gmail, Calendar, Sheets, Drive, Slack, Stripe, or HubSpot. Tokens stay
         in Secrets Manager — never in the browser.
       </p>
 
