@@ -8,9 +8,8 @@ import { SurfacePairSection } from './SurfacePairSection';
 import { SURFACE_PAIRS } from './surfaces';
 
 /**
- * WalkCroach platform landing — Meridian Slate.
- * Primary funnel: memory platform (B). Secondary: coding agents (A).
- * See docs/dual-funnel-messaging.md.
+ * WalkCroach platform landing — ivory canvas + brass accent.
+ * Footer stays on the dark band.
  */
 export function LandingPageView() {
   const { status, cognitoEnabled, devAuthAllowed } = useAuth();

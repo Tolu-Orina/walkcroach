@@ -11,7 +11,7 @@ type Props = {
   showGuest?: boolean;
 };
 
-/** Product-first hero — memory headline verbatim; CTAs include coding agents. */
+/** Product-first hero — PM copy (2026-08-11); live shared-memory preview. */
 export function LandingHero({ authenticated = false, showGuest = false }: Props) {
   const reduce = useReducedMotion();
   const desktopHref = desktopDownloadHref();
@@ -27,15 +27,20 @@ export function LandingHero({ authenticated = false, showGuest = false }: Props)
           className="max-w-xl"
         >
           <h1 className="font-display text-4xl font-extrabold leading-[1.05] tracking-[-0.03em] text-[var(--lp-ink)] sm:text-5xl lg:text-[3.25rem]">
-            Your one memory layer.
-            <span className="mt-2 block text-[var(--lp-accent)]">
-              Agentic Workspace
+            One memory.
+            <span className="mt-2 block">
+              Every surface you{' '}
+              <em className="italic font-extrabold text-[var(--lp-accent-bright)]">
+                build
+              </em>{' '}
+              on.
             </span>
           </h1>
           <p className="mt-6 text-lg font-medium leading-relaxed text-[var(--lp-muted)] sm:text-xl">
-            One CockroachDB memory graph shared by Web, Browser Extension, IDE
-            Extension, CLI, Desktop IDE, and SDK — so context follows you across
-            every surface.
+            Ask something in the browser, get the answer in your terminal.
+            WalkCroach keeps a single shared memory behind Web, your IDE, the
+            CLI, and everything else — so context never gets left behind when
+            you switch tools.
           </p>
           <div className="mt-8 flex flex-wrap items-center gap-3">
             {authenticated ? (

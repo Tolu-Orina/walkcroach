@@ -1,38 +1,37 @@
 /*
-  Landing — Meridian Slate + WalkCroach brand green
-  Favicon lime #c7e54a for fills; deeper olive for text accents (WCAG).
+  Landing — warm ivory canvas + brass accent (PM 2026-08-11).
   Scoped under .landing-meridian so the app shell keeps Graphite Lumen.
-  Dark remap: html[data-theme='dark'] — same preference pipe as the app
-  (walkcroach.theme.v1 / initTheme). Light product imagery stays as-is.
+  Footer band tokens (--lp-footer*) stay dark; do not ivory-wash the footer.
+  Logo / marketing PNGs keep current lime until PM ships brass artwork.
 */
 
 .landing-meridian {
-  --lp-canvas: #f4f6f8;
-  --lp-canvas-deep: #e8eef3;
-  --lp-ink: #0b1220;
-  --lp-muted: #5b6575;
-  --lp-panel: #ffffff;
-  --lp-line: #d5dde6;
-  /* Text / links / eyebrows — olive that passes AA on light canvas */
-  --lp-accent: #5a6618;
-  /* Brand lime from favicon — primary fills */
-  --lp-accent-bright: #c7e54a;
-  --lp-accent-hover: #b8d63a;
-  --lp-accent-soft: #f3f7d9;
-  --lp-on-accent: #0b1220;
+  --lp-canvas: #f6f1e6;
+  --lp-canvas-deep: #efe8da;
+  --lp-ink: #1a1208;
+  --lp-muted: #6b5e4e;
+  --lp-panel: #fffdf8;
+  --lp-line: #e0d5c4;
+  /* Text accents — deeper brass for AA on ivory */
+  --lp-accent: #a35f1f;
+  /* Bright brass fills + hero italic */
+  --lp-accent-bright: #c67d2e;
+  --lp-accent-hover: #b56f28;
+  --lp-accent-soft: #f3e6d4;
+  --lp-on-accent: #1a1208;
   --lp-footer: #0b1220;
   --lp-footer-muted: #94a3b8;
   --lp-radius: 0.75rem;
   --lp-radius-control: 0.5rem;
-  --lp-shadow: 0 1px 0 rgb(11 18 32 / 4%), 0 12px 32px rgb(11 18 32 / 8%);
-  --lp-shadow-hover: 0 1px 0 rgb(11 18 32 / 5%), 0 18px 40px rgb(11 18 32 / 12%);
-  --lp-nav-bg: rgb(244 246 248 / 88%);
-  --lp-nav-line: rgb(213 221 230 / 80%);
+  --lp-shadow: 0 1px 0 rgb(26 18 8 / 4%), 0 12px 32px rgb(26 18 8 / 8%);
+  --lp-shadow-hover: 0 1px 0 rgb(26 18 8 / 5%), 0 18px 40px rgb(26 18 8 / 12%);
+  --lp-nav-bg: rgb(246 241 230 / 88%);
+  --lp-nav-line: rgb(224 213 196 / 80%);
 
   min-height: 100%;
   background:
-    radial-gradient(900px 480px at 85% 8%, rgb(199 229 74 / 18%) 0%, transparent 55%),
-    radial-gradient(700px 420px at 8% 20%, rgb(11 18 32 / 4%) 0%, transparent 50%),
+    radial-gradient(900px 480px at 85% 8%, rgb(198 125 46 / 16%) 0%, transparent 55%),
+    radial-gradient(700px 420px at 8% 20%, rgb(26 18 8 / 4%) 0%, transparent 50%),
     linear-gradient(180deg, var(--lp-canvas) 0%, var(--lp-canvas-deep) 100%);
   color: var(--lp-ink);
   font-family: var(--font-sans);
@@ -40,21 +39,19 @@
   overflow-y: auto;
 }
 
-/* Dark Meridian — peer palette, not an invert of light */
+/* Dark Meridian — brass on slate; footer tokens unchanged */
 html[data-theme='dark'] .landing-meridian {
   --lp-canvas: #0b1220;
   --lp-canvas-deep: #070a12;
-  --lp-ink: #e8eef3;
-  --lp-muted: #94a3b8;
+  --lp-ink: #f6f1e6;
+  --lp-muted: #a89a88;
   --lp-panel: #141a24;
-  /* ≥3:1 vs canvas and panel for borders / UI chrome */
   --lp-line: #64748b;
-  --lp-accent: #c7e54a;
-  --lp-accent-bright: #c7e54a;
-  --lp-accent-hover: #d4ee6a;
-  --lp-accent-soft: rgb(199 229 74 / 14%);
-  --lp-on-accent: #0b1220;
-  /* Footer sits slightly below canvas so it still reads as a band */
+  --lp-accent: #e09a4f;
+  --lp-accent-bright: #c67d2e;
+  --lp-accent-hover: #d48c3f;
+  --lp-accent-soft: rgb(198 125 46 / 16%);
+  --lp-on-accent: #1a1208;
   --lp-footer: #070a12;
   --lp-footer-muted: #94a3b8;
   --lp-shadow: 0 1px 0 rgb(255 255 255 / 4%), 0 16px 40px rgb(0 0 0 / 45%);
@@ -63,8 +60,8 @@ html[data-theme='dark'] .landing-meridian {
   --lp-nav-line: rgb(100 116 139 / 45%);
 
   background:
-    radial-gradient(900px 480px at 85% 8%, rgb(199 229 74 / 10%) 0%, transparent 55%),
-    radial-gradient(700px 420px at 8% 20%, rgb(199 229 74 / 4%) 0%, transparent 50%),
+    radial-gradient(900px 480px at 85% 8%, rgb(198 125 46 / 12%) 0%, transparent 55%),
+    radial-gradient(700px 420px at 8% 20%, rgb(198 125 46 / 5%) 0%, transparent 50%),
     linear-gradient(180deg, var(--lp-canvas) 0%, var(--lp-canvas-deep) 100%);
 }
 
