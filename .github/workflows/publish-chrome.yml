@@ -171,7 +171,10 @@ jobs:
       #
       # Submission can fail for reasons that have nothing to do with the package:
       # CWS enforces that the dashboard's Store listing and Privacy practices
-      # tabs are complete, and returns 400 "Publish condition not met" if not.
+      # tabs are complete. Common 400: "Publish condition not met: Privacy
+      # policy link is not reachable" — the dashboard Privacy policy URL must
+      # be the live rinegan page (see chrome/store/PRIVACY_PRACTICES.md), not
+      # whatever was baked into an older listing.
       - name: Submit for review
         if: inputs.publish_only == true || (startsWith(github.ref, 'refs/tags/') && inputs.dry_run != true)
         env:

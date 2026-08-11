@@ -56,4 +56,6 @@ Open WalkCroach from the **toolbar**. Sign in opens WalkCroach Web `/connect/chr
 ## Privacy
 
 Live: https://walkcroach.rinegansolutions.com/chrome-privacy.html  
-Source: `../web/public/chrome-privacy.html` (redeploy Web after edits).
+Source: `../web/public/chrome-privacy.html` (redeploy Web after edits).  
+CWS publish checks the **dashboard** Privacy policy URL against that live page
+— see `store/PRIVACY_PRACTICES.md`.

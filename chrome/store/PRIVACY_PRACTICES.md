@@ -2,11 +2,24 @@
 
 Align every checkbox with the shipping manifest and the live privacy policy.
 
-**Privacy policy URL (paste exactly):**  
+**Privacy policy URL (paste exactly into the CWS dashboard Privacy practices tab):**  
 https://walkcroach.rinegansolutions.com/chrome-privacy.html
 
 Source file (must be redeployed with Web before submit):  
 `web/public/chrome-privacy.html`
+
+Google crawls **the dashboard field**, not the URL baked into the zip. Before
+`publish`, confirm the live page returns 200:
+
+```bash
+curl -sS -o /dev/null -w "%{http_code}\n" \
+  https://walkcroach.rinegansolutions.com/chrome-privacy.html
+```
+
+If publish fails with `400 Publish condition not met: Privacy policy link is not
+reachable`, the zip is fine — fix the dashboard URL (or the live page), then
+re-run `.github/workflows/publish-chrome.yml` with **`publish_only: true`**.
+Do not re-tag; CWS rejects a second upload of the same version.
 
 Reference: [CWS Privacy practices](https://developer.chrome.com/docs/webstore/cws-dashboard-privacy).
 

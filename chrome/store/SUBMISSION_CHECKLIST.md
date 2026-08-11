@@ -98,6 +98,15 @@ uploaded, or first run fails for every new installer.
 
 ## 5. Dashboard fields
 
+These live in the CWS Dev Console, not in the zip. A green tag workflow still
+fails at **Submit for review** if this tab is wrong.
+
+- [ ] **Privacy policy URL** (Privacy practices): paste exactly  
+      `https://walkcroach.rinegansolutions.com/chrome-privacy.html`  
+      and confirm it returns HTTP 200 from a cold fetch (see
+      `PRIVACY_PRACTICES.md`). Google returns  
+      `Publish condition not met: Privacy policy link is not reachable` when
+      this field still points at an old/dead host.
 - [ ] Permissions justification: paste `PERMISSION_JUSTIFICATIONS.md` in full,
       including `optional_host_permissions`, `identity` and `contextMenus`
 - [ ] Remote code: **No** — see that file's Remote code section; the signed
@@ -107,12 +116,19 @@ uploaded, or first run fails for every new installer.
 - [ ] Single purpose: the wording in `STORE_LISTING.md`
 - [ ] Screenshots: 5 current captures from `store/screenshots/`; regenerate with
       `npm run screenshots` if the UI changed since the last upload
-- [ ] Package: the `0.6.2` zip from `npm run zip:prod`
+- [ ] Package: the `0.6.2` zip from `npm run zip:prod` (or the
+      `chrome-v0.6.2` tag workflow)
 
 ---
 
-## 6. After upload
+## 6. After upload / submit recovery
 
+Release path: push tag `chrome-v*` → `.github/workflows/publish-chrome.yml`
+(upload, then publish). Manual `workflow_dispatch` defaults to dry-run.
+
+- [ ] If **upload** succeeded but **publish** failed (privacy URL, incomplete
+      Privacy practices, etc.): fix the dashboard, then re-run the workflow with
+      **`publish_only: true`**. Do not re-upload the same version — CWS rejects it.
 - [ ] Record the assigned extension ID in `enterprise/policies.json` and in the
       table at the top of this file
 - [ ] Add `chrome-extension://<id>` to the captures bucket CORS
