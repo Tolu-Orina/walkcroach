@@ -332,7 +332,9 @@ export { refreshProjectMemorySummary } from './project-memory.js';
 export {
   writeSharedSkill,
   listSharedSkills,
+  searchSharedSkills,
   type SharedSkillRecord,
+  type SharedSkillSearchHit,
 } from './skills.js';
 export {
   loadProjectKnowledge,

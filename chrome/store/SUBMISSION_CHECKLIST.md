@@ -1,4 +1,4 @@
-# Chrome Web Store submission checklist — v0.6.1
+# Chrome Web Store submission checklist — v0.6.2
 
 Supersedes the v0.1.4 checklist, which described a CORS hotfix and predates the
 permission model, the redesign, and connectors.
@@ -10,7 +10,7 @@ Production endpoints (never substitute localhost):
 | API | `https://api.walkcroach.rinegansolutions.com/v1` |
 | Privacy | `https://walkcroach.rinegansolutions.com/chrome-privacy.html` |
 | Product | `https://walkcroach.rinegansolutions.com` |
-| Extension version | `0.6.1` |
+| Extension version | `0.6.2` |
 | Extension ID | _already assigned — the listing has been live since 0.1.5. Read it from the dashboard URL and store it as the `EXTENSION_ID` secret in the `cws-publish` environment._ |
 
 ---
@@ -107,7 +107,7 @@ uploaded, or first run fails for every new installer.
 - [ ] Single purpose: the wording in `STORE_LISTING.md`
 - [ ] Screenshots: 5 current captures from `store/screenshots/`; regenerate with
       `npm run screenshots` if the UI changed since the last upload
-- [ ] Package: the `0.6.1` zip from `npm run zip:prod`
+- [ ] Package: the `0.6.2` zip from `npm run zip:prod`
 
 ---
 

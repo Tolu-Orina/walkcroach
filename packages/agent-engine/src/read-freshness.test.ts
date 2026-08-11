@@ -87,6 +87,8 @@ describe('content-aware freshness', () => {
     });
     expect(msg).toMatch(/\[edit_mismatch\]/);
     expect(msg).toMatch(/Do not retry the identical old_str/);
+    expect(msg).toMatch(/Do not switch edit_file/);
+    expect(msg).not.toMatch(/Prefer apply_patch/);
     expect(msg).toContain('hello world');
   });
 

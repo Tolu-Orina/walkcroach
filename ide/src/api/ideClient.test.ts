@@ -221,6 +221,32 @@ describe('createSharedSkillsBridge', () => {
     expect(mirrorCall?.[1]?.body).toContain('"sourceSurface":"ide"');
   });
 
+  it('searches via POST /ide/v1/skills/search', async () => {
+    const bridge = createSharedSkillsBridge({ getToken: async () => 'tok-1' });
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        skills: [
+          {
+            name: 'txn',
+            description: 'd',
+            body: 'b',
+            sourceSurface: 'ide',
+            createdAt: '1',
+            updatedAt: '2',
+            distance: 0.15,
+          },
+        ],
+      }),
+    );
+    expect(bridge.search).toBeTypeOf('function');
+    const hits = await bridge.search!({ query: 'retries', limit: 3 });
+    expect(hits[0]?.name).toBe('txn');
+    expect(hits[0]?.distance).toBe(0.15);
+    const call = fetchMock.mock.calls.at(-1);
+    expect(String(call?.[0])).toContain('/ide/v1/skills/search');
+    expect(call?.[1]?.method).toBe('POST');
+  });
+
   it('throws when not signed in', async () => {
     const bridge = createSharedSkillsBridge({ getToken: async () => undefined });
     await expect(bridge.list()).rejects.toThrow(/Not signed in/);

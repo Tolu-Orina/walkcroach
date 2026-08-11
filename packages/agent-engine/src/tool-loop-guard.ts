@@ -3,6 +3,9 @@
  * agent cannot retry the same dead-end forever.
  */
 
+import { normalizeEditPath } from './edit-anchor-guard.js';
+import { normalizeAnchorText } from './nearest-anchor.js';
+
 export const DEFAULT_IDENTICAL_FAILURE_LIMIT = 3;
 
 export type ToolLoopGuardState = {
@@ -12,6 +15,11 @@ export type ToolLoopGuardState = {
 
 export function emptyToolLoopGuard(): ToolLoopGuardState {
   return { fingerprint: null, streak: 0 };
+}
+
+/** Soft-normalize edit anchors so near-miss whitespace still shares a thrash fp. */
+export function softNormalizeEditAnchor(text: string): string {
+  return normalizeAnchorText(text);
 }
 
 /** Stable fingerprint for a tool invocation (name + relevant inputs). */
@@ -25,6 +33,32 @@ export function fingerprintToolCall(
     const cwd = String(args.cwd ?? '');
     const mode = String(args.mode ?? '');
     return `${name}|${stableJson({ cmd: normalizeCmd(cmd), cwd, mode })}`;
+  }
+  // Cross-tool: edit_file and apply_patch share an anchor fingerprint so
+  // switching tools does not reset thrash / identical-failure guards.
+  // Soft whitespace normalization collapses near-miss thrash; path is normalized.
+  if (name === 'edit_file' || name === 'apply_patch') {
+    const path = normalizeEditPath(String(args.path ?? ''));
+    const oldStrs: string[] = [];
+    if (name === 'edit_file') {
+      const o = String(args.old_str ?? '');
+      if (o) oldStrs.push(o);
+    } else if (Array.isArray(args.edits)) {
+      for (const row of args.edits) {
+        if (!row || typeof row !== 'object') continue;
+        const o = String((row as { old_str?: unknown }).old_str ?? '');
+        if (o) oldStrs.push(o);
+      }
+    }
+    const joined = oldStrs
+      .map((s) => softNormalizeEditAnchor(s))
+      .filter(Boolean)
+      .join('\n---\n');
+    const slim =
+      joined.length > 500
+        ? `${joined.slice(0, 200)}…(${joined.length})`
+        : joined;
+    return `edit_anchor|${stableJson({ path, old: slim })}`;
   }
   // Generic: name + sorted shallow keys (avoid huge blobs)
   const slim: Record<string, unknown> = {};
@@ -122,7 +156,21 @@ export function afterToolResult(
 }
 
 export function isLoopSensitiveTool(name: string): boolean {
-  return name === 'run_terminal' || name === 'verify';
+  return (
+    name === 'run_terminal' ||
+    name === 'verify' ||
+    name === 'edit_file' ||
+    name === 'apply_patch'
+  );
+}
+
+/** Stricter identical-failure limit for edit anchors (1 = refuse 2nd identical). */
+export function identicalFailureLimitFor(
+  name: string,
+  defaultLimit: number,
+): number {
+  if (name === 'edit_file' || name === 'apply_patch') return 1;
+  return defaultLimit;
 }
 
 export function buildStuckLoopNudge(state: ToolLoopGuardState): string {

@@ -27,6 +27,8 @@ import {
 import { createFakeHost } from './fake-host.js';
 import { executeTool } from './tools/execute.js';
 import { getToolDef } from './tools/defs.js';
+import { createEditAnchorFailCache } from './edit-anchor-guard.js';
+import { createEditPathMismatchState } from './edit-path-mismatch-guard.js';
 
 describe('P1 compact', () => {
   it('does not compact under threshold', () => {
@@ -148,6 +150,125 @@ describe('P1 patch', () => {
 
   it('tool def exists', () => {
     expect(getToolDef('apply_patch')?.name).toBe('apply_patch');
+  });
+
+  it('executeTool edit_file applies whitespace-tolerant anchors', async () => {
+    const host = createFakeHost({
+      autoApprove: true,
+      files: { 'src/a.ts': '  const a = 1;  \n' },
+    });
+    const result = await executeTool({
+      host,
+      tool: {
+        toolUseId: 'fuzzy1',
+        name: 'edit_file',
+        input: {
+          path: 'src/a.ts',
+          old_str: 'const a = 1;\n',
+          new_str: 'const a = 2;\n',
+        },
+      },
+    });
+    expect(result.status).toBe('success');
+    expect(host.files.get('src/a.ts')).toBe('  const a = 2;\n');
+  });
+
+  it('read_file does not unlock a failed edit anchor', async () => {
+    const host = createFakeHost({
+      autoApprove: true,
+      files: { 'src/a.ts': 'hello\n' },
+    });
+    const cache = createEditAnchorFailCache();
+    const fail = await executeTool({
+      host,
+      tool: {
+        toolUseId: 'e1',
+        name: 'edit_file',
+        input: {
+          path: 'src/a.ts',
+          old_str: 'nope',
+          new_str: 'x',
+        },
+      },
+      editAnchorFails: cache,
+    });
+    expect(fail.status).toBe('error');
+    expect(fail.content).toMatch(/edit_mismatch/);
+
+    await executeTool({
+      host,
+      tool: {
+        toolUseId: 'r1',
+        name: 'read_file',
+        input: { path: 'src/a.ts' },
+      },
+      editAnchorFails: cache,
+    });
+
+    const again = await executeTool({
+      host,
+      tool: {
+        toolUseId: 'e2',
+        name: 'edit_file',
+        input: {
+          path: 'src/a.ts',
+          old_str: 'nope',
+          new_str: 'x',
+        },
+      },
+      editAnchorFails: cache,
+    });
+    expect(again.status).toBe('error');
+    expect(again.content).toMatch(/Refused identical old_str/);
+  });
+
+  it('path-level gate blocks surgical edits after N mismatches', async () => {
+    const host = createFakeHost({
+      autoApprove: true,
+      files: { 'src/a.ts': 'hello world\n' },
+    });
+    const pathState = createEditPathMismatchState(2);
+    const anchors = createEditAnchorFailCache();
+    const fail1 = await executeTool({
+      host,
+      tool: {
+        toolUseId: 'm1',
+        name: 'edit_file',
+        input: { path: 'src/a.ts', old_str: 'zzz1', new_str: 'x' },
+      },
+      editAnchorFails: anchors,
+      editPathMismatches: pathState,
+    });
+    expect(fail1.status).toBe('error');
+    expect(fail1.content).toMatch(/path_gate/);
+    expect(fail1.content).toMatch(/≤400 lines|small file/i);
+
+    const fail2 = await executeTool({
+      host,
+      tool: {
+        toolUseId: 'm2',
+        name: 'edit_file',
+        input: { path: 'src/a.ts', old_str: 'zzz2', new_str: 'x' },
+      },
+      editAnchorFails: anchors,
+      editPathMismatches: pathState,
+    });
+    expect(fail2.status).toBe('error');
+    expect(fail2.content).toMatch(/blocked|write_file/i);
+
+    const blocked = await executeTool({
+      host,
+      tool: {
+        toolUseId: 'm3',
+        name: 'edit_file',
+        input: { path: 'src/a.ts', old_str: 'zzz3', new_str: 'x' },
+      },
+      editAnchorFails: anchors,
+      editPathMismatches: pathState,
+    });
+    expect(blocked.status).toBe('error');
+    expect(blocked.content).toMatch(/Path-level gate/);
+    expect(blocked.content).toMatch(/write_file/);
   });
 
   it('low-friction auto-approve for small patches', () => {

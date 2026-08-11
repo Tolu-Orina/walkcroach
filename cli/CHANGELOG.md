@@ -8,6 +8,15 @@ follow semver — see `VERSIONING.md`. `0.3.0` is the first real release;
 npm trusted publishing (OIDC) could be configured — it cannot perform a
 package's first publish.
 
+## [Unreleased]
+
+## [0.3.1] — 2026-08-11
+
+### Changed
+
+- Release bump aligned with platform clients; ships the current monorepo
+  `@walkcroach/sdk` / `@walkcroach/agent-engine` via the CLI bundle.
+
 ## [0.3.0] — 2026-08-01 — First npm release: PKCE sign-in and local MCP servers
 
 ### Security

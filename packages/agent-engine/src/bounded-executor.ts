@@ -278,7 +278,7 @@ export function recoveryHintForClass(
     case 'not_found':
       return `${prefix} Missing path/resource. List/search to locate the real path, then retry with corrected arguments.`;
     case 'edit_mismatch':
-      return `${prefix} Edit/stale mismatch. Re-read the file first; widen old_str with 3–5 unique surrounding lines (do not guess indentation); prefer apply_patch for multi-site. Do not retry the identical old_str.`;
+      return `${prefix} Edit/stale mismatch. Copy a NEW old_str verbatim from the file excerpt (3–5 unique surrounding lines; do not guess indentation). Do not retry the identical old_str. Do not switch edit_file ↔ apply_patch with the same anchors. On files ≤400 lines, prefer write_file after repeated mismatches.`;
     case 'syntax':
       return `${prefix} Syntax/parse failure. Re-read the file, fix the specific error, then verify.`;
     case 'rate_limit':

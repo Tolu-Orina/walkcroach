@@ -6,6 +6,13 @@ Versioning follows [SemVer](https://semver.org/) and `docs/VERSIONING.md`.
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-08-11
+
+### Changed
+
+- Patch release for first-party clients (Chrome / CLI / IDE / Web) consuming
+  `file:../packages/sdk`; no public API break vs 0.2.0.
+
 ## [0.2.0] — 2026-08-07
 
 ### Changed

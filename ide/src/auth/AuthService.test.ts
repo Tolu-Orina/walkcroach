@@ -13,7 +13,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SECRET_KEYS } from '@walkcroach/agent-engine';
-import { AuthService, jwtExpiresInSeconds } from './session.js';
+import { AuthService, classifyCognitoJwt, jwtExpiresInSeconds } from './session.js';
 
 /** Adapter matching the `vscode.SecretStorage` shape the service expects. */
 function secretStorage(initial: Record<string, string> = {}) {
@@ -95,6 +95,7 @@ describe('getAccessToken', () => {
       json: async () => ({
         AuthenticationResult: {
           AccessToken: 'fresh-token',
+          IdToken: 'fresh-id',
           ExpiresIn: 3600,
         },
       }),
@@ -104,6 +105,7 @@ describe('getAccessToken', () => {
 
     expect(token).toBe('fresh-token');
     expect(map.get(SECRET_KEYS.cognitoAccessToken)).toBe('fresh-token');
+    expect(map.get(SECRET_KEYS.cognitoIdToken)).toBe('fresh-id');
     // And the new expiry is recorded, or the next call refreshes again.
     expect(Number(map.get(SECRET_KEYS.cognitoExpiresAt))).toBeGreaterThan(Date.now());
   });
@@ -236,6 +238,50 @@ describe('storeAccessToken', () => {
     const { api, map } = secretStorage();
     await new AuthService(api).storeAccessToken('  padded-token \n');
     expect(map.get(SECRET_KEYS.cognitoAccessToken)).toBe('padded-token');
+  });
+});
+
+describe('storeTokens + getApiBearerToken', () => {
+  it('keeps access and id in separate slots (CLI / Chrome parity)', async () => {
+    const { api, map } = secretStorage();
+    await new AuthService(api).storeTokens({
+      access_token: 'at',
+      id_token: 'it',
+      refresh_token: 'rt',
+      expires_in: 3600,
+    });
+    expect(map.get(SECRET_KEYS.cognitoAccessToken)).toBe('at');
+    expect(map.get(SECRET_KEYS.cognitoIdToken)).toBe('it');
+    expect(map.get(SECRET_KEYS.cognitoRefreshToken)).toBe('rt');
+  });
+
+  it('prefers id token as IDE BFF bearer after a live access session', async () => {
+    const { api } = secretStorage({
+      [SECRET_KEYS.cognitoAccessToken]: 'access-tok',
+      [SECRET_KEYS.cognitoIdToken]: 'id-tok',
+      [SECRET_KEYS.cognitoExpiresAt]: futureExpiry(3600_000),
+    });
+    const service = new AuthService(api);
+    expect(await service.getAccessToken()).toBe('access-tok');
+    expect(await service.getApiBearerToken()).toBe('id-tok');
+  });
+
+  it('falls back to access token when no id is stored', async () => {
+    const { api } = secretStorage({
+      [SECRET_KEYS.cognitoAccessToken]: 'access-only',
+      [SECRET_KEYS.cognitoExpiresAt]: futureExpiry(3600_000),
+    });
+    expect(await new AuthService(api).getApiBearerToken()).toBe('access-only');
+  });
+});
+
+describe('classifyCognitoJwt', () => {
+  it('reads token_use from the payload', () => {
+    const access = `x.${Buffer.from(JSON.stringify({ token_use: 'access' })).toString('base64url')}.y`;
+    const id = `x.${Buffer.from(JSON.stringify({ token_use: 'id' })).toString('base64url')}.y`;
+    expect(classifyCognitoJwt(access)).toBe('access');
+    expect(classifyCognitoJwt(id)).toBe('id');
+    expect(classifyCognitoJwt('not-a-jwt')).toBe('opaque');
   });
 });
 

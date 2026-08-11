@@ -18,6 +18,7 @@ export type PostToWebview = (msg: HostToWebviewMessage) => void;
  */
 export class MessageBridge {
   private readonly coalescer: TokenDeltaCoalescer;
+  private readonly thinkingCoalescer: TokenDeltaCoalescer;
   private disposed = false;
 
   constructor(private readonly post: PostToWebview) {
@@ -25,6 +26,16 @@ export class MessageBridge {
       if (this.disposed) return;
       this.post({ type: 'TOKEN_DELTA', text });
     }, 16);
+    this.thinkingCoalescer = new TokenDeltaCoalescer((text) => {
+      if (this.disposed) return;
+      this.post({ type: 'THINKING_DELTA', text });
+    }, 32);
+  }
+
+  private postOpaqueThinking(): void {
+    if (this.disposed) return;
+    this.thinkingCoalescer.flushNow();
+    this.post({ type: 'THINKING_DELTA', text: '', opaque: true });
   }
 
   parseIncoming(raw: unknown): WebviewToHostMessage | null {
@@ -38,12 +49,21 @@ export class MessageBridge {
       case 'token_delta':
         this.coalescer.push(event.text);
         return;
+      case 'thinking_delta':
+        if (event.opaque) {
+          this.postOpaqueThinking();
+          return;
+        }
+        if (event.text) this.thinkingCoalescer.push(event.text);
+        return;
       case 'phase':
         this.coalescer.flushNow();
+        this.thinkingCoalescer.flushNow();
         this.post({ type: 'PHASE', phase: event.phase });
         return;
       case 'tool_card':
         this.coalescer.flushNow();
+        this.thinkingCoalescer.flushNow();
         this.post({
           type: 'TOOL_CARD',
           id: event.id,
@@ -54,6 +74,7 @@ export class MessageBridge {
         return;
       case 'approval_request': {
         this.coalescer.flushNow();
+        this.thinkingCoalescer.flushNow();
         const r = event.request;
         this.post({
           type: 'APPROVAL_REQUEST',
@@ -72,6 +93,7 @@ export class MessageBridge {
       }
       case 'subagent':
         this.coalescer.flushNow();
+        this.thinkingCoalescer.flushNow();
         this.post({
           type: 'SUBAGENT',
           id: event.id,
@@ -82,10 +104,12 @@ export class MessageBridge {
         return;
       case 'todos':
         this.coalescer.flushNow();
+        this.thinkingCoalescer.flushNow();
         this.post({ type: 'TODOS', todos: event.todos });
         return;
       case 'done':
         this.coalescer.flushNow();
+        this.thinkingCoalescer.flushNow();
         this.post({
           type: 'DONE',
           reason: event.reason,
@@ -95,6 +119,7 @@ export class MessageBridge {
         return;
       case 'error':
         this.coalescer.flushNow();
+        this.thinkingCoalescer.flushNow();
         this.post({
           type: 'ERROR',
           message: event.message,
@@ -103,10 +128,12 @@ export class MessageBridge {
         return;
       case 'warning':
         this.coalescer.flushNow();
+        this.thinkingCoalescer.flushNow();
         this.post({ type: 'WARNING', message: event.message });
         return;
       case 'cache_usage':
         this.coalescer.flushNow();
+        this.thinkingCoalescer.flushNow();
         this.post({
           type: 'CACHE_USAGE',
           cacheReadInputTokens: event.cacheReadInputTokens,
@@ -115,6 +142,7 @@ export class MessageBridge {
         return;
       case 'telemetry':
         this.coalescer.flushNow();
+        this.thinkingCoalescer.flushNow();
         this.post({
           type: 'TELEMETRY',
           name: event.name,
@@ -180,17 +208,20 @@ export class MessageBridge {
 
   postError(message: string): void {
     this.coalescer.flushNow();
+    this.thinkingCoalescer.flushNow();
     this.post({ type: 'ERROR', message });
   }
 
   postWarning(message: string): void {
     this.coalescer.flushNow();
+    this.thinkingCoalescer.flushNow();
     this.post({ type: 'WARNING', message });
   }
 
   dispose(): void {
     // Flush buffered tokens while still accepting posts, then seal.
     this.coalescer.dispose();
+    this.thinkingCoalescer.dispose();
     this.disposed = true;
   }
 }

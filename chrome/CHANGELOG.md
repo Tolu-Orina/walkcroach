@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.6.2 — 2026-08-11
+
+### Fixed
+
+- Production-readiness and sidepanel polish: Cognito dual-token handoff, credit
+  meter errors, propose→confirm deletes, global success notes, NavRail a11y,
+  recall Copy / empty-match, glass reduced-transparency, UX writing humanization.
+
+### Changed
+
+- Default unnamed workspace is **General** (was **Saved**, which collided with
+  the Saved tab).
+
 ## 0.6.1 — 2026-08-01
 
 ### Fixed

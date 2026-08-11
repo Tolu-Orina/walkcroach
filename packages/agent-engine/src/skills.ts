@@ -5,7 +5,8 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
-import { dirname, join, basename } from 'node:path';
+import { homedir } from 'node:os';
+import { dirname, join, basename, isAbsolute, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   BUNDLED_SKILLS,
@@ -16,7 +17,7 @@ import type { SharedSkillsBridge } from './shared-skills.js';
 export type SkillMeta = {
   name: string;
   description: string;
-  source: 'bundled' | 'workspace' | 'shared';
+  source: 'bundled' | 'workspace' | 'user' | 'shared';
   path?: string;
   origin?: string;
 };
@@ -137,6 +138,8 @@ export class SkillsRegistry {
       sharedSkills?: SharedSkillsBridge;
       /** Absolute path to cockroachdb-official.generated.json (IDE sets this). */
       officialSkillsJsonPath?: string;
+      /** Subset of workspaceRoots that are user-global (~/.cursor/skills, …). */
+      userGlobalRoots?: string[];
     },
   ): Promise<void> {
     this.metas = [];
@@ -178,8 +181,12 @@ export class SkillsRegistry {
       }
     }
 
+    const userSet = new Set(
+      (opts?.userGlobalRoots ?? []).map((r) => normalize(r)),
+    );
     for (const root of workspaceRoots) {
-      await this.scanDir(root, { overwrite: true });
+      const source = userSet.has(normalize(root)) ? 'user' : 'workspace';
+      await this.scanDir(root, { overwrite: true, source });
     }
   }
 
@@ -187,11 +194,11 @@ export class SkillsRegistry {
     return [...this.metas];
   }
 
-  /** Cheap catalog for system prompt (~100 tokens each). */
+  /** Cheap catalog for system prompt (~100 tokens each). Includes origin tag. */
   catalogText(): string {
     if (!this.metas.length) return '(no skills loaded)';
     return this.metas
-      .map((m) => `- ${m.name}: ${m.description}`)
+      .map((m) => `- ${m.name} [${m.source}]: ${m.description}`)
       .join('\n');
   }
 
@@ -205,6 +212,33 @@ export class SkillsRegistry {
       body,
       ...(refs && Object.keys(refs).length ? { references: refs } : {}),
     };
+  }
+
+  /**
+   * Ensure a shared-skill search hit is loadable via load_skill even when it
+   * was outside the default list() window.
+   */
+  ingestShared(params: {
+    name: string;
+    description: string;
+    body: string;
+    sourceSurface?: string;
+  }): void {
+    const name = params.name
+      .toLowerCase()
+      .replace(/[^a-z0-9-]+/g, '-')
+      .replace(/^-|-$/g, '');
+    if (!name) return;
+    this.upsert({
+      name,
+      description: params.description,
+      source: 'shared',
+      origin: params.sourceSurface
+        ? `walkcroach:shared:${params.sourceSurface}`
+        : 'walkcroach:shared',
+      body: params.body,
+      overwrite: true,
+    });
   }
 
   /** Format full skill for the model (body + optional references). */
@@ -239,7 +273,7 @@ export class SkillsRegistry {
   private upsert(params: {
     name: string;
     description: string;
-    source: 'bundled' | 'workspace' | 'shared';
+    source: 'bundled' | 'workspace' | 'user' | 'shared';
     body: string;
     path?: string;
     origin?: string;
@@ -268,7 +302,10 @@ export class SkillsRegistry {
 
   private async scanDir(
     dir: string,
-    opts: { overwrite?: boolean } = {},
+    opts: {
+      overwrite?: boolean;
+      source?: 'workspace' | 'user';
+    } = {},
   ): Promise<void> {
     let entries;
     try {
@@ -295,7 +332,10 @@ export class SkillsRegistry {
   private async loadFile(
     path: string,
     fallbackName: string,
-    opts: { overwrite?: boolean } = {},
+    opts: {
+      overwrite?: boolean;
+      source?: 'workspace' | 'user';
+    } = {},
   ): Promise<void> {
     const st = await stat(path);
     if (!st.isFile()) return;
@@ -306,8 +346,12 @@ export class SkillsRegistry {
       .replace(/[^a-z0-9-]+/g, '-')
       .replace(/^-|-$/g, '');
     if (!name) return;
+    const source = opts.source ?? 'workspace';
     const description =
-      parsed.description ?? `Workspace skill from ${path}`;
+      parsed.description ??
+      (source === 'user'
+        ? `User skill from ${path}`
+        : `Workspace skill from ${path}`);
 
     const references: Record<string, string> = {};
     const refDir = join(dirname(path), 'references');
@@ -324,7 +368,7 @@ export class SkillsRegistry {
     this.upsert({
       name,
       description,
-      source: 'workspace',
+      source,
       body: parsed.body,
       path,
       references,
@@ -343,3 +387,63 @@ export function defaultSkillRoots(workspaceRoot?: string): string[] {
     join(workspaceRoot, '.claude', 'skills'),
   ];
 }
+
+/** User-global skill dirs (Cursor + WalkCroach). */
+export function userGlobalSkillRoots(home: string = homedir()): string[] {
+  return [join(home, '.cursor', 'skills'), join(home, '.walkcroach', 'skills')];
+}
+
+export type ResolveSkillRootsOpts = {
+  /** Extra absolute or workspace-relative roots (IDE settings). */
+  extraRoots?: string[];
+  /** Include ~/.cursor/skills and ~/.walkcroach/skills (default true). */
+  includeUserGlobal?: boolean;
+  /** Override home for tests. */
+  homeDir?: string;
+};
+
+export type ResolvedSkillRoots = {
+  roots: string[];
+  /** Roots that should be tagged source=user (not workspace .walkcroach/skills). */
+  userGlobalRoots: string[];
+};
+
+/**
+ * Resolve skill scan roots: workspace defaults → user-global → extras.
+ * Dedupes and drops empty paths. Relative extras resolve against workspaceRoot.
+ */
+export function resolveSkillRoots(
+  workspaceRoot?: string,
+  opts?: ResolveSkillRootsOpts,
+): ResolvedSkillRoots {
+  const includeUserGlobal = opts?.includeUserGlobal !== false;
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const userGlobalRoots: string[] = [];
+
+  const push = (p: string, asUser = false) => {
+    const n = normalize(p.trim());
+    if (!n || seen.has(n)) return;
+    seen.add(n);
+    out.push(n);
+    if (asUser) userGlobalRoots.push(n);
+  };
+
+  for (const r of defaultSkillRoots(workspaceRoot)) push(r);
+  if (includeUserGlobal) {
+    for (const r of userGlobalSkillRoots(opts?.homeDir ?? homedir())) {
+      push(r, true);
+    }
+  }
+  for (const raw of opts?.extraRoots ?? []) {
+    const t = raw.trim();
+    if (!t) continue;
+    if (isAbsolute(t)) {
+      push(t);
+    } else if (workspaceRoot) {
+      push(join(workspaceRoot, t));
+    }
+  }
+  return { roots: out, userGlobalRoots };
+}
+

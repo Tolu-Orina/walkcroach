@@ -12,6 +12,11 @@ export type SharedSkillRecord = {
   sourceSurface?: string;
 };
 
+export type SharedSkillSearchHit = SharedSkillRecord & {
+  /** Cosine distance from CockroachDB `<=>` (lower is closer). */
+  distance: number;
+};
+
 export type SharedSkillsBridge = {
   list(): Promise<SharedSkillRecord[]>;
   mirror(params: {
@@ -21,4 +26,12 @@ export type SharedSkillsBridge = {
     /** Host surface label stored by BFF (default server-side: ide). */
     sourceSurface?: string;
   }): Promise<{ id: string }>;
+  /**
+   * Optional CRDB vector recall over the owner's shared_skills.
+   * When present, the agent loop merges hits into the local skill-rank nudge.
+   */
+  search?(params: {
+    query: string;
+    limit?: number;
+  }): Promise<SharedSkillSearchHit[]>;
 };

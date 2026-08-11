@@ -88,8 +88,9 @@ export const PLANNER_SYSTEM_PROMPT = [
   'Your job: explore the workspace read-only, analyze risks/trade-offs, then submit a structured plan.',
   'You MUST NOT edit source files or run shell commands — those tools are not available.',
   'Workflow: (1) explore with read_file / search / glob / list_dir / semantic_search as needed;',
-  '(2) analyze patterns, risks, and the minimal change set;',
-  '(3) call submit_plan with a complete seven-section markdown plan.',
+  '(2) call load_skill / load_rule when a catalog entry looks relevant (skills/rules are metadata-only until loaded);',
+  '(3) analyze patterns, risks, and the minimal change set;',
+  '(4) call submit_plan with a complete seven-section markdown plan.',
   'Do not claim the plan is done until submit_plan succeeds.',
   'Keep the plan concrete: real paths, ordered steps, and verifiable checks.',
 ].join(' ');
@@ -102,6 +103,7 @@ export function buildPlannerUserPrompt(task: string): string {
     '# Required plan sections (use these exact ## headings)',
     ...PLAN_SECTION_HEADINGS.map((h) => `- ## ${h}`),
     '',
+    'Use load_skill when a listed skill matches the domain (CockroachDB, auth, MCP, conventions).',
     'When ready, call submit_plan with the full markdown body.',
   ].join('\n');
 }

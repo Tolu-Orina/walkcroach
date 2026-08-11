@@ -12,6 +12,11 @@ export type SharedSkillRecord = {
   updatedAt: string;
 };
 
+export type SharedSkillSearchHit = SharedSkillRecord & {
+  /** Cosine distance from `<=>` (0 = identical; lower is closer). */
+  distance: number;
+};
+
 /** Upsert a shared skill for an owner — same name re-mirrors as an update, not a new row. */
 export async function writeSharedSkill(params: {
   db: DbClient;
@@ -78,5 +83,51 @@ export async function listSharedSkills(params: {
     sourceSurface: r.source_surface,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
+  }));
+}
+
+/**
+ * Semantic recall over the owner's shared skills.
+ * Pins owner_id so shared_skills_owner_embedding_idx (044) stays eligible —
+ * do not add unconstrained filters here.
+ */
+export async function searchSharedSkills(params: {
+  db: DbClient;
+  ownerId: string;
+  query: string;
+  limit?: number;
+}): Promise<SharedSkillSearchHit[]> {
+  const q = params.query.trim();
+  if (!q) return [];
+  const limit = Math.min(Math.max(params.limit ?? 5, 1), 20);
+  const embedding = await embedText(q);
+  const vec = formatVector(embedding);
+  const { rows } = await params.db.query<{
+    id: string;
+    name: string;
+    description: string;
+    body: string;
+    source_surface: string;
+    created_at: string;
+    updated_at: string;
+    distance: string | number;
+  }>(
+    `SELECT id, name, description, body, source_surface, created_at, updated_at,
+            embedding <=> $2::vector AS distance
+       FROM shared_skills
+      WHERE owner_id = $1
+      ORDER BY embedding <=> $2::vector
+      LIMIT $3`,
+    [params.ownerId, vec, limit],
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    description: r.description,
+    body: r.body,
+    sourceSurface: r.source_surface,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+    distance: Number(r.distance),
   }));
 }

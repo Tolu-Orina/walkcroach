@@ -1,6 +1,6 @@
 {
   "name": "@walkcroach/chrome",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "private": true,
   "type": "module",
   "description": "WalkCroach Chrome \u2014 Manifest V3 SME copilot extension",

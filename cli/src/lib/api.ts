@@ -201,6 +201,23 @@ export async function listSharedSkills(
   return data.skills ?? [];
 }
 
+export type SharedSkillSearchEntry = SharedSkillEntry & {
+  distance: number;
+};
+
+export async function searchSharedSkills(
+  token: string,
+  params: { query: string; limit?: number },
+): Promise<SharedSkillSearchEntry[]> {
+  const res = await ideFetch('/ide/v1/skills/search', {
+    method: 'POST',
+    token,
+    body: { query: params.query, limit: params.limit },
+  });
+  const data = await readJson<{ skills: SharedSkillSearchEntry[] }>(res);
+  return data.skills ?? [];
+}
+
 /**
  * Account-scoped shared skills (same BFF as the extension).
  * CLI labels skill mirrors as `cli` by default.
@@ -238,6 +255,10 @@ export function createSharedSkillsBridge(params: {
       });
       const data = await readJson<{ id: string }>(res);
       return { id: data.id };
+    },
+    async search({ query, limit }) {
+      const token = await requireToken();
+      return searchSharedSkills(token, { query, limit });
     },
   };
 }

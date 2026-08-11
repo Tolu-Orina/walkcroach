@@ -105,7 +105,7 @@ export const PHASE_A_TOOLS: ToolDef[] = [
   {
     name: 'edit_file',
     description:
-      'Apply an exact search/replace edit to an existing file (requires approval). old_str must match exactly once — include 3–5 lines of unique surrounding context; never guess indentation. On edit_mismatch/stale_read, re-read first; do not retry the identical old_str.',
+      'Apply a search/replace edit to an existing file (requires approval). old_str must match uniquely (exact or whitespace-tolerant). Include 3–5 lines of unique surrounding context copied verbatim; never guess indentation. On edit_mismatch/stale_read: copy a NEW old_str from the excerpt — do not retry the identical old_str and do not switch to apply_patch with the same anchors.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -123,7 +123,7 @@ export const PHASE_A_TOOLS: ToolDef[] = [
   {
     name: 'apply_patch',
     description:
-      'Apply multiple sequential unique search/replace hunks to one existing file (requires approval). Prefer this over many edit_file calls when changing several places in the same file. Each old_str must match exactly once — anchor with unique surrounding context; never guess indentation.',
+      'Apply multiple sequential unique search/replace hunks to one existing file (requires approval). Prefer this over many edit_file calls when changing several places in the same file. Each old_str must match uniquely (exact or whitespace-tolerant) — anchor with unique surrounding context copied verbatim; never guess indentation. On edit_mismatch: fix the anchor; do not hop from edit_file with the same old_str.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -509,14 +509,14 @@ export const PHASE_B_TOOLS: ToolDef[] = [
   {
     name: 'load_skill',
     description:
-      'Load a CockroachDB Agent Skill by name (progressive disclosure). Official skills from cockroachlabs/cockroachdb-skills ship bundled — pick a name from the skills catalog for schema, SQL, observability, security, MOLT, or ops.',
+      'Load a WalkCroach Agent Skill by name (progressive disclosure). Catalog entries are metadata only — call this for the full body. Covers bundled coding/companion skills, official CockroachDB skills (cockroachlabs/cockroachdb-skills), workspace skills (.walkcroach/skills, skills/, …), user-global skills (~/.cursor/skills), and shared CRDB skills when signed in. Pick a name from the skills catalog.',
     inputSchema: {
       type: 'object',
       properties: {
         name: {
           type: 'string',
           description:
-            'Skill name, e.g. cockroachdb-sql, designing-application-transactions, triaging-live-sql-activity, cockroachdb-walkcroach-tools',
+            'Skill name from the catalog, e.g. cockroachdb-sql, designing-application-transactions, cockroachdb-walkcroach-tools, or a workspace/shared skill name',
         },
       },
       required: ['name'],
@@ -641,6 +641,22 @@ export function toBedrockTools(opts?: {
   /** When set, only these tool names are offered (schema-level allowlist). */
   allowlist?: readonly string[];
 }) {
+  // Allowlist is authoritative: resolve from the full registry so Phase B tools
+  // like load_skill appear even when includePhaseB is false (planner / RO subs).
+  if (opts?.allowlist) {
+    const byName = new Map(ALL_TOOLS.map((t) => [t.name, t]));
+    return opts.allowlist
+      .map((name) => byName.get(name))
+      .filter((t): t is ToolDef => Boolean(t))
+      .map((t) => ({
+        toolSpec: {
+          name: t.name,
+          description: t.description,
+          inputSchema: { json: t.inputSchema },
+        },
+      }));
+  }
+
   const includeSubagents = opts?.includeSubagents !== false;
   const includePhaseB = opts?.includePhaseB !== false;
   const includePhaseC = opts?.includePhaseC === true;
@@ -649,22 +665,11 @@ export function toBedrockTools(opts?: {
   if (includePhaseB) list = [...list, ...PHASE_B_TOOLS];
   if (includePhaseC) list = [...list, ...PHASE_C_TOOLS];
   if (includeSharedSkills) list = [...list, ...SHARED_SKILL_TOOLS];
-  if (opts?.allowlist) {
-    const allowed = new Set(opts.allowlist);
-    list = list.filter((t) => allowed.has(t.name));
-  }
   return list
-    .filter((t) => {
-      if (opts?.allowlist) return true;
-      return includeSubagents || t.name !== 'spawn_subagent';
-    })
+    .filter((t) => includeSubagents || t.name !== 'spawn_subagent')
     // present_plan / submit_plan: submit_plan is planner-only (allowlist);
     // present_plan is for the parent agent (exclude from default subagent runs).
-    .filter((t) => {
-      if (opts?.allowlist) return true;
-      if (t.name === 'submit_plan') return false;
-      return true;
-    })
+    .filter((t) => t.name !== 'submit_plan')
     .map((t) => ({
       toolSpec: {
         name: t.name,

@@ -103,6 +103,12 @@ export class VsCodeHostAdapter implements HostAdapter {
     this.sessions.killAll();
   }
 
+  dispose(): void {
+    this.killAllTerminals();
+    this.shellView.dispose();
+    void this.stdioMcp.disposeAll();
+  }
+
   showDiffPreview(
     path: string,
     before: string,

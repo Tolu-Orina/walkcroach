@@ -4,6 +4,7 @@ import type { HostAdapter } from './host.js';
 import {
   streamConverseTurn,
   createBedrockClient,
+  embedText,
   DEFAULT_MAX_OUTPUT_CONTINUATIONS,
   type ConverseTurnResult,
   type ParsedToolUse,
@@ -26,7 +27,13 @@ import {
   type McpConfig,
 } from './mcp.js';
 import { registerConfiguredMcpServers } from './mcp-stdio.js';
-import { SkillsRegistry, defaultSkillRoots } from './skills.js';
+import { SkillsRegistry, resolveSkillRoots } from './skills.js';
+import {
+  candidatesFromRegistry,
+  formatSkillRankNudge,
+  mergeRemoteSkillHits,
+  rankSkills,
+} from './skill-rank.js';
 import { TelemetrySink } from './telemetry.js';
 import { attachEnvExporters } from './telemetry-exporters.js';
 import { resolvePermissionMode } from './permission-mode.js';
@@ -57,6 +64,7 @@ import {
   beforeToolCall,
   buildStuckLoopNudge,
   emptyToolLoopGuard,
+  identicalFailureLimitFor,
   type ToolLoopGuardState,
 } from './tool-loop-guard.js';
 import {
@@ -79,6 +87,8 @@ import {
   type BoundedExecutorState,
 } from './bounded-executor.js';
 import { createReadFreshnessTracker } from './read-freshness.js';
+import { createEditAnchorFailCache } from './edit-anchor-guard.js';
+import { createEditPathMismatchState } from './edit-path-mismatch-guard.js';
 import {
   PLANNER_SYSTEM_PROMPT,
   PLANNER_TOOL_ALLOWLIST,
@@ -186,6 +196,13 @@ export type RunLoopParams = {
    * When unset, SkillsRegistry searches next to the engine module / cwd.
    */
   officialSkillsJsonPath?: string;
+  /**
+   * Extra skill scan roots (absolute or workspace-relative). Merged with
+   * defaultSkillRoots + user-global (~/.cursor/skills, ~/.walkcroach/skills).
+   */
+  skillRoots?: string[];
+  /** Include ~/.cursor/skills and ~/.walkcroach/skills (default true). */
+  includeUserGlobalSkills?: boolean;
   /**
    * Per-turn Bedrock output budget. Unset picks the reasoning-tier default
    * in streamConverseTurn (higher when extended thinking is on).
@@ -318,6 +335,13 @@ async function runPing(params: RunLoopParams): Promise<void> {
     while (!result.done) {
       const ev = result.value;
       if (ev.type === 'token') host.emit({ type: 'token_delta', text: ev.text });
+      if (ev.type === 'thinking') {
+        host.emit({
+          type: 'thinking_delta',
+          text: ev.text,
+          opaque: ev.opaque,
+        });
+      }
       if (ev.type === 'usage') {
         host.emit({
           type: 'cache_usage',
@@ -441,6 +465,8 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
   /** Phase 1: enforcing thrash + nudge budget. */
   let boundedState: BoundedExecutorState = emptyBoundedExecutorState(boundedCfg);
   const readFreshness = createReadFreshnessTracker();
+  const editAnchorFails = createEditAnchorFailCache();
+  const editPathMismatches = createEditPathMismatchState();
   const planSession = {
     autoApprove:
       params.autoApprovePlan ??
@@ -469,9 +495,14 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
   const telemetry = new TelemetrySink();
   attachEnvExporters(telemetry);
   const skills = new SkillsRegistry();
-  await skills.init(defaultSkillRoots(host.getWorkspaceRoot()), {
+  const skillPlan = resolveSkillRoots(host.getWorkspaceRoot(), {
+    extraRoots: params.skillRoots,
+    includeUserGlobal: params.includeUserGlobalSkills,
+  });
+  await skills.init(skillPlan.roots, {
     sharedSkills: params.sharedSkills ?? undefined,
     officialSkillsJsonPath: params.officialSkillsJsonPath,
+    userGlobalRoots: skillPlan.userGlobalRoots,
   });
   if (params.officialSkillsJsonPath) {
     const { existsSync } = await import('node:fs');
@@ -561,9 +592,66 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
   }
   let didTodoWrite = liveTodos.length > 0;
 
+  const offerLoadSkill =
+    includePhaseB ||
+    Boolean(params.toolAllowlist?.includes('load_skill')) ||
+    Boolean(params.readOnly);
+
+  let skillsRankNudge: string | undefined;
+  if (
+    offerLoadSkill &&
+    params.prompt.trim() &&
+    params.prompt !== CONTINUE_PROMPT &&
+    skills.listMeta().length > 0
+  ) {
+    try {
+      const keywordNames = skills.match(params.prompt).map((m) => m.name);
+      let hits = await rankSkills({
+        query: params.prompt,
+        skills: candidatesFromRegistry(skills.listMeta(), (n) => skills.load(n)),
+        embed: (t) => embedText(t, params.client),
+        keywordNames,
+        workspaceRoot: host.getWorkspaceRoot(),
+      });
+
+      if (params.sharedSkills?.search) {
+        try {
+          const remote = await params.sharedSkills.search({
+            query: params.prompt,
+            limit: 5,
+          });
+          for (const r of remote) {
+            skills.ingestShared(r);
+          }
+          hits = mergeRemoteSkillHits({
+            local: hits,
+            remote: remote.map((r) => ({
+              name: r.name,
+              description: r.description,
+              source: 'shared' as const,
+              distance: r.distance ?? 1,
+            })),
+          });
+        } catch {
+          /* remote rank is best-effort */
+        }
+      }
+
+      const nudge = formatSkillRankNudge(hits);
+      if (nudge) skillsRankNudge = nudge;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      host.emit({
+        type: 'warning',
+        message: `Skill ranking skipped: ${message}`,
+      });
+    }
+  }
+
   const system = assembleSystemBlocks({
     walkcroachMd,
-    skillsCatalog: includePhaseB ? skills.catalogText() : undefined,
+    skillsCatalog: offerLoadSkill ? skills.catalogText() : undefined,
+    skillsRankNudge,
     rulesMd: workspaceConfig.rulesMd || undefined,
     ruleCatalog: formatRuleCatalog(workspaceConfig.ruleCatalog) || undefined,
     approvedPlan: params.approvedPlan,
@@ -574,16 +662,13 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
   const tools = (
     params.toolAllowlist
       ? toBedrockTools({
-          includeSubagents: false,
-          includePhaseB: false,
-          includePhaseC: false,
-          includeSharedSkills: false,
           allowlist: params.toolAllowlist,
         })
       : params.readOnly
         ? toBedrockTools({
             includeSubagents: false,
-            includePhaseB: false,
+            // Phase B required so load_skill exists before the RO name filter.
+            includePhaseB: true,
             includePhaseC: Boolean(params.projectMemory),
           }).filter((t) =>
             [
@@ -691,6 +776,13 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
       const ev = turn.value;
       if (ev.type === 'token') {
         host.emit({ type: 'token_delta', text: ev.text });
+      }
+      if (ev.type === 'thinking') {
+        host.emit({
+          type: 'thinking_delta',
+          text: ev.text,
+          opaque: ev.opaque,
+        });
       }
       if (ev.type === 'usage') {
         host.emit({
@@ -803,7 +895,7 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
         toolLoopGuard,
         tool.name,
         tool.input,
-        identicalFailureLimit,
+        identicalFailureLimitFor(tool.name, identicalFailureLimit),
       );
       if (gate.action === 'refuse') {
         host.emit({
@@ -863,6 +955,8 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
       turnId,
       indexSettings: workspaceConfig.settings.index,
       readFreshness: host.supportsMtimeFreshness ? readFreshness : null,
+      editAnchorFails,
+      editPathMismatches,
       plannerMode: params.plannerMode,
       onPlanSubmitted: params.onPlanSubmitted,
       planSession,
@@ -879,6 +973,11 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
               client: params.client,
               modelId: params.modelId,
               projectMemory: params.projectMemory,
+              sharedSkills: params.sharedSkills,
+              officialSkillsJsonPath: params.officialSkillsJsonPath,
+              skillRoots: params.skillRoots,
+              includeUserGlobalSkills: params.includeUserGlobalSkills,
+              attachments: params.attachments,
             });
           }
         : undefined,
@@ -886,6 +985,32 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
 
     if (boundedCfg.enabled && thrashFingerprint) {
       boundedState = recordThrashExecution(boundedState, thrashFingerprint);
+    }
+
+    if (
+      exec.status === 'error' &&
+      /Path-level gate:/i.test(exec.content) &&
+      boundedCfg.interactive
+    ) {
+      const smallFile = /≤\d+ lines|small file/i.test(exec.content);
+      host.emit({ type: 'warning', message: exec.content.split('\n')[0]! });
+      const answer = await host.askUser({
+        question: smallFile
+          ? 'This file is small (≤400 lines) and surgical edits are blocked. Rewrite it with write_file, or stop?'
+          : 'Surgical edits on this path are blocked after repeated mismatches. Use write_file for a full rewrite, or stop?',
+        options: ['Use write_file', 'Stop'],
+        allowFreeText: false,
+      });
+      if (answer.selected.toLowerCase().startsWith('stop')) {
+        stuckLoopStop = true;
+      } else {
+        exec = {
+          ...exec,
+          content: smallFile
+            ? `${exec.content}\n\n[SYSTEM] User chose write_file. Emit the complete updated file via write_file (≤400-line rewrite). Do not call edit_file or apply_patch on this path again.`
+            : `${exec.content}\n\n[SYSTEM] User chose write_file. Rewrite this file with write_file; do not call edit_file or apply_patch on this path again.`,
+        };
+      }
     }
 
     if (MUTATING_TOOLS.has(tool.name) && exec.status === 'success') {
@@ -1203,6 +1328,14 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
             prompt: buildVerifyReviewPrompt(actionPrompt),
             signal,
             depth: depth + 1,
+            region: params.region,
+            client: params.client,
+            modelId: params.modelId,
+            sharedSkills: params.sharedSkills,
+            officialSkillsJsonPath: params.officialSkillsJsonPath,
+            skillRoots: params.skillRoots,
+            includeUserGlobalSkills: params.includeUserGlobalSkills,
+            attachments: params.attachments,
           });
           if (!isReviewOk(review)) {
             messages.push({
@@ -1375,6 +1508,11 @@ async function runPlanThenExecute(params: RunLoopParams): Promise<void> {
       client: params.client,
       modelId: params.modelId,
       projectMemory: params.projectMemory,
+      sharedSkills: params.sharedSkills,
+      officialSkillsJsonPath: params.officialSkillsJsonPath,
+      skillRoots: params.skillRoots,
+      includeUserGlobalSkills: params.includeUserGlobalSkills,
+      attachments: params.attachments,
       onPlanSubmitted: (p) => {
         lastPlanPath = p;
       },
@@ -1503,6 +1641,12 @@ async function runSubagent(params: {
   client?: import('@aws-sdk/client-bedrock-runtime').BedrockRuntimeClient;
   modelId?: string;
   projectMemory?: import('./project-memory.js').ProjectMemoryBridge | null;
+  sharedSkills?: SharedSkillsBridge | null;
+  officialSkillsJsonPath?: string;
+  skillRoots?: string[];
+  includeUserGlobalSkills?: boolean;
+  /** Forwarded for planner / review / explore so image/PDF context is visible. */
+  attachments?: SubmitAttachment[];
   onPlanSubmitted?: (planPath: string) => void;
 }): Promise<string> {
   const chunks: string[] = [];
@@ -1535,6 +1679,11 @@ async function runSubagent(params: {
     depth: params.depth,
     maxIterations: isPlanner ? 12 : 8,
     projectMemory: isPlanner ? params.projectMemory : undefined,
+    sharedSkills: params.sharedSkills,
+    officialSkillsJsonPath: params.officialSkillsJsonPath,
+    skillRoots: params.skillRoots,
+    includeUserGlobalSkills: params.includeUserGlobalSkills,
+    attachments: params.attachments,
     region: params.region,
     client: params.client,
     modelId: params.modelId,

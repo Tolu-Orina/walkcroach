@@ -26,13 +26,73 @@ import {
   updateIndex,
   DEFAULT_MAX_INDEX_FILES,
 } from '../local-index.js';
-import { applyPatchEdits, normalizePatchEdits } from '../patch.js';
+import { applyPatchEdits, applyUniqueReplace, normalizePatchEdits } from '../patch.js';
 import {
   buildStdinPayload,
   MAX_STDIN_REPLIES,
 } from '../stream-shell.js';
 import { enterGitWorktree, exitGitWorktree } from '../worktree.js';
 import { dispatchTool } from './dispatch.js';
+import {
+  assertEditAnchorAllowed,
+  clearEditAnchorsForPath,
+  recordEditAnchorFailure,
+} from '../edit-anchor-guard.js';
+import {
+  assertPathEditAllowed,
+  clearPathEditMismatches,
+  recordPathEditMismatch,
+} from '../edit-path-mismatch-guard.js';
+import {
+  formatEditMismatchError,
+  recordReadFreshness,
+} from '../read-freshness.js';
+
+async function buildEditMismatchError(
+  opts: ExecuteToolOptions,
+  args: {
+    path: string;
+    reason: string;
+    content: string;
+    oldStr?: string;
+    oldStrs?: string[];
+  },
+): Promise<Error> {
+  if (opts.readFreshness) {
+    recordReadFreshness(opts.readFreshness, args.path, {
+      content: args.content,
+      mtimeMs: await getMtimeMs(opts, args.path),
+    });
+  }
+  const pathMismatch = recordPathEditMismatch(
+    opts.editPathMismatches,
+    args.path,
+    { content: args.content },
+  );
+  return new Error(
+    formatEditMismatchError({
+      path: args.path,
+      reason: args.reason,
+      content: args.content,
+      oldStr: args.oldStr,
+      oldStrs: args.oldStrs,
+      pathMismatch: pathMismatch.count
+        ? {
+            count: pathMismatch.count,
+            limit: pathMismatch.limit,
+            blocked: pathMismatch.blocked,
+            smallFile: pathMismatch.smallFile,
+            lineCount: pathMismatch.lineCount,
+          }
+        : undefined,
+    }),
+  );
+}
+
+function clearEditGuardsForPath(opts: ExecuteToolOptions, path: string): void {
+  clearEditAnchorsForPath(opts.editAnchorFails, path);
+  clearPathEditMismatches(opts.editPathMismatches, path);
+}
 
 export type ToolExecResult = {
   toolUseId: string;
@@ -72,6 +132,15 @@ export type ExecuteToolOptions = {
   indexSettings?: { enabled: boolean; maxFiles: number };
   /** Phase 1 — stale-read tracker (only enforced when host.supportsMtimeFreshness). */
   readFreshness?: import('../read-freshness.js').ReadFreshnessTracker | null;
+  /**
+   * Failed edit/patch old_str anchors for this run.
+   * Cleared per-path only on successful mutate (not on read_file).
+   */
+  editAnchorFails?: import('../edit-anchor-guard.js').EditAnchorFailCache | null;
+  /**
+   * Consecutive edit_mismatch counts per path; blocks surgical edits after N.
+   */
+  editPathMismatches?: import('../edit-path-mismatch-guard.js').EditPathMismatchState | null;
   /**
    * Phase 2 — when true, submit_plan is allowed (Planner subagent only).
    * Main agent must use present_plan, not submit_plan.
@@ -214,6 +283,8 @@ async function executeToolBody(
         const path = str(input.path);
         const raw = await host.readFile(path);
         await noteReadFreshness(opts, path, raw);
+        // Do NOT clear edit-anchor fail cache here — re-read must not unlock
+        // the same bad old_str (models otherwise thrash after read_file).
         content = truncateText(raw).text;
         break;
       }
@@ -595,6 +666,7 @@ async function executeToolBody(
           kind: 'write_file',
         });
         await host.writeFile(path, next);
+        clearEditGuardsForPath(opts, path);
         await noteReadFreshness(opts, path, next);
         if (opts.turnId) {
           await recordCheckpoint(host.getWorkspaceRoot(), {
@@ -617,6 +689,13 @@ async function executeToolBody(
         if (!old_str) {
           throw new Error('edit_file requires a non-empty old_str');
         }
+        assertPathEditAllowed(opts.editPathMismatches, path);
+        try {
+          assertEditAnchorAllowed(opts.editAnchorFails, path, [old_str]);
+        } catch (err) {
+          recordPathEditMismatch(opts.editPathMismatches, path);
+          throw err;
+        }
         const before = await host.readFile(path);
         const freshnessNote = await gateMutationFreshness(opts, {
           path,
@@ -624,44 +703,21 @@ async function executeToolBody(
           kind: 'edit_file',
           oldStr: old_str,
         });
-        if (!before.includes(old_str)) {
-          const { formatEditMismatchError, recordReadFreshness } = await import(
-            '../read-freshness.js'
-          );
-          if (opts.readFreshness) {
-            recordReadFreshness(opts.readFreshness, path, {
-              content: before,
-              mtimeMs: await getMtimeMs(opts, path),
-            });
-          }
-          throw new Error(
-            formatEditMismatchError({
-              path,
-              reason: `old_str not found in ${path}`,
-              content: before,
-            }),
-          );
+        let after: string;
+        try {
+          after = applyUniqueReplace(before, old_str, new_str);
+        } catch (err) {
+          recordEditAnchorFailure(opts.editAnchorFails, path, [old_str]);
+          throw await buildEditMismatchError(opts, {
+            path,
+            reason:
+              err instanceof Error
+                ? `${err.message} in ${path}`
+                : `old_str not found in ${path}`,
+            content: before,
+            oldStr: old_str,
+          });
         }
-        const occurrences = before.split(old_str).length - 1;
-        if (occurrences > 1) {
-          const { formatEditMismatchError, recordReadFreshness } = await import(
-            '../read-freshness.js'
-          );
-          if (opts.readFreshness) {
-            recordReadFreshness(opts.readFreshness, path, {
-              content: before,
-              mtimeMs: await getMtimeMs(opts, path),
-            });
-          }
-          throw new Error(
-            formatEditMismatchError({
-              path,
-              reason: `old_str matches ${occurrences} locations in ${path}. Provide more surrounding context so the match is unique.`,
-              content: before,
-            }),
-          );
-        }
-        const after = before.replace(old_str, new_str);
         const decision = await host.showDiffPreview(path, before, after, {
           toolName: 'edit_file',
           stepId: id,
@@ -689,26 +745,23 @@ async function executeToolBody(
           kind: 'edit_file',
           oldStr: old_str,
         });
-        if (!latest.includes(old_str) || latest.split(old_str).length - 1 !== 1) {
-          const { formatEditMismatchError, recordReadFreshness } = await import(
-            '../read-freshness.js'
-          );
-          if (opts.readFreshness) {
-            recordReadFreshness(opts.readFreshness, path, {
-              content: latest,
-              mtimeMs: await getMtimeMs(opts, path),
-            });
-          }
-          throw new Error(
-            formatEditMismatchError({
-              path,
-              reason: `old_str no longer uniquely matches ${path} after approval (file changed).`,
-              content: latest,
-            }),
-          );
+        let latestAfter: string;
+        try {
+          latestAfter = applyUniqueReplace(latest, old_str, new_str);
+        } catch (err) {
+          recordEditAnchorFailure(opts.editAnchorFails, path, [old_str]);
+          throw await buildEditMismatchError(opts, {
+            path,
+            reason:
+              err instanceof Error
+                ? `${err.message} in ${path} after approval (file changed).`
+                : `old_str no longer uniquely matches ${path} after approval (file changed).`,
+            content: latest,
+            oldStr: old_str,
+          });
         }
-        const latestAfter = latest.replace(old_str, new_str);
         await host.writeFile(path, latestAfter);
+        clearEditGuardsForPath(opts, path);
         await noteReadFreshness(opts, path, latestAfter);
         if (opts.turnId) {
           await recordCheckpoint(host.getWorkspaceRoot(), {
@@ -729,33 +782,32 @@ async function executeToolBody(
         const path = str(input.path);
         assertPathAllowed(opts.policy, path);
         const edits = normalizePatchEdits(input.edits);
+        const oldStrs = edits.map((e) => e.old_str);
+        assertPathEditAllowed(opts.editPathMismatches, path);
+        try {
+          assertEditAnchorAllowed(opts.editAnchorFails, path, oldStrs);
+        } catch (err) {
+          recordPathEditMismatch(opts.editPathMismatches, path);
+          throw err;
+        }
         const before = await host.readFile(path);
         const freshnessNote = await gateMutationFreshness(opts, {
           path,
           currentContent: before,
           kind: 'apply_patch',
-          oldStrs: edits.map((e) => e.old_str),
+          oldStrs,
         });
         let after: string;
         try {
           after = applyPatchEdits(before, edits);
         } catch (err) {
-          const { formatEditMismatchError, recordReadFreshness } = await import(
-            '../read-freshness.js'
-          );
-          if (opts.readFreshness) {
-            recordReadFreshness(opts.readFreshness, path, {
-              content: before,
-              mtimeMs: await getMtimeMs(opts, path),
-            });
-          }
-          throw new Error(
-            formatEditMismatchError({
-              path,
-              reason: err instanceof Error ? err.message : String(err),
-              content: before,
-            }),
-          );
+          recordEditAnchorFailure(opts.editAnchorFails, path, oldStrs);
+          throw await buildEditMismatchError(opts, {
+            path,
+            reason: err instanceof Error ? err.message : String(err),
+            content: before,
+            oldStrs,
+          });
         }
         if (before === after) {
           throw new Error('apply_patch produced no changes');
@@ -791,28 +843,20 @@ async function executeToolBody(
         try {
           latestAfter = applyPatchEdits(latest, edits);
         } catch (err) {
-          const { formatEditMismatchError, recordReadFreshness } = await import(
-            '../read-freshness.js'
-          );
-          if (opts.readFreshness) {
-            recordReadFreshness(opts.readFreshness, path, {
-              content: latest,
-              mtimeMs: await getMtimeMs(opts, path),
-            });
-          }
-          throw new Error(
-            formatEditMismatchError({
-              path,
-              reason: err instanceof Error ? err.message : String(err),
-              content: latest,
-            }),
-          );
+          recordEditAnchorFailure(opts.editAnchorFails, path, oldStrs);
+          throw await buildEditMismatchError(opts, {
+            path,
+            reason: err instanceof Error ? err.message : String(err),
+            content: latest,
+            oldStrs,
+          });
         }
         if (host.applyDiff) {
           await host.applyDiff(path, JSON.stringify(edits));
         } else {
           await host.writeFile(path, latestAfter);
         }
+        clearEditGuardsForPath(opts, path);
         await noteReadFreshness(opts, path, latestAfter);
         if (opts.turnId) {
           await recordCheckpoint(host.getWorkspaceRoot(), {

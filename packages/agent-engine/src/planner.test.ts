@@ -55,9 +55,44 @@ describe('planner schema (Phase 2 exit criterion)', () => {
     const names = tools.map((t) => t.toolSpec?.name ?? '');
     assertPlannerSchemaHasNoWriteTools(names);
     expect(names).toContain('submit_plan');
+    expect(names).toContain('load_skill');
+    expect(names).toContain('load_rule');
     expect(names).not.toContain('write_file');
     expect(names).not.toContain('run_terminal');
     expect(names).not.toContain('spawn_subagent');
+  });
+
+  it('toBedrockTools(allowlist) includes load_skill even when includePhaseB is false', () => {
+    const tools = toBedrockTools({
+      allowlist: ['read_file', 'load_skill'],
+      includePhaseB: false,
+    });
+    const names = tools.map((t) => t.toolSpec?.name ?? '');
+    expect(names).toEqual(['read_file', 'load_skill']);
+  });
+
+  it('read-only Phase B filter keeps load_skill', () => {
+    const tools = toBedrockTools({
+      includeSubagents: false,
+      includePhaseB: true,
+      includePhaseC: false,
+    }).filter((t) =>
+      [
+        'read_file',
+        'list_dir',
+        'search',
+        'glob',
+        'semantic_search',
+        'ask_user',
+        'recall_project_memory',
+        'load_rule',
+        'load_skill',
+      ].includes(t.toolSpec?.name ?? ''),
+    );
+    const names = tools.map((t) => t.toolSpec?.name ?? '');
+    expect(names).toContain('load_skill');
+    expect(names).not.toContain('write_file');
+    expect(names).not.toContain('ccloud');
   });
 
   it('parent toBedrockTools excludes submit_plan', () => {

@@ -26,10 +26,20 @@ import {
 
 function makeStreamEvents(opts: {
   text?: string;
+  reasoningText?: string;
   toolUse?: { id: string; name: string; input: Record<string, unknown> };
   stopReason?: string;
 }) {
   const events: unknown[] = [];
+
+  if (opts.reasoningText) {
+    events.push({
+      contentBlockDelta: {
+        delta: { reasoningContent: { text: opts.reasoningText } },
+      },
+    });
+    events.push({ contentBlockStop: {} });
+  }
 
   if (opts.text) {
     events.push({ contentBlockDelta: { delta: { text: opts.text } } });
@@ -322,6 +332,61 @@ describe('streamConverseTurn', () => {
 
     const input = mockSend.mock.calls[0]![0].input as Record<string, unknown>;
     expect(input.inferenceConfig).toEqual({ maxTokens: 1234 });
+  });
+
+  it('emits a single opaque thinking event for [REDACTED] walls', async () => {
+    setMockStream(
+      makeStreamEvents({
+        reasoningText: '[REDACTED]. [REDACTED]. [REDACTED]',
+        text: 'ok',
+        stopReason: 'end_turn',
+      }),
+    );
+
+    const gen = streamConverseTurn({
+      system: [{ text: 'sys' }],
+      messages: [{ role: 'user', content: [{ text: 'hi' }] }],
+    });
+    const deltas: unknown[] = [];
+    let result = await gen.next();
+    while (!result.done) {
+      deltas.push(result.value);
+      result = await gen.next();
+    }
+
+    const thinking = deltas.filter(
+      (d): d is { type: 'thinking'; text: string; opaque?: boolean } =>
+        typeof d === 'object' &&
+        d !== null &&
+        (d as { type?: string }).type === 'thinking',
+    );
+    expect(thinking).toEqual([{ type: 'thinking', text: '', opaque: true }]);
+  });
+
+  it('streams readable reasoning when Nova returns real text', async () => {
+    setMockStream(
+      makeStreamEvents({
+        reasoningText: 'Check contrast next.',
+        text: 'ok',
+        stopReason: 'end_turn',
+      }),
+    );
+
+    const gen = streamConverseTurn({
+      system: [{ text: 'sys' }],
+      messages: [{ role: 'user', content: [{ text: 'hi' }] }],
+    });
+    const deltas: unknown[] = [];
+    let result = await gen.next();
+    while (!result.done) {
+      deltas.push(result.value);
+      result = await gen.next();
+    }
+
+    expect(deltas).toContainEqual({
+      type: 'thinking',
+      text: 'Check contrast next.',
+    });
   });
 
   it('throws on abort before start', async () => {

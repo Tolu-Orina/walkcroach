@@ -9,6 +9,16 @@
  */
 
 import { createHash } from 'node:crypto';
+import { oldStrMatchesUniquely } from './patch.js';
+import {
+  findNearestAnchors,
+  formatNearestAnchorHints,
+} from './nearest-anchor.js';
+import {
+  isSmallFileForRewrite,
+  pathMismatchGateMessage,
+  SMALL_FILE_LINE_LIMIT,
+} from './edit-path-mismatch-guard.js';
 
 export const DEFAULT_MTIME_TOLERANCE_MS = 50;
 /** Cap excerpt attached to reject errors (OpenCode-style recovery). */
@@ -149,13 +159,8 @@ function allOldStrsUnique(
   strs: string[],
 ): { ok: true } | { ok: false; reason: string } {
   for (const [i, s] of strs.entries()) {
+    if (oldStrMatchesUniquely(content, s)) continue;
     const n = countOccurrences(content, s);
-    if (n === 0) {
-      return {
-        ok: false,
-        reason: strs.length > 1 ? `hunk[${i}] old_str not found` : 'old_str not found',
-      };
-    }
     if (n > 1) {
       return {
         ok: false,
@@ -165,6 +170,10 @@ function allOldStrsUnique(
             : `old_str matches ${n} locations`,
       };
     }
+    return {
+      ok: false,
+      reason: strs.length > 1 ? `hunk[${i}] old_str not found` : 'old_str not found',
+    };
   }
   return { ok: true };
 }
@@ -294,15 +303,58 @@ export function evaluateMutationFreshness(
   };
 }
 
-/** Build a rich edit_mismatch error with excerpt + anchor guidance. */
+/** Build a rich edit_mismatch error with excerpt + nearest anchors + guidance. */
 export function formatEditMismatchError(opts: {
   path: string;
   reason: string;
   content: string;
+  /** Failed anchor(s) — used to rank nearest copy-paste candidates. */
+  oldStr?: string;
+  oldStrs?: string[];
+  /** Optional path-gate progress after recording this failure. */
+  pathMismatch?: {
+    count: number;
+    limit: number;
+    blocked: boolean;
+    smallFile?: boolean;
+    lineCount?: number;
+  };
 }): string {
-  return [
+  const small =
+    opts.pathMismatch?.smallFile === true ||
+    isSmallFileForRewrite(opts.content);
+
+  const parts = [
     `[edit_mismatch] ${opts.reason}`,
-    'Re-read if needed. Include 3–5 lines of unique surrounding context in old_str; do not guess whitespace. Prefer apply_patch for several sites in one file. Do not retry the identical old_str.',
-    formatFreshnessExcerpt(opts.path, opts.content),
-  ].join('\n');
+    'Copy 3–5 unique surrounding lines into old_str verbatim from a nearest candidate or the excerpt below — do not guess whitespace or indentation.',
+    'Do not retry the identical old_str. Do not switch edit_file ↔ apply_patch with the same anchors; fix the anchor instead.',
+    small
+      ? `This file is ≤${SMALL_FILE_LINE_LIMIT} lines — if anchors keep failing, stop surgical edits and use write_file with the full updated contents.`
+      : 'If anchors keep failing, use write_file for a full rewrite.',
+  ];
+
+  const needle =
+    opts.oldStr ??
+    (opts.oldStrs && opts.oldStrs.length ? opts.oldStrs.join('\n') : '');
+  if (needle) {
+    const hints = formatNearestAnchorHints(
+      findNearestAnchors(opts.content, needle),
+    );
+    if (hints) parts.push(hints);
+  }
+
+  if (opts.pathMismatch) {
+    parts.push(
+      pathMismatchGateMessage({
+        path: opts.path,
+        count: opts.pathMismatch.count,
+        limit: opts.pathMismatch.limit,
+        smallFile: opts.pathMismatch.smallFile ?? small,
+        lineCount: opts.pathMismatch.lineCount,
+      }),
+    );
+  }
+
+  parts.push(formatFreshnessExcerpt(opts.path, opts.content));
+  return parts.join('\n');
 }

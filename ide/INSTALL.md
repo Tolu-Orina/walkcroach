@@ -12,7 +12,9 @@ For invited users this week. Open VSX / Marketplace comes after publisher enroll
 4. Optional: WalkCroach Web account for Sign In + project memory
 5. Optional: CockroachDB Cloud cluster for MCP / `ccloud`
 
-There is a **Setup** page in the sidebar (gear icon) for Bedrock API key and CockroachDB MCP credentials. Secrets are stored in VS Code **SecretStorage** (OS keychain), not settings.json.
+There is a **Setup** page in the sidebar (gear icon) for Bedrock API key and
+optional CockroachDB MCP credentials. Secrets are stored in VS Code
+**SecretStorage** (OS keychain), not settings.json.
 
 You can also use AWS credentials / `AWS_BEARER_TOKEN_BEDROCK` in the environment that launches the IDE.
 
@@ -29,14 +31,14 @@ You can also use AWS credentials / `AWS_BEARER_TOKEN_BEDROCK` in the environment
 ## First run
 
 1. Command palette → **WalkCroach: Ping** (smokes Bedrock).
-2. Optional account (same WalkCroach login as Web / Chrome):
-   - **WalkCroach: Sign In** opens the Web app.
+2. Optional account (same WalkCroach login as Web / Chrome) — **preferred auth**:
+   - **WalkCroach: Sign In** opens the Web app (cleanest path; no token paste).
    - Sign in normally if needed (same `/signin`).
    - Web issues a one-time connect code; your IDE exchanges it for tokens (tokens never appear in the browser URL).
    - Allow the `vscode://` protocol prompt.
-   - Fallback: **WalkCroach: Paste Token** (advanced).
+   - Advanced only: **WalkCroach: Paste Token (Advanced)** if Web sign-in is unavailable.
 3. **WalkCroach: Link Project** to attach cross-surface memory.
-4. **WalkCroach: Configure CockroachDB** for Managed MCP / `ccloud`.
+4. Optional: **WalkCroach: Configure CockroachDB** for Managed MCP / `ccloud`.
 
 ## Defaults baked into this build
 

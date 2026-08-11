@@ -17,6 +17,13 @@ type PendingConnect = {
   reject: (err: Error) => void;
 };
 
+type CognitoTokens = {
+  access_token: string;
+  refresh_token?: string;
+  id_token?: string;
+  expires_in?: number;
+};
+
 const IDE_AUTH_PATH = 'walkcroach.walkcroach-ide/auth';
 
 /** Fallback TTL when a pasted JWT has no readable `exp` (55 minutes). */
@@ -50,13 +57,40 @@ export function jwtExpiresInSeconds(token: string): number | undefined {
 }
 
 /**
+ * Peek Cognito JWT `token_use` without verifying — store access vs id in the
+ * right SecretStorage slots (never for authorization decisions).
+ */
+export function classifyCognitoJwt(
+  token: string,
+): 'access' | 'id' | 'opaque' {
+  const parts = token.trim().split('.');
+  if (parts.length !== 3 || !parts[1]) return 'opaque';
+  try {
+    const json = Buffer.from(
+      parts[1].replace(/-/g, '+').replace(/_/g, '/'),
+      'base64',
+    ).toString('utf8');
+    const payload = JSON.parse(json) as { token_use?: string };
+    if (payload.token_use === 'access') return 'access';
+    if (payload.token_use === 'id') return 'id';
+  } catch {
+    /* not a JWT payload */
+  }
+  return 'opaque';
+}
+
+/**
  * Shared Cognito (same SPA client / user pool as Web + Chrome).
  *
- * Industry-standard native handoff:
+ * Primary path — WalkCroach Web sign-in (no manual token paste):
  * 1. Open Web /connect/ide (reuses normal /signin)
  * 2. Web issues a one-time auth code via BFF
  * 3. IDE deep-link callback carries only code+state (never tokens)
  * 4. Extension exchanges code at POST /ide/v1/oauth/token
+ *
+ * Token slots match CLI / Chrome:
+ * - `cognitoAccessToken` → Cognito **access** token (SDK `/v1`)
+ * - `cognitoIdToken` → Cognito **id** token (IDE BFF Bearer, same as Web)
  */
 export class AuthService {
   private pending: PendingConnect | null = null;
@@ -64,6 +98,9 @@ export class AuthService {
 
   constructor(private readonly secrets: vscode.SecretStorage) {}
 
+  /**
+   * Cognito access_token for `@walkcroach/sdk` (memory bridge) and CLI key parity.
+   */
   async getAccessToken(): Promise<string | undefined> {
     const token = await Promise.resolve(
       this.secrets.get(SECRET_KEYS.cognitoAccessToken),
@@ -80,6 +117,18 @@ export class AuthService {
       return this.refreshIfPossible();
     }
     return token;
+  }
+
+  /**
+   * Bearer for IDE BFF (`/ide/v1/*`). Prefer id token (matches Web); fall back
+   * to access. Refreshes via the access-token path first.
+   */
+  async getApiBearerToken(): Promise<string | undefined> {
+    const access = await this.getAccessToken();
+    if (!access) return undefined;
+    const id = await Promise.resolve(this.secrets.get(SECRET_KEYS.cognitoIdToken));
+    const trimmed = id?.trim();
+    return trimmed || access;
   }
 
   async isSignedIn(): Promise<boolean> {
@@ -99,6 +148,10 @@ export class AuthService {
     this.pending = null;
   }
 
+  /**
+   * Persist an access token (+ optional companions). Prefer `storeTokens` after
+   * Web PKCE so access and id never share a slot.
+   */
   async storeAccessToken(
     token: string,
     extras?: {
@@ -114,8 +167,11 @@ export class AuthService {
         extras.refreshToken,
       );
     }
-    if (extras?.idToken) {
-      await this.secrets.store(SECRET_KEYS.cognitoIdToken, extras.idToken);
+    if (extras?.idToken?.trim()) {
+      await this.secrets.store(
+        SECRET_KEYS.cognitoIdToken,
+        extras.idToken.trim(),
+      );
     }
     if (extras?.expiresIn) {
       await this.secrets.store(
@@ -125,24 +181,61 @@ export class AuthService {
     }
   }
 
+  /** Store a full OAuth token set from Web PKCE or Cognito refresh. */
+  async storeTokens(tokens: CognitoTokens): Promise<void> {
+    const access = tokens.access_token.trim();
+    if (!access) {
+      throw new Error('Token response missing Cognito access_token.');
+    }
+    await this.secrets.store(SECRET_KEYS.cognitoAccessToken, access);
+    if (tokens.id_token?.trim()) {
+      await this.secrets.store(
+        SECRET_KEYS.cognitoIdToken,
+        tokens.id_token.trim(),
+      );
+    }
+    if (tokens.refresh_token) {
+      await this.secrets.store(
+        SECRET_KEYS.cognitoRefreshToken,
+        tokens.refresh_token,
+      );
+    }
+    if (tokens.expires_in) {
+      await this.secrets.store(
+        SECRET_KEYS.cognitoExpiresAt,
+        String(Date.now() + tokens.expires_in * 1000),
+      );
+    }
+  }
+
+  /**
+   * Advanced fallback only — product sign-in is WalkCroach Web (`signInWithWeb`).
+   */
   async pasteAccessToken(): Promise<boolean> {
     const token = await vscode.window.showInputBox({
-      title: 'WalkCroach: Paste Cognito access token',
+      title: 'WalkCroach: Paste token (advanced)',
       prompt:
-        'Advanced fallback: paste an access token from a signed-in WalkCroach Web session',
+        'Prefer Sign In (opens WalkCroach Web). Advanced: paste a Cognito access token if Web sign-in is unavailable.',
       password: true,
       ignoreFocusOut: true,
     });
     if (!token?.trim()) return false;
+    const trimmed = token.trim();
+    if (classifyCognitoJwt(trimmed) === 'id') {
+      void vscode.window.showWarningMessage(
+        'That looks like an ID token. Use WalkCroach: Sign In (opens Web) instead — paste is access-token only.',
+      );
+      return false;
+    }
     // Drop any prior refresh/id so we don't mix pasted access with stale OAuth.
     await this.signOut();
     const expiresIn =
-      jwtExpiresInSeconds(token.trim()) ?? PASTE_TOKEN_FALLBACK_TTL_SEC;
-    await this.storeAccessToken(token.trim(), { expiresIn });
+      jwtExpiresInSeconds(trimmed) ?? PASTE_TOKEN_FALLBACK_TTL_SEC;
+    await this.storeTokens({ access_token: trimmed, expires_in: expiresIn });
     return true;
   }
 
-  /** Open WalkCroach Web connect flow (shared account). */
+  /** Open WalkCroach Web connect flow (shared account) — primary sign-in. */
   async signInWithWeb(cfg: { webAppUrl: string }): Promise<boolean> {
     if (!cfg.webAppUrl) {
       throw new Error(
@@ -249,11 +342,7 @@ export class AuthService {
         redirectUri: pending.redirectUri || ideRedirectUri(),
         codeVerifier: pending.codeVerifier,
       });
-      await this.storeAccessToken(tokens.id_token ?? tokens.access_token, {
-        refreshToken: tokens.refresh_token,
-        idToken: tokens.id_token ?? tokens.access_token,
-        expiresIn: tokens.expires_in ?? 3600,
-      });
+      await this.storeTokens(tokens);
       pending.resolve(true);
     } catch (e) {
       pending.reject(e instanceof Error ? e : new Error(String(e)));
@@ -281,12 +370,13 @@ export class AuthService {
           clientId: cfg.clientId,
           refreshToken,
         });
-        await this.storeAccessToken(tokens.id_token ?? tokens.access_token, {
-          refreshToken: tokens.refresh_token ?? refreshToken,
-          idToken: tokens.id_token,
-          expiresIn: tokens.expires_in,
+        await this.storeTokens({
+          access_token: tokens.access_token,
+          id_token: tokens.id_token,
+          refresh_token: tokens.refresh_token ?? refreshToken,
+          expires_in: tokens.expires_in,
         });
-        return tokens.id_token ?? tokens.access_token;
+        return tokens.access_token;
       } catch {
         await this.signOut();
         return undefined;
@@ -304,12 +394,7 @@ async function exchangeAuthCode(params: {
   redirectUri: string;
   /** PKCE verifier. Without it the BFF answers invalid_grant. */
   codeVerifier: string;
-}): Promise<{
-  access_token: string;
-  refresh_token?: string;
-  id_token?: string;
-  expires_in?: number;
-}> {
+}): Promise<CognitoTokens> {
   const base = getIdeApiBaseUrl();
   const res = await fetch(`${base}/ide/v1/oauth/token`, {
     method: 'POST',

@@ -56,13 +56,13 @@ export default defineConfig({
       ],
       thresholds: {
         // Honest global floor. Raise it as the gap above closes; never lower it.
-        statements: 11,
-        lines: 11,
+        statements: 12,
+        lines: 12,
         // Modules that are genuinely covered must stay that way.
         'src/api/ideClient.ts': { statements: 90, lines: 90 },
         'src/auth/pkce.ts': { statements: 90, lines: 90 },
         'src/host/messageBridge.ts': { statements: 90, lines: 90 },
-        'src/auth/session.ts': { statements: 45, lines: 45 },
+        'src/auth/session.ts': { statements: 50, lines: 50 },
       },
     },
   },

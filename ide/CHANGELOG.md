@@ -7,6 +7,32 @@ VSCodium, Windsurf). Format follows
 `0.2.0` is the first public release. `0.1.0` existed only as a privately
 distributed VSIX.
 
+## [0.2.1] — 2026-08-11
+
+### Fixed
+
+- Typecheck: `formatOnSave` restore now reads `workspaceFolderValue` /
+  `workspaceValue` (VS Code inspect API).
+- Cognito token slots match CLI / Chrome: **access** for SDK memory, **id**
+  (preferred) for IDE BFF Bearer. Web Sign In remains the primary auth path;
+  Paste Token is advanced fallback only.
+- Default autonomy is **strict** (was `low_friction`), aligned with the CLI.
+- Setup CTA no longer requires Cockroach MCP — MCP stays optional.
+- Webview body / monospace type scale (was 5.625px / 5.5px).
+- Marketplace + sidebar brand mark refreshed from `web/public/walkcroach-icon.png`.
+  Activity bar uses the same colored `media/icon.png` (VS Code masks it to
+  monochrome); the dedicated SVG was removed.
+- Plan review questions render via `react-markdown` (was plain `<p>`).
+
+### Changed
+
+- **Edit thrash guard:** identical `old_str` after `edit_mismatch` is refused
+  until `read_file` on that path (covers edit_file ↔ apply_patch hopping).
+- **Thinking stream:** Nova extended-thinking deltas surface in the sidebar so
+  medium/high reasoning no longer looks hung.
+- Prompt caching was already enabled for Nova via system `cachePoint`s (AWS:
+  Nova 2 Lite supports prompt caching, max 20K cached tokens).
+
 ## [0.2.0] — 2026-08-01 — First public release: PKCE sign-in and local MCP servers
 
 ### Security

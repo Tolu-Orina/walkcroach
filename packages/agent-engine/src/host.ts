@@ -50,6 +50,7 @@ export type ApprovalRequest = {
 export type AgentEvent =
   | { type: 'phase'; phase: 'gather' | 'act' | 'verify' }
   | { type: 'token_delta'; text: string }
+  | { type: 'thinking_delta'; text: string; opaque?: boolean }
   | {
       type: 'tool_card';
       id: string;

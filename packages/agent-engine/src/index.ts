@@ -175,6 +175,10 @@ export {
   type NovaReasoningEffort,
 } from './bedrock.js';
 export {
+  isOpaqueReasoningText,
+  stripOpaqueReasoningMarkers,
+} from './reasoning-text.js';
+export {
   updateIndex,
   semanticSearch,
   chunkLines,
@@ -215,12 +219,48 @@ export {
 
 export {
   fingerprintToolCall,
+  softNormalizeEditAnchor,
   beforeToolCall,
   afterToolResult,
   emptyToolLoopGuard,
   buildStuckLoopNudge,
+  identicalFailureLimitFor,
+  isLoopSensitiveTool,
   type ToolLoopGuardState,
 } from './tool-loop-guard.js';
+
+export {
+  createEditAnchorFailCache,
+  assertEditAnchorAllowed,
+  recordEditAnchorFailure,
+  clearEditAnchorsForPath,
+  type EditAnchorFailCache,
+} from './edit-anchor-guard.js';
+
+export {
+  DEFAULT_PATH_MISMATCH_LIMIT,
+  SMALL_FILE_LINE_LIMIT,
+  SMALL_FILE_PATH_MISMATCH_LIMIT,
+  createEditPathMismatchState,
+  recordPathEditMismatch,
+  clearPathEditMismatches,
+  assertPathEditAllowed,
+  pathMismatchGateMessage,
+  countFileLines,
+  isSmallFileForRewrite,
+  type EditPathMismatchState,
+  type PathMismatchRecord,
+} from './edit-path-mismatch-guard.js';
+
+export {
+  DEFAULT_NEAREST_TOP_K,
+  DEFAULT_NEAREST_MIN_SCORE,
+  findNearestAnchors,
+  formatNearestAnchorHints,
+  normalizeAnchorText,
+  levenshteinRatio,
+  type NearestAnchorCandidate,
+} from './nearest-anchor.js';
 
 export {
   DEFAULT_OBSERVE_WINDOW,
@@ -322,7 +362,12 @@ export {
   applyPatchEdits,
   applyDiffString,
   normalizePatchEdits,
+  applyUniqueReplace,
+  findUniqueOldStrSpan,
+  oldStrMatchesUniquely,
   type PatchEdit,
+  type MatchStrategy,
+  type UniqueMatch,
 } from './patch.js';
 export {
   normalizeTodos,
@@ -416,10 +461,14 @@ export {
 export {
   SkillsRegistry,
   defaultSkillRoots,
+  userGlobalSkillRoots,
+  resolveSkillRoots,
   parseSkillMd,
   loadOfficialCockroachSkills,
   type SkillMeta,
   type SkillFull,
+  type ResolveSkillRootsOpts,
+  type ResolvedSkillRoots,
 } from './skills.js';
 export { BUNDLED_SKILLS } from './skills/bundled.js';
 export {
@@ -463,7 +512,19 @@ export type {
 export type {
   SharedSkillsBridge,
   SharedSkillRecord,
+  SharedSkillSearchHit,
 } from './shared-skills.js';
+export {
+  rankSkills,
+  formatSkillRankNudge,
+  mergeRemoteSkillHits,
+  candidatesFromRegistry,
+  skillEmbedText,
+  DEFAULT_SKILL_RANK_TOP_K,
+  SKILLS_VECTORS_REL_PATH,
+  type SkillRankHit,
+  type SkillRankCandidate,
+} from './skill-rank.js';
 export {
   normalizeLocalRepoKey,
 } from './repo-key.js';

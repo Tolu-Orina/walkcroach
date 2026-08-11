@@ -83,6 +83,7 @@ type PendingAttachment = DisplayAttachment & {
 
 type HostMessage =
   | { type: 'TOKEN_DELTA'; text: string }
+  | { type: 'THINKING_DELTA'; text: string; opaque?: boolean }
   | { type: 'PHASE'; phase: Phase }
   | { type: 'DONE'; reason: string; canContinue?: boolean; turnId?: string }
   | { type: 'ERROR'; message: string; fatal?: boolean }
@@ -231,7 +232,7 @@ export function App() {
   const [draft, setDraft] = useState('');
   const [mode, setMode] = useState<ChatMode>('agent');
   const [modeOpen, setModeOpen] = useState(false);
-  const [autonomy, setAutonomy] = useState<Autonomy>('low_friction');
+  const [autonomy, setAutonomy] = useState<Autonomy>('strict');
   const [approval, setApproval] = useState<Approval | null>(null);
   const [tools, setTools] = useState<ToolCard[]>([]);
   const [subagents, setSubagents] = useState<Subagent[]>([]);
@@ -247,6 +248,8 @@ export function App() {
   const [linkedProjectId, setLinkedProjectId] = useState<string | null>(null);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [liveText, setLiveText] = useState('');
+  const [liveThinking, setLiveThinking] = useState('');
+  const [thinkingOpaque, setThinkingOpaque] = useState(false);
   const [todos, setTodos] = useState<AgentTodo[]>([]);
   const [hasSession, setHasSession] = useState(false);
   const [freeText, setFreeText] = useState('');
@@ -306,6 +309,8 @@ export function App() {
       ]);
       liveTextRef.current = '';
       setLiveText('');
+      setLiveThinking('');
+      setThinkingOpaque(false);
       setTools([]);
       setSubagents([]);
     },
@@ -385,6 +390,16 @@ export function App() {
             return next;
           });
           break;
+        case 'THINKING_DELTA':
+          if (msg.opaque) {
+            setThinkingOpaque(true);
+            break;
+          }
+          if (msg.text) {
+            setThinkingOpaque(false);
+            setLiveThinking((t) => t + msg.text);
+          }
+          break;
         case 'TODOS':
           setTodos(msg.todos);
           break;
@@ -443,6 +458,8 @@ export function App() {
           setPhase(null);
           setApproval(null);
           setError(null);
+          setLiveThinking('');
+          setThinkingOpaque(false);
           commitAssistantTurn(liveTextRef.current, {
             stopReason: msg.reason,
             canContinue: Boolean(msg.canContinue),
@@ -583,6 +600,8 @@ export function App() {
     setError(null);
     setNotice(null);
     setLiveText('');
+    setLiveThinking('');
+    setThinkingOpaque(false);
     liveTextRef.current = '';
     setTools([]);
     setSubagents([]);
@@ -667,6 +686,8 @@ export function App() {
     setTurns([]);
     setTodos([]);
     setLiveText('');
+    setLiveThinking('');
+    setThinkingOpaque(false);
     liveTextRef.current = '';
     setTools([]);
     setSubagents([]);
@@ -694,6 +715,8 @@ export function App() {
     setError(null);
     setNotice(null);
     setLiveText('');
+    setLiveThinking('');
+    setThinkingOpaque(false);
     liveTextRef.current = '';
     setTools([]);
     setSubagents([]);
@@ -716,8 +739,13 @@ export function App() {
     [streaming],
   );
 
-  const empty = turns.length === 0 && !streaming && !liveText;
-  const needsSetup = !bedrockConfigured || !mcpConfigured;
+  const empty =
+    turns.length === 0 &&
+    !streaming &&
+    !liveText &&
+    !liveThinking &&
+    !thinkingOpaque;
+  const needsSetup = !bedrockConfigured;
   const lastTurn = turns[turns.length - 1];
   const showContinue =
     !streaming && Boolean(lastTurn?.canContinue) && trusted;
@@ -807,9 +835,7 @@ export function App() {
           onClick={() => setView('settings')}
         >
           <span className="setup-cta-title">
-            {!bedrockConfigured
-              ? 'Add Bedrock & Cockroach credentials'
-              : 'Add CockroachDB MCP (optional)'}
+            Add Bedrock credentials to run the agent
           </span>
           <span className="setup-cta-meta">Open setup →</span>
         </button>
@@ -949,7 +975,7 @@ export function App() {
               </article>
             ))}
 
-            {(streaming || liveText) && (
+            {(streaming || liveText || liveThinking || thinkingOpaque) && (
               <article className="bubble assistant live">
                 <div className="bubble-label">
                   WalkCroach
@@ -1002,7 +1028,10 @@ export function App() {
                     </div>
                     {approval.kind === 'question' ? (
                       <>
-                        <p className="question-text">{approval.question}</p>
+                        <MarkdownBody
+                          text={approval.question ?? ''}
+                          className="question-text md"
+                        />
                         <div className="question-options">
                           {(approval.options ?? []).map((opt) => (
                             <button
@@ -1069,9 +1098,24 @@ export function App() {
                     ) : null}
                   </section>
                 )}
+                {liveThinking || thinkingOpaque ? (
+                  <div className="bubble-body md thinking" aria-live="polite">
+                    <span className="thinking-label">Thinking</span>
+                    {liveThinking ? (
+                      <MarkdownBody
+                        text={liveThinking}
+                        className="bubble-body md thinking-body"
+                      />
+                    ) : (
+                      <p className="thinking-opaque">
+                        Reasoning is protected by the model…
+                      </p>
+                    )}
+                  </div>
+                ) : null}
                 {liveText ? (
                   <MarkdownBody text={liveText} />
-                ) : streaming ? (
+                ) : streaming && !liveThinking && !thinkingOpaque ? (
                   <div className="bubble-body md thinking">…</div>
                 ) : null}
               </article>

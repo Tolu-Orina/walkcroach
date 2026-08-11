@@ -2,18 +2,24 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const writeSharedSkill = vi.fn();
 const listSharedSkills = vi.fn();
+const searchSharedSkills = vi.fn();
 const dbClose = vi.fn(async () => {});
 
 vi.mock('@walkcroach/agent-harness', () => ({
   writeSharedSkill: (...args: unknown[]) => writeSharedSkill(...args),
   listSharedSkills: (...args: unknown[]) => listSharedSkills(...args),
+  searchSharedSkills: (...args: unknown[]) => searchSharedSkills(...args),
 }));
 vi.mock('@walkcroach/db', () => ({
   createDbClient: () => ({ close: dbClose }),
 }));
 
 import type { AuthContext } from '../auth.js';
-import { handleSkillsList, handleSkillsMirror } from './skills.js';
+import {
+  handleSkillsList,
+  handleSkillsMirror,
+  handleSkillsSearch,
+} from './skills.js';
 
 const auth: AuthContext = {
   ownerId: 'owner-1',
@@ -24,6 +30,7 @@ const auth: AuthContext = {
 beforeEach(() => {
   writeSharedSkill.mockReset();
   listSharedSkills.mockReset();
+  searchSharedSkills.mockReset();
   dbClose.mockClear();
 });
 
@@ -76,5 +83,33 @@ describe('handleSkillsList', () => {
       expect.objectContaining({ ownerId: 'owner-1' }),
     );
     expect(JSON.parse(res.body)).toEqual({ skills: [{ name: 'my-skill' }] });
+  });
+});
+
+describe('handleSkillsSearch', () => {
+  it('rejects a missing query', async () => {
+    const res = await handleSkillsSearch(auth, JSON.stringify({}));
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('searches scoped to auth.ownerId', async () => {
+    searchSharedSkills.mockResolvedValue([
+      { name: 'txn-skill', distance: 0.1 },
+    ]);
+    const res = await handleSkillsSearch(
+      auth,
+      JSON.stringify({ query: 'retries', limit: 3 }),
+    );
+    expect(res.statusCode).toBe(200);
+    expect(searchSharedSkills).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerId: 'owner-1',
+        query: 'retries',
+        limit: 3,
+      }),
+    );
+    expect(JSON.parse(res.body)).toEqual({
+      skills: [{ name: 'txn-skill', distance: 0.1 }],
+    });
   });
 });

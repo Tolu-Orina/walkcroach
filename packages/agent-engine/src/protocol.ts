@@ -23,6 +23,7 @@ export const WEBVIEW_TO_HOST = [
 
 export const HOST_TO_WEBVIEW = [
   'TOKEN_DELTA',
+  'THINKING_DELTA',
   'TOOL_CARD',
   'PHASE',
   'SUBAGENT',
@@ -140,6 +141,7 @@ export type WebviewToHostMessage =
 
 export type HostToWebviewMessage =
   | { type: 'TOKEN_DELTA'; text: string }
+  | { type: 'THINKING_DELTA'; text: string; opaque?: boolean }
   | {
       type: 'TOOL_CARD';
       id: string;

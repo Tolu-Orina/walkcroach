@@ -4,7 +4,7 @@ vi.mock('./bedrock.js', () => ({
   embedText: vi.fn(async () => [0.1, 0.2, 0.3]),
 }));
 
-import { listSharedSkills, writeSharedSkill } from './skills.js';
+import { listSharedSkills, searchSharedSkills, writeSharedSkill } from './skills.js';
 
 function fakeDb(rows: unknown[]) {
   const query = vi.fn(async () => ({ rows }));
@@ -62,5 +62,59 @@ describe('listSharedSkills', () => {
       .calls[0] as [string, unknown[]];
     expect(sql).toContain('WHERE owner_id = $1');
     expect(params).toEqual(['owner-1', 100]);
+  });
+});
+
+describe('searchSharedSkills', () => {
+  it('pins owner_id, orders by cosine distance, and maps hits', async () => {
+    const db = fakeDb([
+      {
+        id: 'skill-1',
+        name: 'txn-skill',
+        description: 'retries',
+        body: 'body',
+        source_surface: 'ide',
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-02T00:00:00Z',
+        distance: '0.12',
+      },
+    ]);
+    const result = await searchSharedSkills({
+      db,
+      ownerId: 'owner-1',
+      query: 'transaction retries',
+      limit: 5,
+    });
+    expect(result).toEqual([
+      {
+        id: 'skill-1',
+        name: 'txn-skill',
+        description: 'retries',
+        body: 'body',
+        sourceSurface: 'ide',
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-02T00:00:00Z',
+        distance: 0.12,
+      },
+    ]);
+    const [sql, params] = (db.query as ReturnType<typeof vi.fn>).mock
+      .calls[0] as [string, unknown[]];
+    expect(sql).toContain('WHERE owner_id = $1');
+    expect(sql).toContain('embedding <=> $2::vector');
+    expect(sql).toContain('ORDER BY embedding <=> $2::vector');
+    expect(params[0]).toBe('owner-1');
+    expect(params[1]).toBe('[0.1,0.2,0.3]');
+    expect(params[2]).toBe(5);
+  });
+
+  it('returns [] for blank query without hitting the db', async () => {
+    const db = fakeDb([]);
+    const result = await searchSharedSkills({
+      db,
+      ownerId: 'owner-1',
+      query: '   ',
+    });
+    expect(result).toEqual([]);
+    expect(db.query).not.toHaveBeenCalled();
   });
 });

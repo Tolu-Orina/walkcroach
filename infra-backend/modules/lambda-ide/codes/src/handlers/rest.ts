@@ -21,7 +21,7 @@ import {
   handleExchangeToken,
 } from './oauth.js';
 import { handleSdkRest, isSdkPath } from './sdk.js';
-import { handleSkillsList, handleSkillsMirror } from './skills.js';
+import { handleSkillsList, handleSkillsMirror, handleSkillsSearch } from './skills.js';
 
 /** Strip API Gateway stage prefix if present (`/v1/ide/...` → `/ide/...`). */
 export function normalizeIdePath(path: string): string {
@@ -124,6 +124,10 @@ export async function handleIdeRest(req: HttpRequest) {
 
   if (method === 'POST' && /\/ide\/v1\/skills\/mirror\/?$/.test(path)) {
     return handleSkillsMirror(auth, req.body);
+  }
+
+  if (method === 'POST' && /\/ide\/v1\/skills\/search\/?$/.test(path)) {
+    return handleSkillsSearch(auth, req.body);
   }
 
   if (method === 'GET' && /\/ide\/v1\/skills\/?$/.test(path)) {

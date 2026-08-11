@@ -7,6 +7,10 @@ import {
   type SystemContentBlock,
   type ToolConfiguration,
 } from '@aws-sdk/client-bedrock-runtime';
+import {
+  isOpaqueReasoningText,
+  stripOpaqueReasoningMarkers,
+} from './reasoning-text.js';
 
 export function getNovaModelId(): string {
   return (
@@ -175,6 +179,8 @@ type OpenToolBlock = {
 
 export type StreamDelta =
   | { type: 'token'; text: string }
+  /** Extended thinking delta. `opaque` when Nova redacts the text (`[REDACTED]`). */
+  | { type: 'thinking'; text: string; opaque?: boolean }
   | {
       type: 'usage';
       cacheReadInputTokens: number;
@@ -242,6 +248,8 @@ export async function* streamConverseTurn(params: {
   let cacheWriteInputTokens = 0;
   let currentText = '';
   let openTool: OpenToolBlock | null = null;
+  /** Avoid flooding the UI with one opaque heartbeat per redacted token. */
+  let emittedOpaqueThinking = false;
 
   const flushText = () => {
     if (currentText) {
@@ -272,14 +280,39 @@ export async function* streamConverseTurn(params: {
       yield { type: 'token', text: chunk };
     }
 
+    // Nova extended thinking — surface activity; text is often always redacted.
+    const reasoningDelta = event.contentBlockDelta?.delta?.reasoningContent;
+    if (reasoningDelta && 'text' in reasoningDelta && reasoningDelta.text) {
+      if (isOpaqueReasoningText(reasoningDelta.text)) {
+        if (!emittedOpaqueThinking) {
+          emittedOpaqueThinking = true;
+          yield { type: 'thinking', text: '', opaque: true };
+        }
+      } else {
+        const readable = stripOpaqueReasoningMarkers(reasoningDelta.text);
+        if (readable) {
+          emittedOpaqueThinking = false;
+          yield { type: 'thinking', text: readable };
+        } else if (!emittedOpaqueThinking) {
+          emittedOpaqueThinking = true;
+          yield { type: 'thinking', text: '', opaque: true };
+        }
+      }
+    } else if (
+      reasoningDelta &&
+      'redactedContent' in reasoningDelta &&
+      reasoningDelta.redactedContent &&
+      !emittedOpaqueThinking
+    ) {
+      emittedOpaqueThinking = true;
+      yield { type: 'thinking', text: '', opaque: true };
+    }
+
     if (event.contentBlockDelta?.delta?.toolUse?.input) {
       if (openTool) {
         openTool.inputJson += event.contentBlockDelta.delta.toolUse.input;
       }
     }
-
-    // Extended-thinking deltas stream as reasoningContent, not text — leave
-    // them out of the chat timeline (still billed as output tokens).
 
     if (event.contentBlockStop) {
       if (openTool) {
@@ -307,6 +340,7 @@ export async function* streamConverseTurn(params: {
         openTool = null;
       } else {
         flushText();
+        emittedOpaqueThinking = false;
       }
     }
 

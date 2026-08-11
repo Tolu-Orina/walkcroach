@@ -58,4 +58,42 @@ describe('tool-loop-guard', () => {
     );
     expect(state.streak).toBe(1);
   });
+
+  it('shares edit_file / apply_patch fingerprints and refuses after one failure', () => {
+    const editInput = {
+      path: 'a.css',
+      old_str: 'color: red;',
+      new_str: 'color: blue;',
+    };
+    const patchInput = {
+      path: 'a.css',
+      edits: [{ old_str: 'color: red;', new_str: 'color: blue;' }],
+    };
+    expect(fingerprintToolCall('edit_file', editInput)).toBe(
+      fingerprintToolCall('apply_patch', patchInput),
+    );
+    let state = emptyToolLoopGuard();
+    state = afterToolResult(state, 'edit_file', editInput, 'error');
+    expect(state.streak).toBe(1);
+    const refused = beforeToolCall(state, 'apply_patch', patchInput, 1);
+    expect(refused.action).toBe('refuse');
+  });
+
+  it('soft-normalizes whitespace and path so near-miss edits share a fingerprint', () => {
+    const a = fingerprintToolCall('edit_file', {
+      path: 'blog\\SiteChrome.tsx',
+      old_str: '  return (\n    <footer />\n  );',
+      new_str: 'x',
+    });
+    const b = fingerprintToolCall('apply_patch', {
+      path: 'blog/SiteChrome.tsx',
+      edits: [
+        {
+          old_str: 'return (\n<footer />\n);',
+          new_str: 'x',
+        },
+      ],
+    });
+    expect(a).toBe(b);
+  });
 });

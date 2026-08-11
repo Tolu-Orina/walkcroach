@@ -19,6 +19,8 @@ import {
   normalizeBedrockApiKey,
   resolveInferenceCredentials,
   withInferenceCredentials,
+  SkillsRegistry,
+  resolveSkillRoots,
   type AgentTodo,
   type BedrockMessage,
   type McpServerView,
@@ -113,7 +115,7 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
       context.workspaceState.get<string>(TRANSCRIPT_KEY) ?? '';
     const autonomy =
       context.workspaceState.get<'strict' | 'low_friction'>(AUTONOMY_KEY) ??
-      'low_friction';
+      'strict';
 
     this.host = new VsCodeHostAdapter((event) => {
       if (event.type === 'token_delta') {
@@ -319,7 +321,7 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
     const cfg = getCognitoConfig();
     if (!cfg.webAppUrl) {
       void vscode.window.showInformationMessage(
-        'WalkCroach Web URL is not configured. Set walkcroach.ide.webAppUrl, or use “WalkCroach: Paste Token”.',
+        'WalkCroach Web URL is not configured. Set walkcroach.ide.webAppUrl.',
       );
       return;
     }
@@ -362,10 +364,10 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
   }
 
   async linkProject(): Promise<void> {
-    const token = await this.auth.getAccessToken();
+    const token = await this.auth.getApiBearerToken();
     if (!token) {
       void vscode.window.showWarningMessage(
-        'Sign in first (WalkCroach: Sign In or Paste Token).',
+        'Sign in first (WalkCroach: Sign In — opens WalkCroach Web).',
       );
       return;
     }
@@ -430,7 +432,7 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
   }
 
   async unlinkProject(): Promise<void> {
-    const token = await this.auth.getAccessToken();
+    const token = await this.auth.getApiBearerToken();
     if (!token) {
       void vscode.window.showWarningMessage('Not signed in.');
       return;
@@ -454,7 +456,7 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
   }
 
   async viewMirroredMemory(): Promise<void> {
-    const token = await this.auth.getAccessToken();
+    const token = await this.auth.getApiBearerToken();
     if (!token) {
       void vscode.window.showWarningMessage('Sign in first.');
       return;
@@ -523,7 +525,7 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
    * Account-scoped (no linked project required), unlike viewMirroredMemory.
    */
   async viewSharedSkills(): Promise<void> {
-    const token = await this.auth.getAccessToken();
+    const token = await this.auth.getApiBearerToken();
     if (!token) {
       void vscode.window.showWarningMessage('Sign in first.');
       return;
@@ -558,6 +560,76 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
 
     const doc = await vscode.workspace.openTextDocument({
       content: `# ${picked.skill.name}\n\n${picked.skill.description}\n\n---\n\n${picked.skill.body}`,
+      language: 'markdown',
+    });
+    await vscode.window.showTextDocument(doc, { preview: true });
+  }
+
+  /**
+   * Effective skills the agent would load this session: bundled + official JSON +
+   * workspace roots + user-global + extras + shared (when signed in).
+   */
+  async viewLoadedSkills(): Promise<void> {
+    const cfg = vscode.workspace.getConfiguration('walkcroach.ide');
+    const includeUserGlobal = cfg.get<boolean>('includeUserGlobalSkills', true);
+    const extraRoots = cfg.get<string[]>('skillRoots', []) ?? [];
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+
+    let sharedSkills = undefined;
+    const apiBearer = await this.auth.getApiBearerToken();
+    if (apiBearer) {
+      sharedSkills = createSharedSkillsBridge({
+        getToken: () => this.auth.getApiBearerToken(),
+        sourceSurface: 'ide',
+      });
+    }
+
+    const registry = new SkillsRegistry();
+    try {
+      const skillPlan = resolveSkillRoots(workspaceRoot, {
+        extraRoots,
+        includeUserGlobal,
+      });
+      await registry.init(skillPlan.roots, {
+        sharedSkills,
+        officialSkillsJsonPath: path.join(
+          this.context.extensionPath,
+          'dist',
+          'cockroachdb-official.generated.json',
+        ),
+        userGlobalRoots: skillPlan.userGlobalRoots,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      void vscode.window.showErrorMessage(`Failed to load skills: ${message}`);
+      return;
+    }
+
+    const metas = registry.listMeta();
+    if (!metas.length) {
+      void vscode.window.showInformationMessage('No skills loaded.');
+      return;
+    }
+
+    const picked = await vscode.window.showQuickPick(
+      metas.map((m) => ({
+        label: m.name,
+        description: m.source,
+        detail: m.description,
+        meta: m,
+      })),
+      {
+        title: `Loaded skills (${metas.length}) — select to view body`,
+        matchOnDescription: true,
+        matchOnDetail: true,
+      },
+    );
+    if (!picked) return;
+
+    const full = registry.load(picked.meta.name);
+    const body = full?.body ?? '(empty body)';
+    const doc = await vscode.workspace.openTextDocument({
+      content: `# ${picked.meta.name}\n\nSource: ${picked.meta.source}\nOrigin: ${picked.meta.origin ?? '—'}\n\n${picked.meta.description}\n\n---\n\n${body}`,
       language: 'markdown',
     });
     await vscode.window.showTextDocument(doc, { preview: true });
@@ -712,11 +784,12 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
     const priorFormatOnSave = cfg.inspect<boolean>('formatOnSave');
     const priorMode = cfg.inspect<string>('formatOnSaveMode');
     const previousFormatOnSave = folder
-      ? (priorFormatOnSave?.workspaceFolder ?? priorFormatOnSave?.workspace)
-      : priorFormatOnSave?.workspace;
+      ? (priorFormatOnSave?.workspaceFolderValue ??
+        priorFormatOnSave?.workspaceValue)
+      : priorFormatOnSave?.workspaceValue;
     const previousMode = folder
-      ? (priorMode?.workspaceFolder ?? priorMode?.workspace)
-      : priorMode?.workspace;
+      ? (priorMode?.workspaceFolderValue ?? priorMode?.workspaceValue)
+      : priorMode?.workspaceValue;
     try {
       await cfg.update('formatOnSave', false, scope);
     } catch (err) {
@@ -875,7 +948,7 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
 
   private async refreshAuthAndLink(): Promise<void> {
     const gen = ++this.authRefreshGen;
-    const token = await this.auth.getAccessToken();
+    const token = await this.auth.getApiBearerToken();
     if (gen !== this.authRefreshGen) return;
 
     this.signedIn = Boolean(token);
@@ -1286,17 +1359,18 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
 
     let projectMemory = undefined;
     let sharedSkills = undefined;
-    const token = await this.auth.getAccessToken();
-    if (token && this.linkedProjectId) {
+    const accessToken = await this.auth.getAccessToken();
+    const apiBearer = await this.auth.getApiBearerToken();
+    if (accessToken && this.linkedProjectId) {
       projectMemory = createProjectMemoryBridge({
         getToken: () => this.auth.getAccessToken(),
         projectId: this.linkedProjectId,
         projectName: this.linkedProjectName ?? undefined,
       });
     }
-    if (token) {
+    if (apiBearer) {
       sharedSkills = createSharedSkillsBridge({
-        getToken: () => this.auth.getAccessToken(),
+        getToken: () => this.auth.getApiBearerToken(),
         sourceSurface: 'ide',
       });
     }
@@ -1304,6 +1378,12 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
     const formatRestore = await this.beginFormatOnSaveSuppress();
     try {
       const bedrockOpts = await this.withBedrockRunOptions();
+      const skillCfg = vscode.workspace.getConfiguration('walkcroach.ide');
+      const includeUserGlobalSkills = skillCfg.get<boolean>(
+        'includeUserGlobalSkills',
+        true,
+      );
+      const skillRoots = skillCfg.get<string[]>('skillRoots', []) ?? [];
       await this.withBedrockSecretEnv(async () => {
         await runAgentLoop({
           host: this.host,
@@ -1321,6 +1401,8 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
           modelId: bedrockOpts.modelId,
           region: bedrockOpts.region,
           reasoningEffort: bedrockOpts.reasoningEffort,
+          skillRoots,
+          includeUserGlobalSkills,
           officialSkillsJsonPath: path.join(
             this.context.extensionPath,
             'dist',
@@ -1445,11 +1527,7 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
     this.clearAutoContinue(true);
     this.abort?.abort();
     // After a clean done, abort is already cleared — still reap leftover shells.
-    this.host.killAllTerminals?.();
-    // §6.6 — stdio MCP servers are tied to window lifetime, not to a run. A
-    // server left alive after the window closes is indistinguishable from a
-    // legitimate long-running process, which is threat T6.
-    void this.host.stdioMcp.disposeAll();
+    this.host.dispose();
     this.webviewMessageSub?.dispose();
     this.webviewMessageSub = undefined;
     this.bridge?.dispose();

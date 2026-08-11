@@ -1,4 +1,4 @@
-import { listSharedSkills, writeSharedSkill } from '@walkcroach/agent-harness';
+import { listSharedSkills, searchSharedSkills, writeSharedSkill } from '@walkcroach/agent-harness';
 import { createDbClient } from '@walkcroach/db';
 import type { AuthContext } from '../auth.js';
 import { jsonResponse } from '../http.js';
@@ -85,6 +85,45 @@ export async function handleSkillsList(
   const db = createDbClient();
   try {
     const skills = await listSharedSkills({ db, ownerId: auth.ownerId });
+    return jsonResponse(200, { skills });
+  } finally {
+    await db.close();
+  }
+}
+
+/**
+ * POST /ide/v1/skills/search
+ * Body: { query, limit? }
+ * Server-side Titan embed + CRDB cosine recall (owner-scoped).
+ */
+export async function handleSkillsSearch(
+  auth: AuthContext,
+  rawBody: string | undefined,
+): Promise<ReturnType<typeof jsonResponse>> {
+  const parsed = parseJsonBody<{
+    query?: string;
+    limit?: number;
+  }>(rawBody);
+  if (!parsed.ok) {
+    return jsonResponse(400, { error: parsed.error });
+  }
+  const query = parsed.data.query?.trim();
+  if (!query) {
+    return jsonResponse(400, { error: 'query is required' });
+  }
+  if (query.length > 4_000) {
+    return jsonResponse(400, { error: 'query exceeds 4000 characters' });
+  }
+
+  const db = createDbClient();
+  try {
+    const skills = await searchSharedSkills({
+      db,
+      ownerId: auth.ownerId,
+      query,
+      limit: parsed.data.limit,
+    });
+    metricLog('ide.skills.search', { ok: true, hits: skills.length });
     return jsonResponse(200, { skills });
   } finally {
     await db.close();
