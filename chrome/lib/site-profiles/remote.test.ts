@@ -153,3 +153,15 @@ describe('the packaged bundle', () => {
     expect(validateProfilesBundle(SITE_PROFILES)).not.toBeNull();
   });
 });
+
+describe('remoteProfilesEnabled', () => {
+  it('is false when the build has no public key (safe default)', async () => {
+    const { remoteProfilesEnabled, PROFILES_PUBLIC_KEY } = await import(
+      './remote'
+    );
+    // Unit builds leave the key empty unless WALKCROACH_PROFILES_PUBLIC_KEY is set.
+    if (!PROFILES_PUBLIC_KEY) {
+      expect(remoteProfilesEnabled()).toBe(false);
+    }
+  });
+});

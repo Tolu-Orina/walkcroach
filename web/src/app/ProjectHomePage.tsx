@@ -19,15 +19,19 @@ import type {
   ProjectSession,
 } from '../api/types';
 import { ConfirmDialog } from '../components/ConfirmDialog';
-import { BuilderIconLink } from '../features/builder/BuilderIconLink';
+import { ProductErrorBanner } from '../components/product/ProductErrorBanner';
+import { Skeleton } from '../components/Skeleton';
 import {
   displayMemoryText,
   memorySurfaceLabel,
 } from '../features/memory/memoryDisplay';
+import { builderWorkspacePath } from '../lib/builderRoutes';
+import { promoteProjectToAppBuilder } from '../lib/promoteToAppBuilder';
+import { rememberBuilderProject } from '../lib/lastBuilderProject';
 
 /**
- * Project home — chat compilation + knowledge container.
- * App Builder is a room off this project (icon), not the project itself.
+ * Project home — chat compilation + knowledge container (ADR-0004).
+ * Open in App Builder promotes to a new kind=app workspace (Phase 6).
  */
 export function ProjectHomePage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -48,6 +52,7 @@ export function ProjectHomePage() {
   const [addingDoc, setAddingDoc] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [promoting, setPromoting] = useState(false);
   const [memoryFilter, setMemoryFilter] = useState<'all' | 'chrome' | 'other'>(
     'all',
   );
@@ -204,6 +209,24 @@ export function ProjectHomePage() {
     }
   };
 
+  const openInAppBuilder = async () => {
+    if (!project || promoting) return;
+    setPromoting(true);
+    setError(null);
+    try {
+      const appId = await promoteProjectToAppBuilder(project);
+      rememberBuilderProject(appId);
+      navigate(builderWorkspacePath(appId));
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Could not open App Builder — try again.',
+      );
+      setPromoting(false);
+    }
+  };
+
   const handleArchive = async () => {
     if (!projectId) return;
     try {
@@ -231,18 +254,35 @@ export function ProjectHomePage() {
     return null;
   }
 
-  if (loading) {
+  if (loading && !project) {
     return (
-      <div className="grid h-full place-items-center text-sm text-mist">
-        Loading project…
+      <div className="flex h-full min-h-0 flex-col overflow-y-auto px-5 py-8 sm:px-8">
+        <div className="mx-auto w-full max-w-3xl space-y-6" aria-busy="true">
+          <Skeleton className="h-3 w-24" />
+          <Skeleton className="h-9 w-64" />
+          <Skeleton className="h-4 w-full max-w-md" />
+          <Skeleton className="mt-8 h-40 w-full" />
+          <Skeleton className="h-48 w-full" />
+        </div>
       </div>
     );
   }
 
   if (error && !project) {
     return (
-      <div className="grid h-full place-items-center px-6 text-center text-sm text-ember">
-        {error}
+      <div className="grid h-full place-items-center px-6">
+        <div className="w-full max-w-md">
+          <ProductErrorBanner
+            message={error}
+            onRetry={() => void load()}
+          />
+          <Link
+            to="/app/projects"
+            className="btn-ghost mt-4 inline-flex text-sm"
+          >
+            ← Projects
+          </Link>
+        </div>
       </div>
     );
   }
@@ -252,69 +292,86 @@ export function ProjectHomePage() {
   const chats = sessions.filter((s) => s.mode === 'chat');
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-y-auto px-4 py-8 sm:px-8">
-      <div className="mx-auto w-full max-w-3xl">
+    <div className="flex h-full min-h-0 flex-col overflow-y-auto px-5 py-8 sm:px-8">
+      <div className="mx-auto w-full max-w-3xl wc-enter">
         <Link
           to="/app/projects"
-          className="interactive text-[11px] uppercase tracking-[0.16em] text-mist hover:text-signal"
+          className="interactive text-xs font-medium text-mist hover:text-signal"
         >
           ← Projects
         </Link>
 
-        <header className="mt-4 border-b border-line pb-6">
-          <p className="text-[11px] uppercase tracking-[0.2em] text-signal">
-            Project
-          </p>
-          <div className="mt-2 flex flex-wrap items-start justify-between gap-4">
-            <div className="min-w-0">
-              <h1 className="font-display text-3xl font-extrabold text-paper">
+        <header className="mt-4 border-b border-line pb-8">
+          <p className="eyebrow">Project</p>
+          <div className="mt-3 flex flex-wrap items-start justify-between gap-4">
+            <div className="min-w-0 max-w-xl">
+              <h1 className="font-display text-3xl font-extrabold tracking-tight text-paper sm:text-4xl">
                 {project.name}
               </h1>
-              <p className="mt-1 text-sm text-mist">
-                Chats over this project’s life share the description,
-                instructions, and documents below.
+              <p className="mt-2 text-sm leading-relaxed text-mist">
+                Chats in this project share standing instructions, documents,
+                and memory.
               </p>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
               <button
                 type="button"
                 onClick={() => void startChat()}
-                className="btn-primary text-xs"
+                className="btn-primary text-sm"
               >
                 New chat
               </button>
-              <BuilderIconLink projectId={projectId} label="Builder" />
+              <button
+                type="button"
+                onClick={() => void openInAppBuilder()}
+                disabled={promoting}
+                className="btn-secondary text-sm"
+                title="Creates a new App Builder workspace from this project’s name and standing instructions"
+              >
+                {promoting ? 'Opening…' : 'Open in App Builder'}
+              </button>
             </div>
           </div>
         </header>
 
-        {error && <p className="mt-4 text-sm text-ember">{error}</p>}
+        {error && (
+          <div className="mt-6">
+            <ProductErrorBanner message={error} onRetry={() => void load()} />
+          </div>
+        )}
 
-        <section className="mt-8 space-y-3">
+        <section className="mt-10 space-y-4">
           <div className="flex items-end justify-between gap-3">
-            <h2 className="font-display text-lg font-bold text-paper">
-              Chats
-            </h2>
-            <span className="text-[11px] text-mist">
+            <h2 className="font-display text-xl font-bold text-paper">Chats</h2>
+            <span className="text-xs text-mist">
               {chats.length} in this project
             </span>
           </div>
           {chats.length === 0 ? (
-            <p className="text-sm text-mist">
-              No chats yet — start one to keep work in this project’s timeline.
-            </p>
+            <div className="rounded-[var(--radius-surface)] border border-dashed border-line px-5 py-8">
+              <p className="text-sm text-mist">
+                No chats yet — start one to keep work on this project’s timeline.
+              </p>
+              <button
+                type="button"
+                onClick={() => void startChat()}
+                className="btn-secondary mt-4 text-sm"
+              >
+                Start first chat
+              </button>
+            </div>
           ) : (
-            <ul className="divide-y divide-line border border-line">
+            <ul className="divide-y divide-line overflow-hidden rounded-[var(--radius-surface)] border border-line">
               {chats.map((s) => (
                 <li key={s.id}>
                   <Link
                     to={`/app/projects/${projectId}/chat/${s.id}`}
-                    className="interactive flex items-center justify-between gap-3 px-3 py-2.5 hover:bg-panel/40"
+                    className="interactive flex items-center justify-between gap-3 px-4 py-3 hover:bg-raised/40"
                   >
                     <span className="truncate text-sm text-paper">
                       {s.title?.trim() || `Chat ${s.id.slice(0, 8)}`}
                     </span>
-                    <span className="shrink-0 text-[10px] text-mist">
+                    <span className="shrink-0 text-xs text-mist">
                       {new Date(s.createdAt).toLocaleString()}
                     </span>
                   </Link>
@@ -324,17 +381,15 @@ export function ProjectHomePage() {
           )}
         </section>
 
-        <section className="mt-10 space-y-4">
-          <h2 className="font-display text-lg font-bold text-paper">
+        <section className="mt-12 space-y-4">
+          <h2 className="font-display text-xl font-bold text-paper">
             Knowledge
           </h2>
           <p className="text-sm text-mist">
             Applies to every chat in this project — not just the current thread.
           </p>
           <label className="block">
-            <span className="text-[11px] uppercase tracking-wider text-mist">
-              Description
-            </span>
+            <span className="text-xs font-medium text-mist">Description</span>
             <textarea
               value={description}
               onChange={(e) => {
@@ -343,11 +398,11 @@ export function ProjectHomePage() {
               }}
               rows={2}
               placeholder="What is this project about?"
-              className="mt-1 w-full rounded-sm border border-line bg-panel/40 px-3 py-2 text-sm text-paper placeholder:text-mist/50 focus:border-signal/50 focus:outline-none"
+              className="field mt-2 min-h-[4.5rem] resize-y"
             />
           </label>
           <label className="block">
-            <span className="text-[11px] uppercase tracking-wider text-mist">
+            <span className="text-xs font-medium text-mist">
               Standing instructions
             </span>
             <textarea
@@ -358,14 +413,14 @@ export function ProjectHomePage() {
               }}
               rows={5}
               placeholder="Tone, stack, constraints the agent should always follow…"
-              className="mt-1 w-full rounded-sm border border-line bg-panel/40 px-3 py-2 text-sm text-paper placeholder:text-mist/50 focus:border-signal/50 focus:outline-none"
+              className="field mt-2 min-h-[8rem] resize-y"
             />
           </label>
           <button
             type="button"
             onClick={() => void saveKnowledge()}
             disabled={saving}
-            className="btn-primary text-xs"
+            className="btn-secondary text-sm"
           >
             {saving ? 'Saving…' : saveOk ? 'Saved' : 'Save knowledge'}
           </button>
@@ -376,16 +431,16 @@ export function ProjectHomePage() {
           )}
         </section>
 
-        <section className="mt-10 space-y-4">
+        <section className="mt-12 space-y-4">
           <div className="flex items-end justify-between gap-3">
-            <h2 className="font-display text-lg font-bold text-paper">
+            <h2 className="font-display text-xl font-bold text-paper">
               Documents
             </h2>
             <button
               type="button"
               onClick={() => fileRef.current?.click()}
               disabled={addingDoc}
-              className="btn-ghost text-xs"
+              className="btn-ghost text-sm"
             >
               Upload file
             </button>
@@ -398,19 +453,22 @@ export function ProjectHomePage() {
             />
           </div>
           {documents.length === 0 ? (
-            <p className="text-sm text-mist">No documents yet.</p>
+            <p className="text-sm text-mist">
+              No documents yet — upload a file or paste text below for project
+              context.
+            </p>
           ) : (
-            <ul className="divide-y divide-line border border-line">
+            <ul className="divide-y divide-line overflow-hidden rounded-[var(--radius-surface)] border border-line">
               {documents.map((d) => (
                 <li
                   key={d.id}
-                  className="flex items-center justify-between gap-3 px-3 py-2 text-sm"
+                  className="flex items-center justify-between gap-3 px-4 py-3 text-sm"
                 >
                   <div className="min-w-0">
                     <p className="truncate text-paper">{d.name}</p>
-                    <p className="text-[10px] text-mist">
+                    <p className="text-xs text-mist">
                       {d.ingestStatus === 'ok' || (d.chunkCount ?? 0) > 0
-                        ? `RAG indexed${d.chunkCount ? ` (${d.chunkCount} chunks)` : ''}`
+                        ? `Indexed${d.chunkCount ? ` (${d.chunkCount} chunks)` : ''}`
                         : d.hasText
                           ? 'Saved — indexing failed'
                           : 'No text'}{' '}
@@ -420,7 +478,7 @@ export function ProjectHomePage() {
                   <button
                     type="button"
                     onClick={() => void removeDocument(d.id)}
-                    className="interactive shrink-0 text-[11px] text-ember/90 hover:text-ember"
+                    className="interactive shrink-0 text-xs text-ember/90 hover:text-ember"
                   >
                     Remove
                   </button>
@@ -428,36 +486,36 @@ export function ProjectHomePage() {
               ))}
             </ul>
           )}
-          <div className="space-y-2 border border-dashed border-line p-3">
-            <p className="text-[11px] uppercase tracking-wider text-mist">
-              Paste document
-            </p>
+          <div className="space-y-3 rounded-[var(--radius-surface)] border border-dashed border-line p-4">
+            <p className="text-xs font-medium text-mist">Paste document</p>
             <input
               value={docName}
               onChange={(e) => setDocName(e.target.value)}
               placeholder="Name"
-              className="w-full rounded-sm border border-line bg-panel/40 px-3 py-2 text-sm text-paper placeholder:text-mist/50 focus:border-signal/50 focus:outline-none"
+              className="field"
+              aria-label="Document name"
             />
             <textarea
               value={docText}
               onChange={(e) => setDocText(e.target.value)}
               rows={4}
               placeholder="Paste brief, brand notes, API docs…"
-              className="w-full rounded-sm border border-line bg-panel/40 px-3 py-2 text-sm text-paper placeholder:text-mist/50 focus:border-signal/50 focus:outline-none"
+              className="field min-h-[6rem] resize-y"
+              aria-label="Document text"
             />
             <button
               type="button"
               onClick={() => void addDocument()}
               disabled={addingDoc || !docName.trim()}
-              className="btn-ghost text-xs"
+              className="btn-secondary text-sm"
             >
               {addingDoc ? 'Adding…' : 'Add document'}
             </button>
           </div>
         </section>
 
-        <section className="mt-10 space-y-3">
-          <h2 className="font-display text-lg font-bold text-paper">
+        <section className="mt-12 space-y-4">
+          <h2 className="font-display text-xl font-bold text-paper">
             Remembered
           </h2>
           {memorySummary && (
@@ -547,13 +605,13 @@ export function ProjectHomePage() {
           )}
         </section>
 
-        <section className="mt-12 flex flex-wrap gap-3 border-t border-line pt-6">
+        <section className="mt-12 flex flex-wrap gap-3 border-t border-line pt-8">
           <button
             type="button"
             onClick={() => void handleArchive()}
-            className="btn-ghost text-xs"
+            className="btn-ghost text-sm"
           >
-            Archive
+            Archive project
           </button>
           <button
             type="button"
@@ -569,7 +627,7 @@ export function ProjectHomePage() {
         open={deleteOpen}
         title="Delete project?"
         message="This removes the project from your account. Access is revoked immediately; data is soft-deleted and cannot be recovered from the UI."
-        confirmLabel="Delete"
+        confirmLabel="Delete project"
         destructive
         busy={deleteBusy}
         onConfirm={() => void confirmDelete()}

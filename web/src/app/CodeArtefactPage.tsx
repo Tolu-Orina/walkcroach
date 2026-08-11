@@ -5,6 +5,7 @@ import {
   getGithubStatus,
   type CodeArtefactDetail,
 } from '../api/client';
+import { builderWorkspacePath } from '../lib/builderRoutes';
 
 function downloadText(filename: string, content: string) {
   const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
@@ -118,10 +119,10 @@ export function CodeArtefactPage() {
             type="button"
             className="btn-primary text-xs"
             onClick={() =>
-              navigate(`/app/projects/${artefact.projectId}/builder`)
+              navigate(builderWorkspacePath(artefact.projectId!))
             }
           >
-            Open in Builder
+            Open in App Builder
           </button>
         )}
         {artefact.projectId && (

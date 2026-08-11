@@ -9,13 +9,19 @@ export type CheckpointSummary = {
 
 export type PlanDecision = 'approve' | 'adjust' | 'cancel';
 
+/** Schema pillars: Chat=general · Project=knowledge · App Builder=app */
+export type ProjectKind = 'app' | 'general' | 'knowledge';
+
+/** Creatable via POST /projects (Chat uses /me/chat-workspace). */
+export type CreatableProjectKind = 'app' | 'knowledge';
+
 export type ProjectSummary = {
   id: string;
   name: string;
   status: string;
   updatedAt: string;
   memorySummary: string | null;
-  kind?: string;
+  kind?: ProjectKind | string;
   description?: string | null;
 };
 

@@ -12,7 +12,7 @@ describe('Stream — output controls', () => {
   it('hides Insert and Copy mid-stream, so half a draft cannot be pasted', () => {
     render(<Stream text="Half a dr" streaming onInsert={noop} onCopy={noop} />);
     expect(screen.queryByRole('button', { name: 'Insert into page' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Copy' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Copy response' })).toBeNull();
   });
 
   it('offers Insert and Copy on a finished response', async () => {
@@ -29,7 +29,7 @@ describe('Stream — output controls', () => {
     await userEvent.click(
       screen.getByRole('button', { name: 'Insert into page' }),
     );
-    await userEvent.click(screen.getByRole('button', { name: 'Copy' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Copy response' }));
     expect(onInsert).toHaveBeenCalledOnce();
     expect(onCopy).toHaveBeenCalledOnce();
   });

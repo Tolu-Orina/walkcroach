@@ -65,7 +65,7 @@ describe('AccessNotice — the permission gate', () => {
       <AccessNotice access={unknown} onGrant={noop} onRecheck={onRecheck} />,
     );
     await userEvent.click(
-      screen.getByRole('button', { name: /I clicked it/i }),
+      screen.getByRole('button', { name: /Check this tab again/i }),
     );
     expect(onRecheck).toHaveBeenCalledOnce();
   });

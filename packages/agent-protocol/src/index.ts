@@ -7,7 +7,7 @@
  *
  * Bump PROTOCOL_VERSION on any breaking change to HostMessage | ViewMessage.
  */
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 
 export type AgentMode = 'chat' | 'plan' | 'agent';
 export type AgentPhase = 'idle' | 'gather' | 'act' | 'verify';
@@ -42,6 +42,9 @@ export interface ApprovalRequest {
   readonly detail: string;
   readonly path?: string;
   readonly cmd?: string;
+  /** Diff preview (kind === 'diff') — truncated for the wire. */
+  readonly before?: string;
+  readonly after?: string;
   readonly state: ApprovalState;
 }
 
@@ -111,6 +114,7 @@ export type ViewMessage =
       /** Must match ApprovalRequest.sessionId when fleet is active. */
       readonly sessionId?: string;
     }
+  | { readonly type: 'openDiff'; readonly path: string; readonly before: string; readonly after: string }
   | { readonly type: 'signIn' }
   | { readonly type: 'openProvenance'; readonly surface: MemorySurface; readonly ts: number }
   | { readonly type: 'setBrand'; readonly brand: BrandColors }

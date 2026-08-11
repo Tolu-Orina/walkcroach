@@ -19,7 +19,8 @@ other things depend on.
 3. `npm run zip:prod`, upload, fill the dashboard fields (§5).
 4. **Record the assigned extension ID.** Then, in order:
    - `enterprise/policies.json` — replaces `EXTENSION_ID_REPLACE_ME`
-   - Terraform `extension_origins` — enables presigned screenshot upload
+   - Terraform `chrome_extension_id` in `environments/*.tfvars` — captures CORS +
+     Chrome Lambda `CHROME_EXTENSION_IDS`
    - The ID table at the top of `SUBMISSION_CHECKLIST.md`
 5. Review typically takes days, not hours. If it is rejected, the reasons are
    almost always the permission justifications or the data-handling disclosure —

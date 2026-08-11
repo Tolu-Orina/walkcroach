@@ -34,26 +34,70 @@ describeDb('local API — CRDB integration', () => {
   async function createProject(
     ownerId: string,
     name: string,
-  ): Promise<string> {
+    opts?: { templateId?: string; kind?: 'app' | 'knowledge' },
+  ): Promise<{ id: string; kind: string; templateId: string | null }> {
     const res = await api()
       .post('/projects')
       .set('Authorization', devBearer(ownerId))
-      .send({ name, templateId: 'todo' })
+      .send({
+        name,
+        templateId: opts?.templateId ?? 'todo',
+        kind: opts?.kind,
+      })
       .expect(201);
     const id = res.body.id as string;
     createdProjectIds.push(id);
-    return id;
+    return {
+      id,
+      kind: res.body.kind as string,
+      templateId: (res.body.templateId ?? null) as string | null,
+    };
   }
 
   it('POST /projects creates a project for authenticated user', async () => {
-    const id = await createProject(ownerA, 'API integration project');
+    const { id } = await createProject(ownerA, 'API integration project');
     expect(id).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
     );
   });
 
+  it('POST /projects kind=knowledge forces templateId null', async () => {
+    const created = await createProject(ownerA, 'Knowledge project', {
+      kind: 'knowledge',
+      templateId: 'blank',
+    });
+    expect(created.kind).toBe('knowledge');
+    expect(created.templateId).toBeNull();
+
+    const listed = await api()
+      .get('/projects?kind=knowledge')
+      .set('Authorization', devBearer(ownerA))
+      .expect(200);
+    const ids = (listed.body.projects as Array<{ id: string; kind: string }>).map(
+      (p) => p.id,
+    );
+    expect(ids).toContain(created.id);
+
+    const appsOnly = await api()
+      .get('/projects?kind=app')
+      .set('Authorization', devBearer(ownerA))
+      .expect(200);
+    const appIds = (
+      appsOnly.body.projects as Array<{ id: string }>
+    ).map((p) => p.id);
+    expect(appIds).not.toContain(created.id);
+  });
+
+  it('POST /projects rejects kind=general', async () => {
+    await api()
+      .post('/projects')
+      .set('Authorization', devBearer(ownerA))
+      .send({ name: 'Nope', kind: 'general' })
+      .expect(400);
+  });
+
   it('GET /projects returns only the caller projects', async () => {
-    const id = await createProject(ownerA, 'Listed project');
+    const { id } = await createProject(ownerA, 'Listed project');
 
     const res = await api()
       .get('/projects')
@@ -66,7 +110,7 @@ describeDb('local API — CRDB integration', () => {
   });
 
   it('GET /projects/:id returns 404 for non-owner', async () => {
-    const id = await createProject(ownerA, 'Owner A only');
+    const { id } = await createProject(ownerA, 'Owner A only');
 
     await api()
       .get(`/projects/${id}`)
@@ -75,7 +119,7 @@ describeDb('local API — CRDB integration', () => {
   });
 
   it('POST /projects/:id/secrets stores write-only; GET returns masked keys only', async () => {
-    const id = await createProject(ownerA, 'Secrets project');
+    const { id } = await createProject(ownerA, 'Secrets project');
     const secretValue = 'sk_live_api_integration_must_not_leak_12345678';
 
     await api()
@@ -98,7 +142,7 @@ describeDb('local API — CRDB integration', () => {
   });
 
   it('rejects invalid secret key names', async () => {
-    const id = await createProject(ownerA, 'Invalid secret key');
+    const { id } = await createProject(ownerA, 'Invalid secret key');
 
     const res = await api()
       .post(`/projects/${id}/secrets`)
@@ -110,7 +154,7 @@ describeDb('local API — CRDB integration', () => {
   });
 
   it('POST /proxy/:projectId/sql returns 404 for non-owner (cross-project)', async () => {
-    const id = await createProject(ownerA, 'Proxy owner A');
+    const { id } = await createProject(ownerA, 'Proxy owner A');
 
     const res = await api()
       .post(`/proxy/${id}/sql`)
@@ -122,7 +166,7 @@ describeDb('local API — CRDB integration', () => {
   });
 
   it('POST /proxy/:projectId/http requires https URL', async () => {
-    const id = await createProject(ownerA, 'Proxy http validation');
+    const { id } = await createProject(ownerA, 'Proxy http validation');
 
     const res = await api()
       .post(`/proxy/${id}/http`)

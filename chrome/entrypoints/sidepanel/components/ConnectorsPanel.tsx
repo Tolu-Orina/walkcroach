@@ -87,18 +87,18 @@ export function ConnectorsPanel({
                       aria-busy={busyProvider === p.id}
                       /*
                         The label tracks the state. A static "Disconnect Gmail"
-                        overrides the visible "Removing…" for a screen reader,
+                        overrides the visible "Disconnecting…" for a screen reader,
                         so the one user who cannot see the button changing is
                         also the one told nothing is happening.
                       */
                       aria-label={
                         busyProvider === p.id
-                          ? `Removing ${p.label}…`
+                          ? `Disconnecting ${p.label}…`
                           : `Disconnect ${p.label}`
                       }
                       onClick={() => onDisconnect(p.id)}
                     >
-                      {busyProvider === p.id ? 'Removing…' : 'Disconnect'}
+                      {busyProvider === p.id ? 'Disconnecting…' : 'Disconnect'}
                     </button>
                   ) : (
                     <span className="wc-muted wc-small">Not connected</span>

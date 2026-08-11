@@ -23,22 +23,21 @@ export function sdkBaseUrl(): string {
 }
 
 /**
- * Prefer real Cognito access_token; fall back to id_token / BFF bearer.
- * Device sessions cannot call IDE `/v1` — returns undefined.
+ * Cognito access_token only — never the id_token / BFF bearer.
+ *
+ * BFF routes accept the id_token; IDE `/v1` (SDK) requires the real access_token
+ * stored by Web PKCE sign-in. Falling back to id_token caused silent 401s after
+ * paste-upgrade or partial storage. Device sessions cannot call `/v1`.
  */
 export async function getSdkAccessToken(): Promise<string | undefined> {
   const session = await loadSession();
   if (!session || session.source !== 'cognito') return undefined;
 
-  const data = await chrome.storage.local.get([
-    'wc_cognito_access_token',
-    'wc_id_token',
-    'wc_access_token',
-  ]);
-  const cognitoAccess = (data.wc_cognito_access_token as string | undefined)?.trim();
-  const idToken = (data.wc_id_token as string | undefined)?.trim();
-  const bearer = session.accessToken?.trim();
-  return cognitoAccess || idToken || bearer || undefined;
+  const data = await chrome.storage.local.get(['wc_cognito_access_token']);
+  const cognitoAccess = (
+    data.wc_cognito_access_token as string | undefined
+  )?.trim();
+  return cognitoAccess || undefined;
 }
 
 /**
@@ -49,7 +48,7 @@ export async function createWalkCroachClient(): Promise<WalkCroach> {
   const accessToken = await getSdkAccessToken();
   if (!accessToken) {
     throw new Error(
-      'Project memory requires a signed-in WalkCroach account (Cognito).',
+      'Project memory needs a fresh WalkCroach sign-in (missing Cognito access token). Open Account and Sign in with WalkCroach.',
     );
   }
   return new WalkCroach({

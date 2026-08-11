@@ -59,8 +59,8 @@ export function LandingNav({ showGuest = false, authenticated = false }: Props) 
         <div className="ml-auto flex shrink-0 items-center gap-2">
           <LandingThemeToggle />
           {authenticated ? (
-            <Link to="/app/chat" className="lp-btn-primary">
-              Open Chat
+            <Link to="/app/builder" className="lp-btn-primary">
+              Start building
             </Link>
           ) : (
             <>

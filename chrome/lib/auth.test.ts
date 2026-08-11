@@ -373,6 +373,9 @@ describe('upgradeToCognito', () => {
     expect(session.ownerId).toBe('cognito-sub');
     expect(session.deviceKey).toBe('dk');
     expect(session.expiresAt).toBeGreaterThan(Date.now());
+    // Opaque paste must not claim to be a Cognito access_token for the SDK.
+    expect(storage['wc_cognito_access_token']).toBeUndefined();
+    expect(storage['wc_id_token']).toBe('cognito-access');
   });
 });
 
@@ -519,5 +522,66 @@ describe('startWebSignIn', () => {
   it('throws when the Web URL is not configured', async () => {
     const { startWebSignIn } = await import('./auth');
     await expect(startWebSignIn('')).rejects.toThrow(/not configured/);
+  });
+});
+
+describe('signOutToDevice', () => {
+  it('revokes Cognito via the BFF before clearing local slots', async () => {
+    storage.wc_device_key = 'dk';
+    storage.wc_access_token = 'id-bearer';
+    storage.wc_owner_id = 'sub';
+    storage.wc_auth_source = 'cognito';
+    storage.wc_cognito_access_token = 'access-tok';
+    storage.wc_refresh_token = 'refresh-tok';
+    storage.wc_id_token = 'id-tok';
+
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+
+    const { signOutToDevice } = await import('./auth');
+    const session = await signOutToDevice(async (deviceKey) => ({
+      accessToken: 'device-jwt',
+      ownerId: 'anon:device:x',
+      deviceKey,
+      expiresIn: 3600,
+    }));
+
+    expect(fetchMock).toHaveBeenCalled();
+    const revokeCall = fetchMock.mock.calls.find(([url]) =>
+      String(url).includes('/oauth/revoke'),
+    );
+    expect(revokeCall).toBeTruthy();
+    expect(JSON.parse(String(revokeCall![1]?.body))).toEqual({
+      accessToken: 'access-tok',
+      refreshToken: 'refresh-tok',
+    });
+    expect(session.source).toBe('device');
+    expect(storage.wc_cognito_access_token).toBeUndefined();
+    expect(storage.wc_refresh_token).toBeUndefined();
+  });
+
+  it('still remints a device session if Cognito revoke fails', async () => {
+    storage.wc_device_key = 'dk';
+    storage.wc_access_token = 'id-bearer';
+    storage.wc_owner_id = 'sub';
+    storage.wc_auth_source = 'cognito';
+    storage.wc_cognito_access_token = 'access-tok';
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('nope', { status: 502 }),
+    );
+
+    const { signOutToDevice } = await import('./auth');
+    const session = await signOutToDevice(async () => ({
+      accessToken: 'device-jwt',
+      ownerId: 'anon:device:y',
+      deviceKey: 'dk',
+    }));
+    expect(session.source).toBe('device');
+    expect(session.accessToken).toBe('device-jwt');
   });
 });

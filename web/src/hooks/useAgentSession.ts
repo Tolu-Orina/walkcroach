@@ -431,7 +431,8 @@ export function useAgentSession(
           try {
             const detail = await getSession(existing.sessionId);
             if (cancelled) return;
-            if (detail.projectId !== projectId) {
+            const sessionMode = detail.mode ?? 'builder';
+            if (detail.projectId !== projectId || sessionMode !== 'builder') {
               localStorage.removeItem(storageKey(projectId));
             } else {
               setSessionId(detail.id);
@@ -453,10 +454,15 @@ export function useAgentSession(
         }
 
         try {
-          const latest = await getLatestSession(projectId);
+          const latest = await getLatestSession(projectId, 'builder');
           if (!cancelled && latest.sessionId) {
             const detail = await getSession(latest.sessionId);
-            if (!cancelled && detail.projectId === projectId) {
+            const sessionMode = detail.mode ?? 'builder';
+            if (
+              !cancelled &&
+              detail.projectId === projectId &&
+              sessionMode === 'builder'
+            ) {
               saveStored({ projectId, sessionId: detail.id });
               setSessionId(detail.id);
               setPendingPlan(hydratePendingPlan(detail));
@@ -473,10 +479,10 @@ export function useAgentSession(
             }
           }
         } catch {
-          /* no sessions yet — create below */
+          /* no builder sessions yet — create below */
         }
 
-        const session = await createSession(projectId);
+        const session = await createSession(projectId, 'builder');
         saveStored({ projectId, sessionId: session.id });
         if (!cancelled) {
           setSessionId(session.id);

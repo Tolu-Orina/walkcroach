@@ -143,7 +143,7 @@ describe('ConnectorsPanel — actions', () => {
       />,
     );
     // The accessible name tracks the state too, not just the visible text.
-    const btn = screen.getByRole('button', { name: 'Removing Gmail…' });
+    const btn = screen.getByRole('button', { name: 'Disconnecting Gmail…' });
     expect(btn).toBeDisabled();
     expect(btn).toHaveAttribute('aria-busy', 'true');
   });

@@ -1,10 +1,10 @@
 {
   "_comment": "WalkCroach Chrome — managed-install SAMPLE (NFR-C08). Read enterprise/README.md before applying; it explains two settings that were wrong in the previous version of this file. Replace EXTENSION_ID_REPLACE_ME with the ID the Chrome Web Store assigns on first publish (see chrome/VERSIONING.md).",
   "ExtensionInstallForcelist": [
-    "EXTENSION_ID_REPLACE_ME;https://clients2.google.com/service/update2/crx"
+    "oljdeopppkgfjeoobgochpddchlhmeaj;https://clients2.google.com/service/update2/crx"
   ],
   "ExtensionSettings": {
-    "EXTENSION_ID_REPLACE_ME": {
+    "oljdeopppkgfjeoobgochpddchlhmeaj": {
       "installation_mode": "force_installed",
       "update_url": "https://clients2.google.com/service/update2/crx",
       "toolbar_pin": "force_pinned",

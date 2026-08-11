@@ -68,6 +68,26 @@ variable "chrome_lambda_memory_mb" {
   default     = 512
 }
 
+variable "chrome_extension_id" {
+  type        = string
+  description = <<-EOT
+    Published Chrome Web Store extension ID ([a-p]{32}). When set:
+      - captures bucket CORS allows chrome-extension://<id> (presigned screenshot PUT)
+      - Chrome Lambda CHROME_EXTENSION_IDS locks BFF CORS to that ID
+    Empty leaves CORS open to any extension Origin and disables captures CORS
+    (upload falls back through the Lambda).
+  EOT
+  default     = ""
+
+  validation {
+    condition = (
+      var.chrome_extension_id == "" ||
+      can(regex("^[a-p]{32}$", var.chrome_extension_id))
+    )
+    error_message = "chrome_extension_id must be empty or a 32-character Chrome id matching [a-p]{32}."
+  }
+}
+
 variable "ide_lambda_zip_path" {
   type        = string
   description = "Path to IDE Lambda zip. Empty = modules/lambda-ide/.build/lambda.zip"

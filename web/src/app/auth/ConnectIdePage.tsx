@@ -7,7 +7,7 @@ import { AuthCard, AuthError, AuthLink } from '../../components/auth/AuthCard';
 
 /** Must stay in sync with IDE BFF oauth redirect allowlist. */
 const REDIRECT_PATTERN =
-  /^(vscode|cursor|vscode-insiders|vscodium|windsurf|code-oss):\/\/walkcroach\.walkcroach-ide\/auth$/;
+  /^(vscode|cursor|vscode-insiders|vscodium|windsurf|code-oss|walkcroach):\/\/walkcroach\.walkcroach-ide\/auth$/;
 
 const DEFAULT_REDIRECT = 'vscode://walkcroach.walkcroach-ide/auth';
 

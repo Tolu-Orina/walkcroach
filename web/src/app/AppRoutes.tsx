@@ -46,10 +46,18 @@ function LegacyProjectRedirect() {
   return <Navigate to={`/app/projects/${projectId}`} replace />;
 }
 
+/** Phase 6: old `/app/projects/:id/builder` → `/app/builder/:id`. */
+function LegacyBuilderWorkspaceRedirect() {
+  const { projectId } = useParams<{ projectId: string }>();
+  if (!projectId) return <Navigate to="/app/builder" replace />;
+  return <Navigate to={`/app/builder/${projectId}`} replace />;
+}
+
 function ProjectRoute() {
   const { projectId } = useParams<{ projectId: string }>();
   const [name, setName] = useState<string | null>(null);
   const [templateId, setTemplateId] = useState<string | null>(null);
+  const [kind, setKind] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -61,6 +69,7 @@ function ProjectRoute() {
         if (!cancelled) {
           setName(project.name);
           setTemplateId(project.templateId);
+          setKind(project.kind ?? 'app');
         }
       } catch (err) {
         if (!cancelled) {
@@ -81,12 +90,17 @@ function ProjectRoute() {
       </div>
     );
   }
-  if (!name) {
+  if (!name || !kind) {
     return (
       <AppShell wide>
         <ProjectPageSkeleton />
       </AppShell>
     );
+  }
+
+  // App Builder only opens kind=app workspaces (ADR-0004 Phase 2).
+  if (kind !== 'app') {
+    return <Navigate to={`/app/projects/${projectId}`} replace />;
   }
 
   return (
@@ -107,7 +121,7 @@ function TryRoute() {
         const pending = peekPendingPrompt();
         const templateId = pending?.templateId ?? 'blank';
         const name = pending ? projectNameFromPrompt(pending.prompt) : 'Guest scratch';
-        const { id } = await createProject(name, templateId);
+        const { id } = await createProject(name, templateId, { kind: 'app' });
         if (!cancelled) setProjectId(id);
       } catch (err) {
         if (!cancelled) {
@@ -121,7 +135,7 @@ function TryRoute() {
   }, [status]);
 
   if (status === 'authenticated') {
-    return <Navigate to="/app/projects" replace />;
+    return <Navigate to="/app/builder" replace />;
   }
 
   if (error) {
@@ -235,12 +249,20 @@ export function AppRoutes() {
         element={<LegacyProjectRedirect />}
       />
       <Route
-        path="/app/projects/:projectId/builder"
+        path="/app/builder/:projectId"
         element={
           <ProtectedRoute requireSignedIn>
             <ErrorBoundary label="builder">
               <ProjectRoute />
             </ErrorBoundary>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/app/projects/:projectId/builder"
+        element={
+          <ProtectedRoute requireSignedIn>
+            <LegacyBuilderWorkspaceRedirect />
           </ProtectedRoute>
         }
       />

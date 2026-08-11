@@ -31,6 +31,15 @@ function makeUserId(prefix: 'user' | 'anon'): string {
   return `${prefix}:${crypto.randomUUID()}`;
 }
 
+/** Stable owner for “Continue locally (dev)” so local data survives re-sign-in. */
+const LOCAL_DEBUGGER_ID = 'user:local-debugger';
+
+function resolveDevUserId(displayName: string): string {
+  return displayName === 'Local Debugger'
+    ? LOCAL_DEBUGGER_ID
+    : makeUserId('user');
+}
+
 function devToken(ownerId: string): string {
   return `dev:${ownerId}`;
 }
@@ -118,10 +127,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Local debug: allow forged Bearer tokens when VITE_ALLOW_DEV_AUTH=true,
       // even if Cognito client env is also present.
       if (cognitoEnabled && !devAuthAllowed) return;
-      const id = makeUserId('user');
+      const display = displayName?.trim() || 'Builder';
+      const id = resolveDevUserId(display);
       const user: AuthUser = {
         id,
-        displayName: displayName?.trim() || 'Builder',
+        displayName: display,
         isAnonymous: false,
       };
       applySession(setState, { user, token: devToken(id) });

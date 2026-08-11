@@ -4,6 +4,7 @@ import {
   rememberProjectMemory,
   type ProjectMemoryEntry,
 } from '../../../lib/sdkClient';
+import { formatUiError } from '../../../lib/errors';
 
 type ProjectMemoryPanelProps = {
   projectId: string;
@@ -11,6 +12,32 @@ type ProjectMemoryPanelProps = {
   /** Only Cognito sessions can call IDE `/v1`. */
   enabled: boolean;
 };
+
+const KIND_LABELS: Record<string, string> = {
+  preference: 'Preference',
+  decision: 'Decision',
+  note: 'Note',
+  fact: 'Fact',
+  capture: 'Capture',
+};
+
+const SURFACE_LABELS: Record<string, string> = {
+  chrome: 'Chrome',
+  web: 'Web',
+  ide: 'IDE',
+  cli: 'CLI',
+  sdk: 'SDK',
+  desktop: 'Desktop',
+};
+
+/** Memory kinds and surfaces arrive as raw API enums — show people words. */
+export function humanizeMemoryKind(kind: string): string {
+  return KIND_LABELS[kind] ?? kind.charAt(0).toUpperCase() + kind.slice(1);
+}
+
+export function humanizeMemorySurface(surface: string): string {
+  return SURFACE_LABELS[surface] ?? surface;
+}
 
 /**
  * Linked-project memory via `@walkcroach/sdk` (list + remember).
@@ -25,21 +52,26 @@ export function ProjectMemoryPanel({
   const [open, setOpen] = useState(true);
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!enabled || !projectId) {
       setEntries([]);
+      setLoading(false);
       return;
     }
+    setLoading(true);
     try {
       const mem = await listProjectMemory(projectId);
       setEntries((mem.entries ?? []).slice(0, 12));
       setError(null);
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : 'Could not load project memory',
+        formatUiError(err, 'Couldn’t load project memory. Try again.'),
       );
+    } finally {
+      setLoading(false);
     }
   }, [enabled, projectId]);
 
@@ -64,21 +96,21 @@ export function ProjectMemoryPanel({
         await load();
       })
       .catch((err) =>
-        setError(err instanceof Error ? err.message : 'Remember failed'),
+        setError(formatUiError(err, 'Couldn’t save that note. Try again.')),
       )
       .finally(() => setBusy(false));
   };
 
   return (
-    <div className="wc-section" style={{ marginTop: 12 }}>
+    <div className="wc-section wc-project-memory">
       <button
         type="button"
-        className="wc-btn wc-btn--ghost"
-        style={{ width: '100%', justifyContent: 'space-between' }}
+        className="wc-btn wc-btn--ghost wc-project-memory__toggle"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
+        aria-label={open ? 'Hide project memory' : 'Show project memory'}
       >
-        <span className="wc-section__title" style={{ margin: 0 }}>
+        <span className="wc-section__title wc-project-memory__title">
           Project memory
           {entries.length ? ` · ${entries.length}` : ''}
         </span>
@@ -88,8 +120,8 @@ export function ProjectMemoryPanel({
         <>
           <p className="wc-muted wc-small">
             Shared with
-            {projectName ? ` “${projectName}”` : ' your linked Web project'} via
-            the WalkCroach memory API.
+            {projectName ? ` “${projectName}”` : ' your linked Web project'}{' '}
+            across WalkCroach.
           </p>
           {error && <p className="wc-error">{error}</p>}
           <div className="wc-ask">
@@ -113,17 +145,28 @@ export function ProjectMemoryPanel({
               disabled={busy || !note.trim()}
               onClick={onRemember}
             >
-              Remember
+              Remember note
             </button>
           </div>
-          {entries.length > 0 ? (
+          {loading && !entries.length && !error ? (
+            <div className="wc-skeleton-stack" aria-busy="true">
+              <span className="wc-sr-only" role="status">
+                Loading project memory
+              </span>
+              <div className="wc-skeleton" style={{ width: '70%' }} />
+              <div className="wc-skeleton" style={{ width: '90%' }} />
+              <div className="wc-skeleton" style={{ width: '55%' }} />
+            </div>
+          ) : entries.length > 0 ? (
             <ul className="wc-list">
               {entries.map((e) => (
                 <li key={e.id}>
                   <div className="wc-list__body">
                     <span className="wc-list__title">
-                      {e.kind}
-                      {e.sourceSurface ? ` · ${e.sourceSurface}` : ''}
+                      {humanizeMemoryKind(e.kind)}
+                      {e.sourceSurface
+                        ? ` · ${humanizeMemorySurface(e.sourceSurface)}`
+                        : ''}
                     </span>
                     <span className="wc-list__sub">{e.text}</span>
                   </div>
@@ -133,8 +176,8 @@ export function ProjectMemoryPanel({
           ) : (
             !error && (
               <p className="wc-muted wc-small">
-                No project memories yet — save a page (mirrors as capture) or
-                remember a note above.
+                No project memories yet — save a page on the Page tab, or add a
+                note above.
               </p>
             )
           )}

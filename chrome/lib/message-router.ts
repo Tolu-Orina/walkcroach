@@ -71,7 +71,7 @@ export async function routeMessage(
     }
 
     /**
-     * "I clicked it — check again".
+     * "Check this tab again" (unknown-state retry).
      *
      * The button used to send GET_PAGE_CONTEXT, which only re-ran the
      * classifier — and the classifier returns `unknown` precisely because
@@ -102,28 +102,14 @@ export async function routeMessage(
     }
 
     /**
-     * Best-effort warm: spends a live `activeTab` window (or an existing grant)
-     * once, so the panel is instant later. Silent on failure by design — this
-     * runs on panel open, and a failure here is not a user-facing error.
+     * Classify the focused tab for the panel — never extract page text.
+     *
+     * Runs on panel open. Reading the page here would contradict "only when you
+     * click an action". Cache fills on GET_ACTIVE_EXTRACT / explicit actions.
      */
     case 'WARM_PAGE_CONTEXT': {
       const access = await deps.getAccess();
-      if (access.status !== 'ready') {
-        // activeTab may still be live even when tab.url was hidden; try anyway.
-        if (access.status === 'unknown') {
-          const extract = await deps.extract(access.tabId);
-          if (extract) {
-            await deps.writeCache(access.tabId, extract);
-            return { ok: true, access, warmed: true };
-          }
-        }
-        return { ok: true, access, warmed: false };
-      }
-      const cached = await deps.readCache(access.tabId, access.url);
-      if (cached) return { ok: true, access, warmed: true };
-      const extract = await deps.extract(access.tabId);
-      if (extract) await deps.writeCache(access.tabId, extract);
-      return { ok: true, access, warmed: Boolean(extract) };
+      return { ok: true, access, warmed: false };
     }
 
     case 'GET_ACTIVE_TAB_INFO': {
@@ -149,8 +135,13 @@ export async function routeMessage(
         if (cached) return { ok: true, access, extract: cached, cached: true };
       }
       if (isDeadEnd(access)) return { ok: false, access };
-      // 'needs-grant' and 'unknown' still get one attempt: a live activeTab
-      // window can satisfy them, and succeeding beats a correct refusal.
+      // Durable grant required for known origins. Best-effort extract on
+      // `needs-grant` contradicted "only when Allowed" and could cache text
+      // before the user clicked Allow. Panel `preparePage` requests the grant
+      // first; the worker must refuse if that grant is still missing.
+      // `unknown` may still attempt once: a live toolbar `activeTab` window can
+      // reveal the URL without a prior optional-host grant.
+      if (access.status === 'needs-grant') return { ok: false, access };
       const extract = await deps.extract(access.tabId);
       if (!extract) return { ok: false, access };
       await deps.writeCache(access.tabId, extract);
@@ -159,7 +150,7 @@ export async function routeMessage(
 
     case 'INSERT_DRAFT': {
       const text = (message.payload as { text?: string } | undefined)?.text;
-      if (!text) return { ok: false, error: 'text required' };
+      if (!text) return { ok: false, error: 'Nothing to insert.' };
       const access = await deps.getAccess();
       if (isDeadEnd(access)) return { ok: false, access };
       try {
@@ -169,7 +160,7 @@ export async function routeMessage(
             ok: false,
             error:
               result.reason ??
-              'no focused field — click into a text box on the page, then Insert again (or Copy)',
+              'No focused field — click into a text box on the page, then Insert again (or Copy response)',
           };
         }
         return { ok: true };
@@ -200,7 +191,11 @@ export async function routeMessage(
       try {
         const screenshot = await deps.captureScreenshot(access.tabId);
         if (!screenshot) {
-          return { ok: false, access, error: 'could not encode the screenshot' };
+          return {
+            ok: false,
+            access,
+            error: 'Couldn’t capture the screenshot. Try again.',
+          };
         }
         return { ok: true, access, screenshot };
       } catch (err) {
@@ -225,6 +220,6 @@ export async function routeMessage(
     }
 
     default:
-      return { ok: false, error: 'unhandled' };
+      return { ok: false, error: 'Something went wrong. Try again.' };
   }
 }

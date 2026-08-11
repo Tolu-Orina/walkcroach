@@ -1,9 +1,11 @@
 import {
   exchangeOauthToken,
   refreshCognitoSession,
+  revokeCognitoSession,
   upgradeAuth,
   WEB_APP_URL,
 } from './api';
+import { classifyCognitoJwt } from './cognito-jwt';
 import { generatePkce, PKCE_METHOD } from './pkce';
 
 const DEVICE_KEY = 'wc_device_key';
@@ -22,11 +24,16 @@ async function storeCognitoTokenPair(tokens: {
   id_token?: string;
 }): Promise<void> {
   const patch: Record<string, string | null> = {};
-  if (tokens.access_token?.trim()) {
-    patch[COGNITO_ACCESS_TOKEN] = tokens.access_token.trim();
+  const access = tokens.access_token?.trim();
+  const id = tokens.id_token?.trim();
+  // Never put an id JWT into the SDK access slot.
+  if (access && classifyCognitoJwt(access) !== 'id') {
+    patch[COGNITO_ACCESS_TOKEN] = access;
   }
-  if (tokens.id_token?.trim()) {
-    patch[ID_TOKEN] = tokens.id_token.trim();
+  if (id) {
+    patch[ID_TOKEN] = id;
+  } else if (access && classifyCognitoJwt(access) === 'id') {
+    patch[ID_TOKEN] = access;
   }
   if (Object.keys(patch).length) {
     await chrome.storage.local.set(patch);
@@ -391,13 +398,17 @@ export async function completeWebSignIn(
     throw new Error('No device session to upgrade. Reopen the side panel first.');
   }
 
-  // Prefer ID token (matches Web/IDE); fall back to access_token.
-  const cognitoToken = (
-    tokens.id_token ??
-    tokens.access_token
-  ).trim();
+  // Prefer ID token for BFF Bearer (matches Web/IDE); keep real access separate.
+  const idToken = (tokens.id_token ?? '').trim();
+  const accessToken = (tokens.access_token ?? '').trim();
+  const cognitoToken = (idToken || accessToken).trim();
   if (!cognitoToken) {
     throw new Error('Connect response missing tokens.');
+  }
+  if (!accessToken) {
+    throw new Error(
+      'Connect response missing Cognito access token. Sign in again on WalkCroach Web.',
+    );
   }
 
   // Re-connect after prior Cognito upgrade: ownerId is already the Cognito sub.
@@ -424,15 +435,19 @@ export async function completeWebSignIn(
     [REFRESH_TOKEN]: tokens.refresh_token ?? null,
   });
   await storeCognitoTokenPair({
-    access_token: tokens.access_token,
-    id_token: tokens.id_token ?? cognitoToken,
+    access_token: accessToken,
+    id_token: idToken || cognitoToken,
   });
   await chrome.storage.session.remove(OAUTH_PENDING);
   return session;
 }
 
 /**
- * After Cognito sign-in (paste fallback): merge anon workspaces/captures.
+ * Dev/test helper: upgrade a device session with a raw Cognito JWT.
+ * Product UI uses `startWebSignIn` only (same Web `/connect/chrome` flow as IDE).
+ *
+ * Stores access vs id tokens by JWT `token_use` — never copies one JWT into both
+ * slots (that blurred BFF Bearer vs SDK `/v1` credentials).
  */
 export async function upgradeToCognito(
   cognitoAccessToken: string,
@@ -455,11 +470,13 @@ export async function upgradeToCognito(
     expiresAt,
   };
   await saveSession(session);
-  // Paste upgrade: treat the pasted JWT as the SDK bearer (often an id token).
-  await storeCognitoTokenPair({
-    access_token: cognitoAccessToken,
-    id_token: cognitoAccessToken,
-  });
+  const kind = classifyCognitoJwt(cognitoAccessToken);
+  if (kind === 'access') {
+    await storeCognitoTokenPair({ access_token: cognitoAccessToken });
+  } else {
+    // id or opaque: BFF bearer only. SDK requires a real access_token from PKCE.
+    await storeCognitoTokenPair({ id_token: cognitoAccessToken });
+  }
   return session;
 }
 
@@ -474,6 +491,24 @@ export async function signOutToDevice(
 ): Promise<StoredSession> {
   const existing = await loadSession();
   const deviceKey = existing?.deviceKey ?? mintClientDeviceKey();
+
+  // Best-effort Cognito revoke before clearing local slots (matches Web).
+  if (existing?.source === 'cognito') {
+    const data = await chrome.storage.local.get([
+      COGNITO_ACCESS_TOKEN,
+      REFRESH_TOKEN,
+    ]);
+    const accessToken = (data[COGNITO_ACCESS_TOKEN] as string | undefined)?.trim();
+    const refreshToken = (data[REFRESH_TOKEN] as string | undefined)?.trim();
+    if (accessToken || refreshToken) {
+      try {
+        await revokeCognitoSession({ accessToken, refreshToken });
+      } catch {
+        // Local sign-out must still succeed if Cognito is unreachable.
+      }
+    }
+  }
+
   await chrome.storage.local.remove([
     REFRESH_TOKEN,
     ID_TOKEN,

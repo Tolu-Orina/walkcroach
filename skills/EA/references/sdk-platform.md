@@ -84,7 +84,7 @@ Ordered by leverage / risk:
 
 | Step | Change | Why |
 |---|---|---|
-| A | Mint + manage keys in **Web settings** (and later portal) | Unblocks external + dogfood |
+| A | Mint + manage keys in **Web settings** (and later portal) | Unblocks external + first-party adopters |
 | B | Point IDE/CLI memory bridges at the same handlers the SDK uses (or import `@walkcroach/sdk` server-side) | Deletes duplicate clients; proves SDK |
 | C | Chrome/Web memory write/recall paths align on same kinds + supersede rules (already CRDB; ensure API parity) | Cross-surface truth |
 | D | Extract shared `AgentEvent` / tool-result DTOs only where both loops need them | Stops silent drift |

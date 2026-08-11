@@ -170,7 +170,7 @@ function IconDeveloper() {
 const NAV_ITEMS: RailItem[] = [
   { to: '/app/chat', label: 'Chat', end: true, icon: <IconChat /> },
   { to: '/app/projects', label: 'Projects', icon: <IconFolder /> },
-  { to: '/app/builder', label: 'Builder', icon: <IconBuilder /> },
+  { to: '/app/builder', label: 'App Builder', icon: <IconBuilder /> },
   { to: '/app/code', label: 'Code', icon: <IconCode /> },
   { to: '/app/apps', label: 'Apps', icon: <IconApps /> },
   { to: '/app/developer', label: 'Developer', icon: <IconDeveloper /> },
@@ -187,6 +187,7 @@ function RailNavLink({
   const builderActive =
     item.to === '/app/builder' &&
     (location.pathname === '/app/builder' ||
+      /^\/app\/builder\/[^/]+/.test(location.pathname) ||
       location.pathname.includes('/builder'));
   const developerActive =
     item.to === '/app/developer' &&
@@ -238,7 +239,7 @@ function EcosystemRail() {
     try {
       const [{ id }, projects] = await Promise.all([
         ensureChatWorkspace(),
-        listProjects(),
+        listProjects({ kind: 'knowledge' }),
       ]);
       setProjectCount(projects.length);
       const sessions = await listChatSessions(id);
@@ -479,9 +480,12 @@ function EcosystemRail() {
 
 function EcosystemShellInner({ children }: { children?: ReactNode }) {
   const location = useLocation();
+  // App Builder *workspace* owns the viewport (AppShell). Hub keeps the rail.
   const focusBuilder =
-    location.pathname.includes('/builder') ||
-    location.pathname.startsWith('/project/');
+    /^\/app\/builder\/[^/]+/.test(location.pathname) ||
+    /\/projects\/[^/]+\/builder(?:\/|$)/.test(location.pathname) ||
+    location.pathname.startsWith('/project/') ||
+    location.pathname === '/try';
 
   // Builder owns the viewport (its own AppShell) — no ecosystem rail.
   if (focusBuilder) {

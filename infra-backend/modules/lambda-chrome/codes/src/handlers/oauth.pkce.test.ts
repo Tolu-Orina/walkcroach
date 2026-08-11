@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, vi } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { createHash, randomBytes } from 'node:crypto';
 import type { AuthContext } from '../auth.js';
 
@@ -31,7 +31,8 @@ vi.mock('@walkcroach/db', () => ({
   }),
 }));
 
-const { handleCreateSessionCode, handleExchangeToken } = await import('./oauth.js');
+const { handleCreateSessionCode, handleExchangeToken, handleRevokeToken } =
+  await import('./oauth.js');
 
 const RFC_VERIFIER = 'dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk';
 const RFC_CHALLENGE = 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM';
@@ -66,6 +67,8 @@ const issue = (over: Record<string, unknown> = {}) =>
       redirectUri: REDIRECT,
       codeChallenge: RFC_CHALLENGE,
       codeChallengeMethod: 'S256',
+      accessToken: 'cognito-access-token',
+      idToken: 'cognito-id-token',
       ...over,
     }),
     'cognito-id-token',
@@ -101,6 +104,30 @@ describe('handleCreateSessionCode — PKCE is mandatory', () => {
     expect(insert?.sql).toMatch(/code_challenge, code_challenge_method/);
     expect(insert?.params).toContain(RFC_CHALLENGE);
     expect(insert?.params).toContain('S256');
+  });
+
+  it('stores Cognito access and id in distinct columns', async () => {
+    await issue();
+    const insert = queries.find((q) => /INSERT INTO chrome_auth_codes/.test(q.sql));
+    // $5 access_token, $7 id_token
+    expect(insert?.params?.[4]).toBe('cognito-access-token');
+    expect(insert?.params?.[6]).toBe('cognito-id-token');
+  });
+
+  it('refuses when accessToken is missing (Web Bearer must not fill that slot)', async () => {
+    const res = await issue({ accessToken: undefined });
+    expect(res.statusCode).toBe(400);
+    expect(body(res).error).toMatch(/accessToken is required/);
+    expect(queries.some((q) => /INSERT INTO chrome_auth_codes/.test(q.sql))).toBe(false);
+  });
+
+  it('refuses when accessToken equals idToken', async () => {
+    const res = await issue({
+      accessToken: 'same',
+      idToken: 'same',
+    });
+    expect(res.statusCode).toBe(400);
+    expect(body(res).error).toMatch(/distinct/);
   });
 
   it('refuses to issue a code with no challenge', async () => {
@@ -176,5 +203,61 @@ describe('handleExchangeToken — proof of possession', () => {
     updateRows = [];
     const unknownCode = body(await exchange());
     expect(pkceFail).toEqual(unknownCode);
+  });
+});
+
+describe('handleRevokeToken', () => {
+  const prevClient = process.env.COGNITO_CLIENT_ID;
+
+  beforeEach(() => {
+    process.env.COGNITO_CLIENT_ID = 'chrome-client';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('{}', { status: 200 })),
+    );
+  });
+
+  afterEach(() => {
+    if (prevClient === undefined) delete process.env.COGNITO_CLIENT_ID;
+    else process.env.COGNITO_CLIENT_ID = prevClient;
+    vi.unstubAllGlobals();
+  });
+
+  it('GlobalSignOuts when an access token is present', async () => {
+    const res = await handleRevokeToken(
+      JSON.stringify({ accessToken: 'at', refreshToken: 'rt' }),
+    );
+    expect(res.statusCode).toBe(200);
+    expect(body(res)).toEqual({ ok: true, via: 'global' });
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining('cognito-idp'),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          'x-amz-target':
+            'AWSCognitoIdentityProviderService.GlobalSignOut',
+        }),
+      }),
+    );
+  });
+
+  it('RevokeTokens when only a refresh token is present', async () => {
+    const res = await handleRevokeToken(
+      JSON.stringify({ refreshToken: 'rt-only' }),
+    );
+    expect(res.statusCode).toBe(200);
+    expect(body(res)).toEqual({ ok: true, via: 'refresh' });
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining('cognito-idp'),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          'x-amz-target': 'AWSCognitoIdentityProviderService.RevokeToken',
+        }),
+      }),
+    );
+  });
+
+  it('requires at least one token', async () => {
+    const res = await handleRevokeToken(JSON.stringify({}));
+    expect(res.statusCode).toBe(400);
   });
 });

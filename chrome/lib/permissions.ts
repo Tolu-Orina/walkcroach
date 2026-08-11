@@ -17,6 +17,14 @@
 
 import { API_BASE } from './api';
 
+declare const __WALKCROACH_IDE_API_BASE__: string;
+
+/** IDE / SDK host — install-time grant in split-origin local builds. */
+const IDE_API_BASE =
+  typeof __WALKCROACH_IDE_API_BASE__ !== 'undefined'
+    ? __WALKCROACH_IDE_API_BASE__
+    : 'http://localhost:3003';
+
 /** Schemes no extension can script, regardless of permissions. */
 const RESTRICTED_SCHEMES = [
   'chrome:',
@@ -91,14 +99,22 @@ export function originLabel(originPattern: string): string {
   return originPattern.replace(/^\w+:\/\//, '').replace(/\/\*$/, '');
 }
 
-/** Install-time API host grant — never shown or revokable in the Sites list. */
-function apiOriginPattern(): string | null {
-  try {
-    const u = new URL(API_BASE);
-    return `${u.protocol}//${u.host}/*`;
-  } catch {
-    return null;
+/** Install-time API / IDE hosts — never shown or revokable in the Sites list. */
+function protectedOriginPatterns(): string[] {
+  const out: string[] = [];
+  for (const base of [API_BASE, IDE_API_BASE]) {
+    try {
+      const u = new URL(base);
+      out.push(`${u.protocol}//${u.host}/*`);
+    } catch {
+      // ignore malformed define
+    }
   }
+  return out;
+}
+
+function isProtectedOrigin(originPattern: string): boolean {
+  return protectedOriginPatterns().includes(originPattern);
 }
 
 export async function hasOriginPermission(
@@ -145,9 +161,9 @@ export async function ensureOriginPermission(
 export async function listGrantedOrigins(): Promise<string[]> {
   try {
     const all = await chrome.permissions.getAll();
-    const api = apiOriginPattern();
+    const protectedOrigins = new Set(protectedOriginPatterns());
     return (all.origins ?? [])
-      .filter((o) => o !== api)
+      .filter((o) => !protectedOrigins.has(o))
       .filter((o) => o !== 'http://*/*' && o !== 'https://*/*')
       .sort((a, b) => originLabel(a).localeCompare(originLabel(b)));
   } catch {
@@ -156,8 +172,7 @@ export async function listGrantedOrigins(): Promise<string[]> {
 }
 
 export async function revokeOrigin(originPattern: string): Promise<boolean> {
-  const api = apiOriginPattern();
-  if (originPattern === api) return false;
+  if (isProtectedOrigin(originPattern)) return false;
   try {
     return await chrome.permissions.remove({ origins: [originPattern] });
   } catch {

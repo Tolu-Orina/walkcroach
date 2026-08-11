@@ -21,7 +21,7 @@ const src = (over: Partial<RecallSource> = {}): RecallSource => ({
 describe('labelType', () => {
   it('translates storage keys into user-facing words', () => {
     expect(labelType('candidate')).toBe('candidate');
-    expect(labelType('selection')).toBe('highlight');
+    expect(labelType('selection')).toBe('selection');
     expect(labelType('price')).toBe('price');
   });
 

@@ -22,6 +22,7 @@ describe('editor redirects (unchanged by the CLI work)', () => {
       'vscodium',
       'windsurf',
       'code-oss',
+      'walkcroach',
     ]) {
       expect(
         isAllowedRedirectUri(`${scheme}://walkcroach.walkcroach-ide/auth`),

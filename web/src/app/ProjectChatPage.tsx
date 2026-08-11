@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { createSession, getProject } from '../api/client';
-import { BuilderIconLink } from '../features/builder/BuilderIconLink';
 import { ChatComposer } from '../features/chat/ChatComposer';
 import { CreativeConfirmCard } from '../features/chat/CreativeConfirmCard';
 import { ConnectorConfirmCard } from '../features/chat/ConnectorConfirmCard';
@@ -188,7 +187,6 @@ export function ProjectChatPage() {
           ))}
         </div>
         <ImageQuotaPill />
-        <BuilderIconLink projectId={projectId} label="Builder" />
       </div>
 
       {!sessionId ? (

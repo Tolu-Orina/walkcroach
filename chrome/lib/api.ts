@@ -2,6 +2,8 @@ declare const __WALKCROACH_API_BASE__: string;
 declare const __WALKCROACH_PRIVACY_URL__: string;
 declare const __WALKCROACH_WEB_URL__: string;
 
+import { formatUiError } from './errors';
+
 export const API_BASE =
   typeof __WALKCROACH_API_BASE__ !== 'undefined'
     ? __WALKCROACH_API_BASE__
@@ -160,7 +162,10 @@ async function* readNdjson(
         try {
           yield JSON.parse(trimmed) as AgentEvent;
         } catch {
-          yield { type: 'error', message: 'malformed stream chunk' };
+          yield {
+            type: 'error',
+            message: 'The answer stopped mid-stream. Try again.',
+          };
         }
       }
     }
@@ -169,7 +174,10 @@ async function* readNdjson(
       try {
         yield JSON.parse(tail) as AgentEvent;
       } catch {
-        yield { type: 'error', message: 'malformed stream chunk' };
+        yield {
+          type: 'error',
+          message: 'The answer stopped mid-stream. Try again.',
+        };
       }
     }
   } finally {
@@ -250,37 +258,71 @@ export type CreditBalance = {
 };
 
 /**
- * Shared Web/Chrome credit ledger (master plan Part 1 §4).
+ * Discriminated result for GET /chrome/v1/credits.
  *
- * The endpoint does not exist yet. Returning `null` rather than throwing means
- * the meter simply does not render until the backend ships — and then lights up
- * with no client change. Deliberately never invents a number: a fabricated
- * balance in a trust-first product is worse than no balance.
+ * - `ok` — signed-in ledger with a real allowance (meter renders).
+ * - `signed-out` — device/anon pool (`requiresSignIn` or allowance 0); meter hidden.
+ * - `error` — network/HTTP/shape failure; UI must surface retry, not soft-fail forever.
+ */
+export type CreditsFetchResult =
+  | { status: 'ok'; balance: CreditBalance }
+  | { status: 'signed-out' }
+  | { status: 'error'; message: string };
+
+/**
+ * Shared Web/Chrome credit ledger (`GET /chrome/v1/credits`).
+ * Never invents a balance — a fabricated number is worse than no meter.
  */
 export async function fetchCredits(
   token: string,
-): Promise<CreditBalance | null> {
+): Promise<CreditsFetchResult> {
   try {
     const res = await fetch(chromePath('/credits'), {
       headers: authHeaders(token),
     });
-    if (!res.ok) return null;
-    const data = (await res.json()) as Partial<CreditBalance>;
+    if (!res.ok) {
+      return {
+        status: 'error',
+        message: `Couldn’t load credits (${res.status}). Try again.`,
+      };
+    }
+    const data = (await res.json()) as Partial<CreditBalance> & {
+      requiresSignIn?: boolean;
+    };
+    if (data.requiresSignIn === true) {
+      return { status: 'signed-out' };
+    }
     if (
       typeof data.remaining !== 'number' ||
-      typeof data.allowance !== 'number' ||
-      data.allowance <= 0
+      typeof data.allowance !== 'number'
     ) {
-      return null;
+      return {
+        status: 'error',
+        message:
+          'Couldn’t load credits. Check your connection, then try again.',
+      };
+    }
+    // Device sessions return allowance 0; Cognito always has a positive monthly pool.
+    if (data.allowance <= 0) {
+      return { status: 'signed-out' };
     }
     return {
-      remaining: data.remaining,
-      allowance: data.allowance,
-      resetsAt: data.resetsAt,
-      plan: data.plan,
+      status: 'ok',
+      balance: {
+        remaining: data.remaining,
+        allowance: data.allowance,
+        resetsAt: data.resetsAt,
+        plan: data.plan,
+      },
     };
-  } catch {
-    return null;
+  } catch (err) {
+    return {
+      status: 'error',
+      message: formatUiError(
+        err,
+        'Couldn’t load credits. Check your connection, then try again.',
+      ),
+    };
   }
 }
 
@@ -533,6 +575,8 @@ export async function deleteWorkspace(token: string, id: string): Promise<void> 
 export type WebProject = {
   id: string;
   name: string;
+  /** Schema kind: knowledge=Project, app=App Builder (ADR-0004). */
+  kind?: string;
   status: string;
   updated_at: string;
 };
@@ -724,6 +768,29 @@ export async function refreshCognitoSession(
     );
   }
   return (await res.json()) as OauthTokenResponse;
+}
+
+/**
+ * Public: revoke Cognito session (GlobalSignOut or RevokeToken).
+ * Best-effort — callers should still clear local state on failure.
+ */
+export async function revokeCognitoSession(opts: {
+  accessToken?: string;
+  refreshToken?: string;
+}): Promise<void> {
+  const res = await fetch(chromePath('/oauth/revoke'), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      accessToken: opts.accessToken,
+      refreshToken: opts.refreshToken,
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(
+      (await res.text()) || `oauth revoke failed: ${res.status}`,
+    );
+  }
 }
 
 /** Create a one-time handoff for Open in Web Chat (page extract stays off the URL). */

@@ -26,7 +26,7 @@ Six product surfaces exist today. Desktop lives in a **sibling repo**. Naming: C
 | **IDE Extension** | `walkcroach/ide` | **agent-engine** + `/ide/v1` BFF | Published Open VSX; `VsCodeHostAdapter` |
 | **CLI** | `walkcroach/cli` | **agent-engine** (bundled) | Published `@walkcroach/cli`; Ink TUI |
 | **SDK** | `packages/sdk` (+ `sdk-mcp`, `sdk-host`) | Memory/content HTTP; host runs via engine | Client built; **first-party surfaces do not import it yet**; no publish workflow |
-| **Desktop IDE** | `walkcroach-desktop/` | **agent-engine** via `desktop-agent` + Agent Host | Preview-capable (unsigned Windows portable); dogfood, not production-hardened |
+| **Desktop IDE** | `walkcroach-desktop/` | **agent-engine** via `desktop-agent` + Agent Host | **Production-grade** (parity with IDE/CLI); **unsigned preview** channel only |
 
 **Planned / missing product surfaces (not built):**
 - **Developer portal** — API keys UI, docs, usage, billing for public SDK consumers (partially foreshadowed by `/v1/keys` + SDK README; no portal app).
@@ -88,7 +88,7 @@ Reopening is legitimate; doing it *by accident under schedule pressure* is the f
 | Was | Now | Note |
 |---|---|---|
 | Desktop UI must be native `ViewPane` + single stylesheet (React webview "reverted") | Desktop ships **React/Tailwind webviews** (`packages/agent-ui` → `agent-ui.js` / `settings-ui.js`) hosted by contrib panes | Spike lesson still valid for *core* chrome; product agent UI is webview. Do not re-litigate without reading `walkcroach-desktop/docs/ARCHITECTURE.md`. |
-| Desktop "scaffold / never compiled" | Preview path works; unsigned Windows portable tooling exists | STATUS: dogfood, not production-hardened |
+| Desktop "scaffold / never compiled" | Production-grade Agent Host + Path B + live CRDB/MCP when configured; unsigned preview packaging | STATUS: production-grade; unsigned preview only |
 | CLI "no packaging/CI" | `@walkcroach/cli` published; GH publish workflow | — |
 
 ---
@@ -118,7 +118,7 @@ Carry these into design; re-verify rather than assuming fixed.
 **Desktop-specific** (see `walkcroach-desktop/docs/STATUS.md`)
 - Nested `vscode/` gitignored by parent; substantial fork code can be **untracked** in nested git — CI/parent do not fully capture product surface.
 - Upstream sync workflow skew (historically clones older tag than product pin).
-- Approvals/fleet race risks; plaintext `FileSecrets`; CRDB panels demo; signing/auto-update deferred.
+- Approvals/fleet hardening debt; CRDB live when configured; signing/auto-update deferred (unsigned preview).
 - Protocol hand-mirror between `agent-ui` and contrib.
 
 **SDK / go-to-market**

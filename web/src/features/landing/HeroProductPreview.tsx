@@ -108,7 +108,7 @@ function WebPreview() {
             Continue from the Chrome capture — what did we decide about SSO?
           </Bubble>
           <Bubble side="agent">
-            From Extension memory: Okta as IdP, SCIM later. Builder already has the auth
+            From Extension memory: Okta as IdP, SCIM later. App Builder already has the auth
             route scaffolded in this project.
           </Bubble>
           <div className="mt-auto flex items-center gap-2 rounded-[var(--lp-radius-control)] border border-[var(--lp-line)] bg-[var(--lp-canvas)] px-2.5 py-2">

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { completeGithubInstall } from '../api/client';
+import { builderWorkspacePath } from '../lib/builderRoutes';
 
 export function AuthGithubCallbackPage() {
   const [search] = useSearchParams();
@@ -24,7 +25,7 @@ export function AuthGithubCallbackPage() {
           state,
         );
         if (!cancelled) {
-          navigate(`/app/projects/${result.projectId}/builder`, { replace: true });
+          navigate(builderWorkspacePath(result.projectId), { replace: true });
         }
       } catch (err) {
         if (!cancelled) {

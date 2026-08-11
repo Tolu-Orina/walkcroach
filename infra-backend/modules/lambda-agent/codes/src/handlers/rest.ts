@@ -46,6 +46,12 @@ import {
   handleGithubStatus,
 } from './github.js';
 import {
+  parseListProjectsKindFilter,
+  resolveCreateProjectKind,
+  resolveCreateTemplateId,
+  resolvePatchTemplateId,
+} from './projectKind.js';
+import {
   handleGetAppResources,
   handleGetSecrets,
   handleInlineEdit,
@@ -290,17 +296,30 @@ export async function handleRest(
     if ('error' in authResult) {
       return jsonResponse(authResult.status, { error: authResult.error });
     }
+    const qs = new URLSearchParams(
+      queryString.startsWith('?') ? queryString.slice(1) : queryString,
+    );
+    const kindFilter = parseListProjectsKindFilter(qs.get('kind'));
+    if (!kindFilter.ok) {
+      return jsonResponse(400, { error: kindFilter.error });
+    }
     const db = createDbClient();
     try {
+      const params: unknown[] = [authResult.ownerId];
+      let kindSql = ` AND COALESCE(kind, 'app') <> 'general'`;
+      if (kindFilter.value !== null) {
+        params.push(kindFilter.value);
+        kindSql = ` AND kind = $${params.length}`;
+      }
       const { rows } = await db.query<ProjectRow>(
         `SELECT id, owner_id, name, status, updated_at, created_at, template_id,
                 memory_summary, kind, description, instructions
          FROM projects
          WHERE owner_id = $1 AND deleted_at IS NULL AND archived_at IS NULL
-           AND COALESCE(kind, 'app') <> 'general'
+           ${kindSql}
          ORDER BY updated_at DESC
          LIMIT 100`,
-        [authResult.ownerId],
+        params,
       );
       return jsonResponse(200, {
         projects: rows.map(mapProjectSummary),
@@ -317,17 +336,36 @@ export async function handleRest(
     if ('error' in authResult) {
       return jsonResponse(authResult.status, { error: authResult.error });
     }
+    const qs = new URLSearchParams(
+      queryString.startsWith('?') ? queryString.slice(1) : queryString,
+    );
+    const modeRaw = qs.get('mode');
+    if (modeRaw !== 'chat' && modeRaw !== 'builder') {
+      return jsonResponse(400, {
+        error: "mode query required: 'chat' or 'builder'",
+      });
+    }
     const db = createDbClient();
     try {
       const project = await assertProjectOwner(db, latestProjectId, authResult);
       if (!project) {
         return jsonResponse(404, { error: 'project not found' });
       }
-      const latest = await getLatestSessionForProject(db, latestProjectId);
+      const latest = await getLatestSessionForProject(
+        db,
+        latestProjectId,
+        modeRaw,
+      );
       if (!latest) {
-        return jsonResponse(404, { error: 'no sessions for project' });
+        return jsonResponse(404, {
+          error: `no ${modeRaw} sessions for project`,
+        });
       }
-      return jsonResponse(200, { sessionId: latest.id, projectId: latestProjectId });
+      return jsonResponse(200, {
+        sessionId: latest.id,
+        projectId: latestProjectId,
+        mode: modeRaw,
+      });
     } finally {
       await db.close();
     }
@@ -439,10 +477,11 @@ export async function handleRest(
           : body.instructions === null
             ? null
             : String(body.instructions).slice(0, 16000);
-      const templateId =
-        typeof body.templateId === 'string' && body.templateId.trim()
-          ? body.templateId.trim().slice(0, 80)
-          : project.template_id;
+      const templateId = resolvePatchTemplateId({
+        kind: project.kind,
+        bodyTemplateId: body.templateId,
+        currentTemplateId: project.template_id,
+      });
       const { rows } = await db.query<ProjectRow>(
         `UPDATE projects
          SET name = $2,
@@ -468,9 +507,15 @@ export async function handleRest(
     }
     const body = JSON.parse(rawBody ?? '{}') as {
       name?: string;
-      templateId?: string;
-      kind?: 'app' | 'general';
+      templateId?: string | null;
+      kind?: string;
     };
+    const kindResult = resolveCreateProjectKind(body.kind);
+    if (!kindResult.ok) {
+      return jsonResponse(400, { error: kindResult.error });
+    }
+    const kind = kindResult.value;
+    const templateId = resolveCreateTemplateId(kind, body.templateId);
     const db = createDbClient();
     try {
       if (authResult.isAnonymous) {
@@ -482,15 +527,22 @@ export async function handleRest(
         }
       }
 
-      const templateId = body.templateId ?? 'blank';
-      const kind = body.kind === 'general' ? 'general' : 'app';
       const { rows } = await db.query<{ id: string }>(
         `INSERT INTO projects (owner_id, name, template_id, kind)
          VALUES ($1, $2, $3, $4)
          RETURNING id`,
-        [authResult.ownerId, body.name ?? 'Untitled', templateId, kind],
+        [
+          authResult.ownerId,
+          (body.name ?? 'Untitled').trim().slice(0, 200) || 'Untitled',
+          templateId,
+          kind,
+        ],
       );
-      return jsonResponse(201, { id: rows[0]!.id, templateId, kind });
+      return jsonResponse(201, {
+        id: rows[0]!.id,
+        templateId,
+        kind,
+      });
     } finally {
       await db.close();
     }
@@ -1475,6 +1527,7 @@ export async function handleRest(
         id: session.id,
         projectId: session.project_id,
         status: session.status,
+        mode: (session.mode === 'chat' ? 'chat' : 'builder') as 'chat' | 'builder',
         pendingTool: session.pending_tool
           ? {
               toolCallId: session.pending_tool.awaiting.toolCallId,

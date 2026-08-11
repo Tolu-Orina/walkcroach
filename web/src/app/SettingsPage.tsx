@@ -138,7 +138,7 @@ export function SettingsPage() {
       setGithubLoading(true);
       setGithubError(null);
       try {
-        const projects = await listProjects();
+        const projects = await listProjects({ kind: 'app' });
         const slice = projects.slice(0, 8);
         const rows = await Promise.all(
           slice.map(async (p) => {
@@ -509,7 +509,7 @@ export function SettingsPage() {
                       ? 'Could not load GitHub status for your projects.'
                       : connectedCount > 0
                         ? `${connectedCount} project${connectedCount === 1 ? '' : 's'} connected`
-                        : 'No repos connected yet — open Builder → Ship.'}
+                        : 'No repos connected yet — open App Builder → Ship.'}
                 </p>
                 {githubError && (
                   <p className="mt-1 text-[11px] text-ember" role="status">
@@ -518,10 +518,10 @@ export function SettingsPage() {
                 )}
               </div>
               <Link
-                to="/app/projects"
+                to="/app/builder"
                 className="btn-ghost shrink-0 text-xs"
               >
-                Projects
+                App Builder
               </Link>
             </div>
             {!githubLoading && githubRows.length > 0 && (

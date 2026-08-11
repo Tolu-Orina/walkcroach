@@ -34,6 +34,10 @@ function stateFingerprint(state: string): string {
 /**
  * POST /chrome/v1/oauth/session-code
  * Authenticated (Web session Bearer = Cognito ID token).
+ *
+ * Body must include the real Cognito `accessToken` separately from `idToken`.
+ * The `access_token` column stores access; `id_token` stores id — never conflate
+ * them (Chrome SDK `/v1` vs BFF Bearer).
  */
 export async function handleCreateSessionCode(
   auth: AuthContext,
@@ -45,6 +49,7 @@ export async function handleCreateSessionCode(
     redirectUri?: string;
     refreshToken?: string;
     idToken?: string;
+    accessToken?: string;
     expiresAt?: number;
     codeChallenge?: string;
     codeChallengeMethod?: string;
@@ -57,6 +62,7 @@ export async function handleCreateSessionCode(
     redirectUri?: string;
     refreshToken?: string;
     idToken?: string;
+    accessToken?: string;
     expiresAt?: number;
     codeChallenge?: string;
     codeChallengeMethod?: string;
@@ -65,6 +71,8 @@ export async function handleCreateSessionCode(
   const redirectUri = body.redirectUri?.trim();
   const codeChallenge = body.codeChallenge?.trim();
   const codeChallengeMethod = body.codeChallengeMethod?.trim();
+  const idToken = (body.idToken?.trim() || sessionBearer).trim();
+  const accessToken = body.accessToken?.trim() || '';
   if (!state || state.length < 8) {
     return jsonResponse(400, { error: 'state is required' });
   }
@@ -87,6 +95,17 @@ export async function handleCreateSessionCode(
   if (sessionBearer.startsWith('dev:')) {
     return jsonResponse(400, {
       error: 'Dev tokens cannot be used for Chrome connect',
+    });
+  }
+  if (!accessToken) {
+    return jsonResponse(400, {
+      error:
+        'accessToken is required (Cognito access token, not the Web ID Bearer)',
+    });
+  }
+  if (accessToken === idToken) {
+    return jsonResponse(400, {
+      error: 'accessToken must be the Cognito access token, distinct from idToken',
     });
   }
 
@@ -117,9 +136,9 @@ export async function handleCreateSessionCode(
         stateFingerprint(state),
         redirectUri,
         auth.ownerId,
-        sessionBearer,
+        accessToken,
         body.refreshToken?.trim() || null,
-        body.idToken?.trim() || sessionBearer,
+        idToken,
         tokenExpiresAt.toISOString(),
         codeExpiresAt.toISOString(),
         codeChallenge,
@@ -305,6 +324,99 @@ export async function handleRefreshToken(
     const message = err instanceof Error ? err.message : 'refresh failed';
     console.error('oauth refresh failed', message);
     return jsonResponse(502, { error: 'refresh failed' });
+  }
+}
+
+/**
+ * POST /chrome/v1/oauth/revoke — public Cognito revoke / GlobalSignOut.
+ *
+ * Prefer GlobalSignOut when an access token is present (invalidates refresh
+ * tokens for the user on this client). Otherwise RevokeToken on the refresh
+ * token. Always best-effort from the extension's perspective — local sign-out
+ * proceeds even if Cognito is unreachable.
+ */
+export async function handleRevokeToken(
+  rawBody: string | undefined,
+): Promise<ReturnType<typeof jsonResponse>> {
+  const parsed = parseJsonBody<{
+    accessToken?: string;
+    refreshToken?: string;
+  }>(rawBody);
+  if ('error' in parsed && parsed.error === 'invalid JSON body') {
+    return jsonResponse(400, { error: parsed.error });
+  }
+  const body = parsed as { accessToken?: string; refreshToken?: string };
+  const accessToken = body.accessToken?.trim() || '';
+  const refreshToken = body.refreshToken?.trim() || '';
+  if (!accessToken && !refreshToken) {
+    return jsonResponse(400, {
+      error: 'accessToken or refreshToken is required',
+    });
+  }
+
+  const clientId = process.env.COGNITO_CLIENT_ID?.trim();
+  const region =
+    process.env.COGNITO_REGION?.trim() ||
+    process.env.COGNITO_USER_POOL_ID?.split('_')[0]?.trim() ||
+    'eu-west-2';
+  if (!clientId) {
+    return jsonResponse(503, { error: 'cognito_unconfigured' });
+  }
+
+  const cognitoUrl = `https://cognito-idp.${region}.amazonaws.com/`;
+
+  try {
+    if (accessToken) {
+      const res = await fetch(cognitoUrl, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/x-amz-json-1.1',
+          'x-amz-target':
+            'AWSCognitoIdentityProviderService.GlobalSignOut',
+        },
+        body: JSON.stringify({ AccessToken: accessToken }),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as {
+          message?: string;
+          __type?: string;
+        };
+        metricLog('chrome.oauth.revoke', { ok: false, via: 'global' });
+        return jsonResponse(400, {
+          error: data.message || data.__type || 'revoke_failed',
+        });
+      }
+      metricLog('chrome.oauth.revoke', { ok: true, via: 'global' });
+      return jsonResponse(200, { ok: true, via: 'global' });
+    }
+
+    const res = await fetch(cognitoUrl, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-amz-json-1.1',
+        'x-amz-target': 'AWSCognitoIdentityProviderService.RevokeToken',
+      },
+      body: JSON.stringify({
+        ClientId: clientId,
+        Token: refreshToken,
+      }),
+    });
+    if (!res.ok) {
+      const data = (await res.json().catch(() => ({}))) as {
+        message?: string;
+        __type?: string;
+      };
+      metricLog('chrome.oauth.revoke', { ok: false, via: 'refresh' });
+      return jsonResponse(400, {
+        error: data.message || data.__type || 'revoke_failed',
+      });
+    }
+    metricLog('chrome.oauth.revoke', { ok: true, via: 'refresh' });
+    return jsonResponse(200, { ok: true, via: 'refresh' });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'revoke failed';
+    console.error('oauth revoke failed', message);
+    return jsonResponse(502, { error: 'revoke failed' });
   }
 }
 

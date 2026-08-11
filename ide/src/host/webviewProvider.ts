@@ -389,10 +389,16 @@ export class WalkCroachSidebarProvider implements vscode.WebviewViewProvider {
     const picked = await vscode.window.showQuickPick(
       projects.map((p) => ({
         label: p.name,
-        description: p.id,
+        description:
+          p.kind === 'knowledge'
+            ? 'Project'
+            : p.kind === 'app'
+              ? 'App Builder'
+              : p.id,
+        detail: p.id,
         project: p,
       })),
-      { title: 'Link local repo to WalkCroach project' },
+      { title: 'Link local repo to WalkCroach Project or App Builder workspace' },
     );
     if (!picked) return;
 

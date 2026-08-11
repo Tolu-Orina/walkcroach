@@ -61,6 +61,29 @@ export function isUsableSelection(text: string): boolean {
   return normalizeSelection(text).length >= 8;
 }
 
+/**
+ * Prefer a scripted `window.getSelection()` over Chrome's `info.selectionText`.
+ *
+ * `truncated` is true when we only have the context-menu fallback (Chrome clips
+ * that around ~1k chars), or when our own 8k cap applied to an injected string.
+ */
+export function resolveSelectionCapture(
+  injected: string | null | undefined,
+  fallback: string,
+): { text: string; truncated: boolean } {
+  const full = typeof injected === 'string' ? injected : '';
+  if (full.trim().length >= 8) {
+    const text = normalizeSelection(full);
+    const truncated =
+      full.length > MAX_SELECTION_CHARS || text.endsWith('\u2026');
+    return { text, truncated };
+  }
+  return {
+    text: normalizeSelection(fallback),
+    truncated: true,
+  };
+}
+
 export async function putPendingSelection(
   selection: PendingSelection,
 ): Promise<void> {

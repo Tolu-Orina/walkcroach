@@ -148,7 +148,13 @@ module "lambda_chrome" {
   allow_dev_auth       = var.allow_dev_auth
   cors_allow_origin    = var.web_app_url != "" ? var.web_app_url : "*"
   web_app_url          = var.web_app_url
-  tags                 = local.tags
+  chrome_extension_id  = var.chrome_extension_id
+  extension_origins = (
+    var.chrome_extension_id != ""
+    ? ["chrome-extension://${var.chrome_extension_id}"]
+    : []
+  )
+  tags = local.tags
 }
 
 module "lambda_ide" {

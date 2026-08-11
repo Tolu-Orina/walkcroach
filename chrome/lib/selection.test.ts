@@ -4,6 +4,7 @@ import {
   isUsableSelection,
   normalizeSelection,
   putPendingSelection,
+  resolveSelectionCapture,
   takePendingSelection,
   type PendingSelection,
 } from './selection';
@@ -88,6 +89,42 @@ describe('isUsableSelection', () => {
 
   it('measures the normalised length, not the raw string', () => {
     expect(isUsableSelection('a' + ' '.repeat(50) + 'b')).toBe(false);
+  });
+});
+
+describe('resolveSelectionCapture', () => {
+  it('prefers a usable injected selection and clears truncated', () => {
+    const { text, truncated } = resolveSelectionCapture(
+      'Lead time is eighteen working days from receipt.',
+      'Lead time is',
+    );
+    expect(text).toContain('eighteen working days');
+    expect(truncated).toBe(false);
+  });
+
+  it('marks truncated when only Chrome selectionText is available', () => {
+    const { text, truncated } = resolveSelectionCapture(
+      null,
+      'Lead time is eighteen working days from receipt.',
+    );
+    expect(text).toContain('eighteen');
+    expect(truncated).toBe(true);
+  });
+
+  it('marks truncated when the injected string exceeds the cap', () => {
+    const { truncated } = resolveSelectionCapture(
+      'x'.repeat(MAX_SELECTION_CHARS + 50),
+      'short',
+    );
+    expect(truncated).toBe(true);
+  });
+
+  it('does not keep truncated=true just because fallback was non-empty', () => {
+    // Regression: old logic set truncated=Boolean(fallback) then only cleared
+    // when inject returned a *longer* string — equal-length inject stayed wrong.
+    const quote = 'Lead time is eighteen working days from receipt.';
+    const { truncated } = resolveSelectionCapture(quote, quote);
+    expect(truncated).toBe(false);
   });
 });
 

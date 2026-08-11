@@ -129,7 +129,12 @@ describe('streamSummarize (NDJSON)', () => {
     })) {
       collected.push(ev);
     }
-    expect(collected).toEqual([{ type: 'error', message: 'malformed stream chunk' }]);
+    expect(collected).toEqual([
+      {
+        type: 'error',
+        message: 'The answer stopped mid-stream. Try again.',
+      },
+    ]);
   });
 
   it('handles chunked data split across reads', async () => {

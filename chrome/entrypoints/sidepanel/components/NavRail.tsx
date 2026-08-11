@@ -28,7 +28,8 @@ const TABS: Array<{
  * their monitor.
  *
  * `tablist` semantics rather than links: this switches panes in place, and a
- * reader should hear "tab 2 of 4", not "link".
+ * reader should hear "tab 2 of 4", not "link". Arrow keys move one step;
+ * Home / End jump to the first / last tab (APG).
  */
 export function NavRail({
   active,
@@ -49,12 +50,12 @@ export function NavRail({
             id={`wc-tab-${id}`}
             aria-selected={selected}
             aria-controls={`wc-pane-${id}`}
+            aria-label={label}
             aria-current={selected ? 'page' : undefined}
             tabIndex={selected ? 0 : -1}
             className="wc-rail__item"
             onClick={() => onSelect(id)}
             onKeyDown={(e) => {
-              // Roving tabindex: arrows move between tabs, as ARIA expects.
               const i = TABS.findIndex((t) => t.id === active);
               if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
                 e.preventDefault();
@@ -62,6 +63,12 @@ export function NavRail({
               } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
                 e.preventDefault();
                 onSelect(TABS[(i - 1 + TABS.length) % TABS.length]!.id);
+              } else if (e.key === 'Home') {
+                e.preventDefault();
+                onSelect(TABS[0]!.id);
+              } else if (e.key === 'End') {
+                e.preventDefault();
+                onSelect(TABS[TABS.length - 1]!.id);
               }
             }}
           >

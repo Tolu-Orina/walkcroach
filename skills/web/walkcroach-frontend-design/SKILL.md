@@ -107,6 +107,7 @@ Skip 3D (`walkcroach-three-d-immersive-ui`) unless the brief explicitly needs sp
 | Dashboard / roles | `walkcroach-enterprise-dashboard-patterns` |
 | WalkCroach brand tokens | `walkcroach-brand-guidelines` |
 | Before calling it done | `walkcroach-design-critique-polish-workflow` |
+| UI labels / empty / errors / glossary | `ux-writing-content-design` |
 
 ## Default stacks (pick one, then add)
 

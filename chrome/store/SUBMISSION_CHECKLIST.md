@@ -107,7 +107,7 @@ uploaded, or first run fails for every new installer.
 - [ ] Single purpose: the wording in `STORE_LISTING.md`
 - [ ] Screenshots: 5 current captures from `store/screenshots/`; regenerate with
       `npm run screenshots` if the UI changed since the last upload
-- [ ] Package: the `0.5.3` zip from `npm run zip:prod`
+- [ ] Package: the `0.6.1` zip from `npm run zip:prod`
 
 ---
 
@@ -116,7 +116,8 @@ uploaded, or first run fails for every new installer.
 - [ ] Record the assigned extension ID in `enterprise/policies.json` and in the
       table at the top of this file
 - [ ] Add `chrome-extension://<id>` to the captures bucket CORS
-      (`extension_origins` in Terraform) so presigned upload starts working
+      (`chrome_extension_id` in `infra-backend/environments/*.tfvars` →
+      `extension_origins` + `CHROME_EXTENSION_IDS` on the next backend apply)
 - [ ] Watch the sign-in success ratio for 48h
       (`POST_SUBMIT_MONITORING.md`) — it is the Bug B regression detector
 - [ ] Bump `package.json` before any resubmission; CWS rejects a repeated version

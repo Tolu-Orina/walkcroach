@@ -23,6 +23,10 @@ export function ConfirmCard({
   summary,
   confirmLabel = 'Confirm & save',
   busy = false,
+  /** Shown on the primary button while `busy` (defaults to “Saving…”). */
+  busyLabel = 'Saving…',
+  /** Shown on the dismiss button (defaults to “Discard”; use “Cancel” for deletes). */
+  dismissLabel = 'Discard',
   /** Irreversible once executed — sending mail, posting to a channel. */
   irreversible = false,
   extra,
@@ -37,6 +41,8 @@ export function ConfirmCard({
   summary?: ConfirmSummaryRow[] | null;
   confirmLabel?: string;
   busy?: boolean;
+  busyLabel?: string;
+  dismissLabel?: string;
   irreversible?: boolean;
   /** Extra opt-in controls shown above the buttons, e.g. the screenshot toggle. */
   extra?: React.ReactNode;
@@ -100,7 +106,7 @@ export function ConfirmCard({
 
       <div className="wc-confirm__actions">
         <button type="submit" className="wc-btn wc-btn--primary" disabled={busy}>
-          {busy ? 'Saving…' : confirmLabel}
+          {busy ? busyLabel : confirmLabel}
         </button>
         <button
           type="button"
@@ -108,7 +114,7 @@ export function ConfirmCard({
           onClick={onDismiss}
           disabled={busy}
         >
-          Discard
+          {dismissLabel}
         </button>
       </div>
     </form>

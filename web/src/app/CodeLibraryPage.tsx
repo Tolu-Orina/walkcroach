@@ -4,6 +4,7 @@ import {
   listCodeArtefacts,
   type CodeArtefactSummary,
 } from '../api/client';
+import { ProductErrorBanner } from '../components/product/ProductErrorBanner';
 
 function fileName(path: string): string {
   return path.split('/').pop() ?? path;
@@ -55,7 +56,7 @@ export function CodeLibraryPage() {
         {(
           [
             ['all', 'All'],
-            ['builder', 'Builder'],
+            ['builder', 'App Builder'],
             ['chat', 'Chat'],
           ] as const
         ).map(([id, label]) => (
@@ -78,9 +79,12 @@ export function CodeLibraryPage() {
         <p className="mt-8 text-sm text-mist">Loading artefacts…</p>
       )}
       {error && (
-        <p className="mt-8 rounded-[var(--radius-control)] border border-ember/30 bg-ember/10 px-3 py-2 text-sm text-paper">
-          {error}
-        </p>
+        <div className="mt-8">
+          <ProductErrorBanner
+            message={error}
+            onRetry={() => window.location.reload()}
+          />
+        </div>
       )}
       {!loading && !error && visible.length === 0 && (
         <div className="surface mt-8 border-dashed p-8 text-center">
@@ -88,12 +92,12 @@ export function CodeLibraryPage() {
             No artefacts yet
           </p>
           <p className="mt-2 text-sm text-mist">
-            Build in a project (files sync automatically), or save a code block
-            from Chat.
+            Files sync from App Builder automatically, or save a code block from
+            Chat.
           </p>
           <div className="mt-4 flex flex-wrap justify-center gap-2">
-            <Link to="/app/projects" className="btn-secondary text-xs">
-              Open Projects
+            <Link to="/app/builder" className="btn-secondary text-xs">
+              Open App Builder
             </Link>
             <Link to="/app/chat" className="btn-ghost text-xs">
               Open Chat

@@ -30,12 +30,16 @@ describe('NavRail — semantics', () => {
     expect(selected[0]).toHaveAccessibleName(/Recall/);
   });
 
-  it('points each tab at the pane it controls', () => {
+  it('gives every tab an accessible name even when the visible label is hidden', () => {
+    // Under ~340px CSS hides `.wc-rail__label`; without aria-label the icon-only
+    // tabs would announce as unnamed (icons are aria-hidden).
     render(<NavRail active="page" onSelect={() => undefined} />);
-    expect(screen.getByRole('tab', { name: /Page/ })).toHaveAttribute(
-      'aria-controls',
-      'wc-pane-page',
-    );
+    for (const name of ['Page', 'Recall', 'Saved', 'Account']) {
+      expect(screen.getByRole('tab', { name })).toHaveAttribute(
+        'aria-label',
+        name,
+      );
+    }
   });
 });
 
@@ -89,11 +93,24 @@ describe('NavRail — roving tabindex', () => {
     expect(onSelect).toHaveBeenCalledWith('account');
   });
 
+  it('jumps to the first and last tab with Home and End', async () => {
+    const onSelect = vi.fn();
+    const { rerender } = render(<NavRail active="recall" onSelect={onSelect} />);
+    screen.getByRole('tab', { name: /Recall/ }).focus();
+    await userEvent.keyboard('{Home}');
+    expect(onSelect).toHaveBeenLastCalledWith('page');
+
+    rerender(<NavRail active="recall" onSelect={onSelect} />);
+    screen.getByRole('tab', { name: /Recall/ }).focus();
+    await userEvent.keyboard('{End}');
+    expect(onSelect).toHaveBeenLastCalledWith('account');
+  });
+
   it('ignores keys that are not navigation', async () => {
     const onSelect = vi.fn();
     render(<NavRail active="page" onSelect={onSelect} />);
     screen.getByRole('tab', { name: /Page/ }).focus();
-    await userEvent.keyboard('{End}');
+    await userEvent.keyboard('{PageDown}');
     expect(onSelect).not.toHaveBeenCalled();
   });
 });

@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { builderWorkspacePath } from '../../lib/builderRoutes';
 
 /** App Builder affordance — split-pane mark (chat | preview). */
 export function IconBuilder({ className = 'h-4 w-4' }: { className?: string }) {
@@ -37,7 +38,7 @@ export function BuilderIconLink({
 }: BuilderIconLinkProps) {
   return (
     <Link
-      to={`/app/projects/${projectId}/builder`}
+      to={builderWorkspacePath(projectId)}
       title="Open App Builder"
       aria-label="Open App Builder"
       className={`interactive inline-flex items-center gap-1.5 rounded-[var(--radius-control)] border border-line px-2.5 py-1.5 text-mist hover:border-signal/40 hover:text-paper ${className}`}

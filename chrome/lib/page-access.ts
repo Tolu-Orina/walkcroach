@@ -118,7 +118,7 @@ export function describePageAccess(access: PageAccess): PageAccessNotice {
       return {
         message: `WalkCroach needs your OK to read ${originLabel(
           access.origin,
-        )}. It reads the page only when you click an action, and you can revoke this any time under Sites.`,
+        )}. It reads the page only when you click an action, and you can revoke this any time under Account → Sites.`,
         action: 'grant',
         actionLabel: `Allow on ${originLabel(access.origin)}`,
         terminal: false,
@@ -134,7 +134,7 @@ export function describePageAccess(access: PageAccess): PageAccessNotice {
         message:
           'Click the WalkCroach icon in the toolbar once so it can see this tab. After that you can allow the site permanently and never do this again.',
         action: 'retry',
-        actionLabel: 'I clicked it — check again',
+        actionLabel: 'Check this tab again',
         terminal: false,
       };
     case 'no-tab':

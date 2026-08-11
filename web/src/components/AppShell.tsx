@@ -79,7 +79,7 @@ export function AppShell({
                   <NavItem to="/app/projects">Projects</NavItem>
                   {onBuilder && (
                     <span className="hidden px-2 font-mono text-[10px] uppercase tracking-wider text-mist/70 sm:inline">
-                      Builder
+                      App Builder
                     </span>
                   )}
                 </>

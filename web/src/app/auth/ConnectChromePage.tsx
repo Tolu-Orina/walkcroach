@@ -86,6 +86,12 @@ export function ConnectChromePage() {
         setError('Dev sessions cannot connect Chrome. Use a real account.');
         return;
       }
+      if (!stored.cognito?.accessToken?.trim()) {
+        setError(
+          'This session is missing a Cognito access token. Sign out and sign in again on WalkCroach Web, then retry.',
+        );
+        return;
+      }
 
       const base = chromeApiBase();
       if (!base) {
@@ -105,11 +111,14 @@ export function ConnectChromePage() {
           body: JSON.stringify({
             state,
             redirectUri,
-            // Refresh is optional — ID/access token alone is enough to connect.
+            // Refresh optional. accessToken is required (distinct from id Bearer).
             ...(stored.cognito?.refreshToken
               ? { refreshToken: stored.cognito.refreshToken }
               : {}),
             idToken: stored.cognito?.idToken ?? stored.token,
+            // Real Cognito access token for the extension SDK slot — never the
+            // Web Bearer (id token). Required so Chrome does not mislabel id as access.
+            accessToken: stored.cognito?.accessToken,
             expiresAt: stored.cognito?.expiresAt,
             codeChallenge,
             codeChallengeMethod,

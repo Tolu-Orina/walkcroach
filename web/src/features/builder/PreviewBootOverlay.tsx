@@ -4,7 +4,7 @@ import type { BuilderRuntimeKind } from '../../hooks/useBuilderSandbox';
 
 const TIPS = [
   'Terminal stays closed until you need it — open it from the status bar.',
-  'Use Code to browse or lightly edit files without leaving the Builder.',
+  'Use Code to browse or lightly edit files without leaving App Builder.',
   'Plan mode sketches architecture before any file writes.',
   'Your project instructions and docs stay available to the agent.',
   'Deploy from Ship when you are ready to share a live URL.',

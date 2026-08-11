@@ -46,7 +46,7 @@ export function CoachMark({ onDismiss }: { onDismiss: () => void }) {
       <p>
         WalkCroach reads a page only when you click an action — and only on sites
         you allow. You’ll be asked once per site, and you can withdraw any site
-        from <strong>Account</strong> at any time.
+        under <strong>Account → Sites</strong> at any time.
       </p>
       <div className="wc-coach__actions">
         <button type="button" className="wc-btn" onClick={onDismiss}>

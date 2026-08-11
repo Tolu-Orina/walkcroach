@@ -13,6 +13,8 @@ import {
 
 /** API_BASE falls back to http://localhost:3002 outside a WXT build. */
 const API_ORIGIN = 'http://localhost:3002/*';
+/** IDE_API_BASE falls back to http://localhost:3003 outside a WXT build. */
+const IDE_ORIGIN = 'http://localhost:3003/*';
 
 type PermissionsMock = {
   contains: ReturnType<typeof vi.fn>;
@@ -162,6 +164,7 @@ describe('listGrantedOrigins', () => {
     permissions.getAll.mockResolvedValue({
       origins: [
         API_ORIGIN,
+        IDE_ORIGIN,
         'https://*/*',
         'http://*/*',
         'https://www.example.com/*',
@@ -175,7 +178,7 @@ describe('listGrantedOrigins', () => {
   });
 
   it('returns an empty list when nothing is granted', async () => {
-    permissions.getAll.mockResolvedValue({ origins: [API_ORIGIN] });
+    permissions.getAll.mockResolvedValue({ origins: [API_ORIGIN, IDE_ORIGIN] });
     await expect(listGrantedOrigins()).resolves.toEqual([]);
   });
 });
@@ -190,6 +193,11 @@ describe('revokeOrigin', () => {
 
   it('refuses to revoke the API host the extension needs to function', async () => {
     await expect(revokeOrigin(API_ORIGIN)).resolves.toBe(false);
+    expect(permissions.remove).not.toHaveBeenCalled();
+  });
+
+  it('refuses to revoke the IDE / SDK host', async () => {
+    await expect(revokeOrigin(IDE_ORIGIN)).resolves.toBe(false);
     expect(permissions.remove).not.toHaveBeenCalled();
   });
 });

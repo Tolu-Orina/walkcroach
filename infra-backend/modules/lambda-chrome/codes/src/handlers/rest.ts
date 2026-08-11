@@ -38,6 +38,7 @@ import {
   handleCreateSessionCode,
   handleExchangeToken,
   handleRefreshToken,
+  handleRevokeToken,
   extractBearer,
 } from './oauth.js';
 import {
@@ -151,6 +152,14 @@ export async function handleChromeRest(
     /\/chrome\/v1\/oauth\/refresh\/?$/.test(path)
   ) {
     return handleRefreshToken(req.body);
+  }
+
+  // Public: revoke refresh / GlobalSignOut on extension sign-out.
+  if (
+    req.method === 'POST' &&
+    /\/chrome\/v1\/oauth\/revoke\/?$/.test(path)
+  ) {
+    return handleRevokeToken(req.body);
   }
 
   const auth = await requireAuth(req.headers);

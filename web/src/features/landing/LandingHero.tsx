@@ -13,8 +13,7 @@ type Props = {
 
 /**
  * Product-first hero (2025–26 SaaS / devtools pattern).
- * One primary CTA (Start building / Open Chat). Desktop download is tertiary
- * text under the CTA row — visible without competing for conversion.
+ * Build intent → App Builder; memory / chat → Open Chat (Phase 6).
  */
 export function LandingHero({ authenticated = false, showGuest = false }: Props) {
   const reduce = useReducedMotion();
@@ -43,9 +42,14 @@ export function LandingHero({ authenticated = false, showGuest = false }: Props)
           </p>
           <div className="mt-8 flex flex-wrap items-center gap-3">
             {authenticated ? (
-              <Link to="/app/chat" className="lp-btn-primary">
-                Open Chat
-              </Link>
+              <>
+                <Link to="/app/builder" className="lp-btn-primary">
+                  Start building
+                </Link>
+                <Link to="/app/chat" className="lp-btn-secondary">
+                  Open Chat
+                </Link>
+              </>
             ) : (
               <>
                 <Link to="/signup" className="lp-btn-primary">

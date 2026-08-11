@@ -45,14 +45,17 @@ export function BuilderHeader({
   const { user, signOut } = useAuth();
 
   return (
-    <header className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-3 py-2 sm:px-3.5">
+    <header
+      className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-3 py-2 sm:px-3.5"
+      data-wc-project-id={projectId}
+    >
       <div className="min-w-0">
         <div className="mb-0.5 flex flex-wrap items-center gap-1.5">
           <Link
-            to={`/app/projects/${projectId}`}
+            to="/app/builder"
             className="interactive text-[10px] font-semibold text-mist hover:text-signal"
           >
-            ← Project
+            ← App Builder
           </Link>
           <button
             type="button"
@@ -154,6 +157,12 @@ export function BuilderHeader({
           </summary>
           <div className="absolute right-0 z-20 mt-1 min-w-[10rem] rounded-[var(--radius-surface)] border border-line bg-panel py-1 shadow-lg">
             <Link
+              to="/app/builder"
+              className="interactive block px-3 py-2 text-sm text-mist hover:bg-ink/60 hover:text-paper"
+            >
+              App Builder hub
+            </Link>
+            <Link
               to="/app/projects"
               className="interactive block px-3 py-2 text-sm text-mist hover:bg-ink/60 hover:text-paper"
             >
@@ -163,7 +172,7 @@ export function BuilderHeader({
               type="button"
               onClick={onOpenInIde}
               className="interactive block w-full px-3 py-2 text-left text-sm text-mist hover:bg-ink/60 hover:text-paper"
-              title="IDE continues via project memory and Git — not this Builder sandbox session"
+              title="IDE continues via project memory and Git — not this App Builder sandbox session"
             >
               Open in IDE
             </button>

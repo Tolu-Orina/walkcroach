@@ -6,19 +6,20 @@ import { AppShell } from '../components/AppShell';
 import { LoadingScreen } from '../components/LoadingScreen';
 import { createProject } from '../api/client';
 import { peekPendingPrompt, projectNameFromPrompt } from '../lib/pending-prompt';
+import { builderWorkspacePath } from '../lib/builderRoutes';
 
 const STEPS = [
   {
     title: 'Chat is the front door',
-    body: 'Ask anything with attachments and search. Projects hold standing context across many chats.',
+    body: 'Ask anything with attachments and search. Standing context across many chats lives in Projects.',
   },
   {
     title: 'Projects hold memory',
     body: 'Description, documents, and instructions belong to the whole project timeline — not one thread.',
   },
   {
-    title: 'Builder is a room',
-    body: 'Open App Builder from a project when you want a live preview. Starter templates live there.',
+    title: 'App Builder ships apps',
+    body: 'Plan, preview, and deploy in App Builder — a separate workspace from Projects.',
   },
 ] as const;
 
@@ -40,10 +41,11 @@ export function WelcomePage() {
         markWelcomeComplete();
         const { id } = await createProject(
           projectNameFromPrompt(pending.prompt),
-          pending.templateId,
+          pending.templateId ?? 'blank',
+          { kind: 'app' },
         );
         if (!cancelled) {
-          navigate(`/app/projects/${id}/builder`, { replace: true });
+          navigate(builderWorkspacePath(id), { replace: true });
         }
       } catch (err) {
         if (!cancelled) {
@@ -64,7 +66,7 @@ export function WelcomePage() {
   if (creating && peekPendingPrompt()) {
     return (
       <AppShell>
-        <LoadingScreen message="Starting your project…" />
+        <LoadingScreen message="Starting App Builder…" />
       </AppShell>
     );
   }
@@ -82,7 +84,7 @@ export function WelcomePage() {
       <div className="prose-marketing mx-auto flex max-w-2xl flex-col px-4 py-12 sm:px-6">
         <p className="text-[11px] uppercase tracking-[0.2em] text-signal">Welcome</p>
         <h1 className="mt-2 font-display text-3xl font-extrabold text-paper">
-          You're in. Memory first, Builder when you need it.
+          You're in. Memory first, App Builder when you need it.
         </h1>
 
         <div className="glass-strong glass-hairline mt-8 p-6">

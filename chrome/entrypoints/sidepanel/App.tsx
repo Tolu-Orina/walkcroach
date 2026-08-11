@@ -38,17 +38,17 @@ import {
   ensureDeviceSession,
   signOutToDevice,
   startWebSignIn,
-  upgradeToCognito,
   type StoredSession,
 } from '../../lib/auth';
 import type { PageExtract } from '../../lib/extract';
-import { formatNetworkError } from '../../lib/errors';
+import { formatUiError } from '../../lib/errors';
 import {
   listGrantedOrigins,
   originLabel,
   requestOriginPermission,
   revokeOrigin,
 } from '../../lib/permissions';
+import { workspaceIdForPendingSave } from '../../lib/selection-claim';
 import { describePageAccess, type PageAccess } from '../../lib/page-access';
 import type { PendingSelection } from '../../lib/selection';
 import {
@@ -61,7 +61,7 @@ import {
   matchSiteProfile,
   type SiteProfile,
 } from '../../lib/site-profiles/matcher';
-import { initProfiles } from '../../lib/site-profiles/remote';
+import { initProfiles, remoteProfilesEnabled } from '../../lib/site-profiles/remote';
 import { BrandHeader } from './components/BrandHeader';
 import { ContextHeader } from './components/ContextHeader';
 import { AccessNotice } from './components/AccessNotice';
@@ -107,6 +107,21 @@ function withWebAvailability(base: string, available?: boolean): string {
   return `${base} Also available in your WalkCroach project.`;
 }
 
+/** Human session line for Account — never lead with a raw Cognito sub / device id. */
+export function describeSessionSource(
+  source: StoredSession['source'] | undefined,
+): string {
+  return source === 'cognito'
+    ? 'Signed in with your WalkCroach account'
+    : 'Device session — local to this browser';
+}
+
+/** Short support ref; full id stays on title for copy/paste when needed. */
+export function shortenSessionRef(ownerId: string, keep = 8): string {
+  if (ownerId.length <= keep) return ownerId;
+  return `${ownerId.slice(0, keep)}…`;
+}
+
 /**
  * A write the user has been shown but has not yet approved (Phase C4).
  *
@@ -144,7 +159,18 @@ type PendingWrite =
    * (Phase E4). The panel holds only the run id — the payload lives server-side,
    * so confirming cannot substitute different arguments.
    */
-  | { kind: 'connector'; proposal: ConnectorProposal };
+  | { kind: 'connector'; proposal: ConnectorProposal }
+  | {
+      kind: 'delete_workspace';
+      workspaceId: string;
+      workspaceName: string;
+    }
+  | {
+      kind: 'delete_capture';
+      captureId: string;
+      captureTitle: string;
+      workspaceId: string;
+    };
 
 export function App() {
   const [tab, setTab] = useState<TabId>('page');
@@ -161,7 +187,9 @@ export function App() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [activeWs, setActiveWs] = useState<string>('');
   const [captures, setCaptures] = useState<Capture[]>([]);
+  const [capturesLoading, setCapturesLoading] = useState(false);
   const [newWsName, setNewWsName] = useState('');
+  const [recallAttempted, setRecallAttempted] = useState(false);
   const [profile, setProfile] = useState<SiteProfile | null>(null);
   const [proposalFields, setProposalFields] = useState<Record<
     string,
@@ -179,16 +207,15 @@ export function App() {
   const [access, setAccess] = useState<PageAccess | null>(null);
   const [grantedOrigins, setGrantedOrigins] = useState<string[]>([]);
   const [credits, setCredits] = useState<CreditBalance | null>(null);
+  const [creditsError, setCreditsError] = useState<string | null>(null);
   const [connectors, setConnectors] = useState<ConnectorsResponse | null>(null);
   const [disconnecting, setDisconnecting] = useState<string | null>(null);
-  const [connectorResult, setConnectorResult] = useState<Record<
-    string,
-    unknown
-  > | null>(null);
   const [signingIn, setSigningIn] = useState(false);
   const [linkHint, setLinkHint] = useState<string | null>(null);
   const [linking, setLinking] = useState(false);
   const streamAbortRef = useRef<AbortController | null>(null);
+  /** Skip focusing the pane heading on the initial mount — only after a tab change. */
+  const skipTabFocusRef = useRef(true);
   /**
    * `claimSelection` needs `ensureNamedWorkspace`, which is declared later and
    * closes over current state. A ref keeps the call site honest without
@@ -198,6 +225,18 @@ export function App() {
     async () => '',
   );
   const coach = useCoachMark();
+
+  useEffect(() => {
+    if (skipTabFocusRef.current) {
+      skipTabFocusRef.current = false;
+      return;
+    }
+    const pane = document.getElementById(`wc-pane-${tab}`);
+    const heading = pane?.querySelector<HTMLElement>('h2');
+    if (!heading) return;
+    if (!heading.hasAttribute('tabindex')) heading.tabIndex = -1;
+    heading.focus({ preventScroll: true });
+  }, [tab]);
 
   const token = session?.accessToken ?? '';
 
@@ -229,8 +268,28 @@ export function App() {
       setLinkHint(data.hint ?? null);
     } catch {
       setWebProjects([]);
-      setLinkHint('Could not load Web projects.');
+      setLinkHint('Couldn’t load Web projects. Try again, or sign out and back in.');
     }
+  }, []);
+
+  const refreshCredits = useCallback(async (tok: string, source: string) => {
+    if (source !== 'cognito') {
+      setCredits(null);
+      setCreditsError(null);
+      return;
+    }
+    const result = await fetchCredits(tok);
+    if (result.status === 'ok') {
+      setCredits(result.balance);
+      setCreditsError(null);
+      return;
+    }
+    setCredits(null);
+    if (result.status === 'signed-out') {
+      setCreditsError(null);
+      return;
+    }
+    setCreditsError(result.message);
   }, []);
 
   const bootstrap = useCallback(async () => {
@@ -244,19 +303,18 @@ export function App() {
       setWorkspaces(ws);
       if (ws[0]) setActiveWs(ws[0].id);
       await refreshWebProjects(s.accessToken, s.source);
-      // Null until the shared ledger endpoint ships — the meter stays hidden.
-      setCredits(await fetchCredits(s.accessToken));
+      await refreshCredits(s.accessToken, s.source);
       // Connections are account-scoped and shared with Web; a failure here must
       // not break bootstrap, so it degrades to "none listed".
       setConnectors(
         await listConnectors(s.accessToken).catch(() => null),
       );
     } catch (err) {
-      setError(formatNetworkError(err, 'bootstrap failed'));
+      setError(formatUiError(err, 'Couldn’t connect to WalkCroach. Check your network, then try again.'));
     } finally {
       setLoading(false);
     }
-  }, [refreshWebProjects]);
+  }, [refreshWebProjects, refreshCredits]);
 
   useEffect(() => {
     void bootstrap();
@@ -377,8 +435,12 @@ export function App() {
     const selection = res?.selection;
     if (!selection?.text) return;
 
-    const wsName = workspaces.find((w) => w.id === activeWs)?.name ?? 'Saved';
-    const wsId = activeWs || (await ensureNamedWorkspaceRef.current(wsName));
+    const wsName = workspaces.find((w) => w.id === activeWs)?.name ?? 'General';
+    const wsId = await workspaceIdForPendingSave({
+      activeWs,
+      ensureNamed: ensureNamedWorkspaceRef.current,
+      fallbackName: wsName,
+    });
     setTab('page');
     setStreamText('');
     setPriceHistory(null);
@@ -504,7 +566,7 @@ export function App() {
         await refreshConnectors();
         setSaveNote(`Disconnected. This applies everywhere you use WalkCroach.`);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'could not disconnect');
+        setError(formatUiError(err, 'Couldn’t disconnect that account. Try again.'));
       } finally {
         setDisconnecting(null);
       }
@@ -526,16 +588,22 @@ export function App() {
   /* ── Workspaces & captures ───────────────────────────────────────── */
 
   const refreshCaptures = useCallback(async (wsId: string, tok: string) => {
-    setCaptures(await listCaptures(tok, wsId));
+    setCapturesLoading(true);
+    try {
+      setCaptures(await listCaptures(tok, wsId));
+    } finally {
+      setCapturesLoading(false);
+    }
   }, []);
 
   useEffect(() => {
     if (!token || !activeWs) {
       setCaptures([]);
+      setCapturesLoading(false);
       return;
     }
     void refreshCaptures(activeWs, token).catch((err) =>
-      setError(err instanceof Error ? err.message : 'list captures failed'),
+      setError(formatUiError(err, 'Couldn’t load captures. Try again.')),
     );
   }, [token, activeWs, refreshCaptures]);
 
@@ -553,6 +621,8 @@ export function App() {
     return ws.id;
   };
 
+  ensureNamedWorkspaceRef.current = ensureNamedWorkspace;
+
   /* ── Streaming actions ───────────────────────────────────────────── */
 
   const runStream = useCallback(async (gen: AsyncGenerator<AgentEvent>) => {
@@ -563,11 +633,11 @@ export function App() {
       for await (const ev of gen) {
         if (ev.type === 'token') setStreamText((t) => t + ev.text);
         else if (ev.type === 'recall_sources') setRecallSources(ev.sources);
-        else if (ev.type === 'error') setError(ev.message);
+        else if (ev.type === 'error') setError(formatUiError(ev.message, 'The answer stopped. Try again.'));
       }
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return;
-      setError(err instanceof Error ? err.message : 'stream failed');
+      setError(formatUiError(err, 'The answer stopped. Try again.'));
     } finally {
       setStreaming(false);
     }
@@ -576,12 +646,12 @@ export function App() {
   const clearResults = () => {
     setRecallSources([]);
     setShot(null);
-    setConnectorResult(null);
     setProposalFields(null);
     setPending(null);
     setPriceHistory(null);
     setPriceChanged(undefined);
     setSaveNote(null);
+    setRecallAttempted(false);
   };
 
   const onSummarize = async () => {
@@ -606,7 +676,7 @@ export function App() {
           full += ev.text;
           setStreamText(full);
         } else if (ev.type === 'error') {
-          setError(ev.message);
+          setError(formatUiError(ev.message, 'Couldn’t finish that. Try again.'));
         }
       }
       if (full && !signal.aborted) {
@@ -614,7 +684,7 @@ export function App() {
       }
     } catch (err) {
       if (!(err instanceof DOMException && err.name === 'AbortError')) {
-        setError(err instanceof Error ? err.message : 'summarize failed');
+        setError(formatUiError(err, 'Couldn’t summarize this page. Try again.'));
       }
     } finally {
       setStreaming(false);
@@ -689,7 +759,7 @@ export function App() {
       await chrome.tabs.create({ url: target.toString() });
       setSaveNote('Opened WalkCroach Web Chat with this page context.');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not open Web Chat');
+      setError(formatUiError(err, 'Couldn’t open Web Chat. Try again.'));
     }
   };
 
@@ -699,7 +769,7 @@ export function App() {
     const page = await preparePage();
     if (!page) return;
     clearResults();
-    const wsName = workspaces.find((w) => w.id === activeWs)?.name ?? 'Saved';
+    const wsName = workspaces.find((w) => w.id === activeWs)?.name ?? 'General';
     const wsId = activeWs || (await ensureNamedWorkspace(wsName));
     setPending({
       kind: 'capture',
@@ -780,12 +850,12 @@ export function App() {
           );
           setStreamText(ev.summary);
         } else if (ev.type === 'error') {
-          setError(ev.message);
+          setError(formatUiError(ev.message, 'Couldn’t finish that. Try again.'));
         }
       }
     } catch (err) {
       if (!(err instanceof DOMException && err.name === 'AbortError')) {
-        setError(err instanceof Error ? err.message : 'propose failed');
+        setError(formatUiError(err, 'Couldn’t prepare that save. Try again.'));
       }
     } finally {
       setStreaming(false);
@@ -795,6 +865,7 @@ export function App() {
   const onRecall = async () => {
     if (!token || !recallQ.trim()) return;
     setRecallSources([]);
+    setRecallAttempted(true);
     await runStream(
       streamRecall(
         token,
@@ -831,7 +902,10 @@ export function App() {
         setError(
           res?.access && res.access.status !== 'ready'
             ? describePageAccess(res.access).message
-            : (res?.error ?? 'Could not capture this tab.'),
+            : formatUiError(
+                res?.error,
+                'Couldn’t capture the screenshot. Try again.',
+              ),
         );
         return;
       }
@@ -874,9 +948,31 @@ export function App() {
       // were fixed and validated when the proposal was recorded, so confirming
       // executes exactly what the card showed and nothing else.
       if (pending.kind === 'connector') {
-        const result = await executeConnectorRun(token, pending.proposal.runId);
-        setConnectorResult(result);
+        await executeConnectorRun(token, pending.proposal.runId);
         setSaveNote(`${pending.proposal.title} — done.`);
+        setPending(null);
+        setCommitting(false);
+        return;
+      }
+
+      if (pending.kind === 'delete_workspace') {
+        await deleteWorkspace(token, pending.workspaceId);
+        const next = await listWorkspaces(token);
+        setWorkspaces(next);
+        setActiveWs(next[0]?.id ?? '');
+        setCaptures([]);
+        setSaveNote(`Deleted workspace “${pending.workspaceName}”.`);
+        setPending(null);
+        setCommitting(false);
+        return;
+      }
+
+      if (pending.kind === 'delete_capture') {
+        await deleteCapture(token, pending.captureId);
+        await refreshCaptures(pending.workspaceId, token);
+        setSaveNote(
+          `Deleted “${pending.captureTitle || 'that capture'}”.`,
+        );
         setPending(null);
         setCommitting(false);
         return;
@@ -971,7 +1067,7 @@ export function App() {
       setPending(null);
       setProposalFields(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'save failed');
+      setError(formatUiError(err, 'Couldn’t save that. Check your connection, then try again.'));
     } finally {
       setCommitting(false);
     }
@@ -1050,8 +1146,10 @@ export function App() {
       ];
       return {
         title: 'Save this page?',
-        intent: 'This stores the page text in your WalkCroach memory.',
+        intent: 'This stores the page text as a capture in WalkCroach.',
         confirmLabel: 'Save page',
+        busyLabel: 'Saving…',
+        dismissLabel: 'Discard',
         summary: rows,
         fields: null,
         irreversible: false,
@@ -1063,9 +1161,43 @@ export function App() {
         title: `${proposal.title}?`,
         intent: proposal.consequence,
         confirmLabel: proposal.title,
+        busyLabel: 'Sending…',
+        dismissLabel: proposal.irreversible ? 'Cancel' : 'Discard',
         summary: proposal.rows,
         fields: null,
         irreversible: proposal.irreversible,
+      };
+    }
+    if (pending.kind === 'delete_workspace') {
+      return {
+        title: `Delete “${pending.workspaceName}”?`,
+        intent:
+          'Removes this workspace and its captures from WalkCroach.',
+        confirmLabel: 'Delete workspace',
+        busyLabel: 'Deleting…',
+        dismissLabel: 'Cancel',
+        summary: [
+          { label: 'Workspace', value: pending.workspaceName },
+        ] satisfies ConfirmSummaryRow[],
+        fields: null,
+        irreversible: true,
+      };
+    }
+    if (pending.kind === 'delete_capture') {
+      return {
+        title: 'Delete this capture?',
+        intent: 'Removes this capture from the workspace.',
+        confirmLabel: 'Delete capture',
+        busyLabel: 'Deleting…',
+        dismissLabel: 'Cancel',
+        summary: [
+          {
+            label: 'Capture',
+            value: pending.captureTitle || pending.captureId,
+          },
+        ] satisfies ConfirmSummaryRow[],
+        fields: null,
+        irreversible: true,
       };
     }
     if (pending.kind === 'selection') {
@@ -1084,8 +1216,10 @@ export function App() {
       return {
         title: 'Save this selection?',
         intent:
-          'Only the text you highlighted is saved — not the rest of the page.',
+          'Only the text you selected is saved — not the rest of the page.',
         confirmLabel: 'Save selection',
+        busyLabel: 'Saving…',
+        dismissLabel: 'Discard',
         summary: rows,
         fields: null,
         irreversible: false,
@@ -1096,6 +1230,8 @@ export function App() {
         title: 'Start tracking this price?',
         intent: `Checks are appended to “${pending.workspaceName}”. Correct anything the model misread.`,
         confirmLabel: 'Track price',
+        busyLabel: 'Tracking…',
+        dismissLabel: 'Discard',
         summary: null,
         fields: proposalFields,
         irreversible: false,
@@ -1105,6 +1241,8 @@ export function App() {
       title: 'Save these details?',
       intent: `Goes into “${pending.workspaceName}”. Edit any field before saving.`,
       confirmLabel: 'Save details',
+      busyLabel: 'Saving…',
+      dismissLabel: 'Discard',
       summary: null,
       fields: proposalFields,
       irreversible: false,
@@ -1138,7 +1276,7 @@ export function App() {
                 className="wc-btn wc-btn--ghost"
                 onClick={() => setError(null)}
               >
-                Dismiss
+                Dismiss error
               </button>
               {!session && !loading && (
                 <button
@@ -1146,23 +1284,100 @@ export function App() {
                   className="wc-btn"
                   onClick={() => void bootstrap()}
                 >
-                  Retry
+                  Retry connection
                 </button>
               )}
             </div>
           </div>
         )}
 
+        {saveNote && (
+          <p className="wc-note" role="status" aria-live="polite">
+            {saveNote}
+          </p>
+        )}
+
+        {confirmView && (
+          <ConfirmCard
+            title={confirmView.title}
+            intent={confirmView.intent}
+            confirmLabel={confirmView.confirmLabel}
+            busyLabel={confirmView.busyLabel}
+            fields={confirmView.fields}
+            summary={confirmView.summary}
+            busy={committing}
+            irreversible={confirmView.irreversible}
+            dismissLabel={confirmView.dismissLabel}
+            extra={
+              pending &&
+              (pending.kind === 'capture' || pending.kind === 'selection') ? (
+                <>
+                  {shot ? (
+                    <>
+                      <img
+                        className="wc-shot"
+                        src={shot.dataUrl}
+                        alt={`Screenshot of the visible page, ${shot.width} by ${shot.height} pixels`}
+                      />
+                      <div className="wc-context__meta">
+                        <span>Screenshot will be saved with this capture.</span>
+                        <button
+                          type="button"
+                          className="wc-btn wc-btn--danger"
+                          disabled={committing}
+                          onClick={() => setShot(null)}
+                        >
+                          Remove screenshot
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        className="wc-btn"
+                        disabled={shotBusy || committing || actionsBlocked}
+                        onClick={() => void onCaptureScreenshot()}
+                      >
+                        {shotBusy ? 'Capturing…' : 'Add a screenshot'}
+                      </button>
+                      <span className="wc-muted wc-small">
+                        Captures what is visible on screen right now, including
+                        anything else in the window.
+                      </span>
+                    </>
+                  )}
+                </>
+              ) : null
+            }
+            onFieldChange={(key, value) =>
+              setProposalFields((prev) =>
+                prev ? { ...prev, [key]: value } : prev,
+              )
+            }
+            onConfirm={() => void onCommit()}
+            onDismiss={() => {
+              if (pending?.kind === 'connector' && token) {
+                void declineConnectorRun(token, pending.proposal.runId);
+              }
+              setPending(null);
+              setProposalFields(null);
+            }}
+          />
+        )}
+
         {!loading && !session && !error && (
           <div className="wc-section">
-            <p className="wc-status">Not connected.</p>
+            <p className="wc-status">
+              Couldn’t connect to WalkCroach. Check your network, then retry.
+            </p>
             <div>
               <button
                 type="button"
                 className="wc-btn"
                 onClick={() => void bootstrap()}
               >
-                Retry
+                Retry connection
               </button>
             </div>
           </div>
@@ -1170,7 +1385,12 @@ export function App() {
 
         {/* ── Page ── */}
         {!loading && session && tab === 'page' && (
-          <div id="wc-pane-page" role="tabpanel" aria-labelledby="wc-tab-page">
+          <div
+            id="wc-pane-page"
+            role="tabpanel"
+            aria-labelledby="wc-tab-page"
+            className="wc-pane"
+          >
             <div className="wc-section">
               {coach.show && <CoachMark onDismiss={coach.dismiss} />}
 
@@ -1201,87 +1421,12 @@ export function App() {
                 onOpenInWebChat={() => void onOpenInWebChat()}
               />
 
-              {confirmView && (
-                <ConfirmCard
-                  title={confirmView.title}
-                  intent={confirmView.intent}
-                  confirmLabel={confirmView.confirmLabel}
-                  fields={confirmView.fields}
-                  summary={confirmView.summary}
-                  busy={committing}
-                  irreversible={confirmView.irreversible}
-                  extra={
-                    /*
-                      Screenshots are offered only for captures of a real page.
-                      A price track re-checks a URL over time, so a snapshot of
-                      one visit would be noise.
-                    */
-                    pending &&
-                    (pending.kind === 'capture' ||
-                      pending.kind === 'selection') ? (
-                      <>
-                        {shot ? (
-                          <>
-                            <img
-                              className="wc-shot"
-                              src={shot.dataUrl}
-                              alt={`Screenshot of the visible page, ${shot.width} by ${shot.height} pixels`}
-                            />
-                            <div className="wc-context__meta">
-                              <span>Screenshot will be saved with this capture.</span>
-                              <button
-                                type="button"
-                                className="wc-btn wc-btn--danger"
-                                disabled={committing}
-                                onClick={() => setShot(null)}
-                              >
-                                Remove
-                              </button>
-                            </div>
-                          </>
-                        ) : (
-                          <>
-                            <button
-                              type="button"
-                              className="wc-btn"
-                              disabled={shotBusy || committing || actionsBlocked}
-                              onClick={() => void onCaptureScreenshot()}
-                            >
-                              {shotBusy ? 'Capturing…' : 'Add a screenshot'}
-                            </button>
-                            <span className="wc-muted wc-small">
-                              Captures what is visible on screen right now,
-                              including anything else in the window.
-                            </span>
-                          </>
-                        )}
-                      </>
-                    ) : null
-                  }
-                  onFieldChange={(key, value) =>
-                    setProposalFields((prev) =>
-                      prev ? { ...prev, [key]: value } : prev,
-                    )
-                  }
-                  onConfirm={() => void onCommit()}
-                  onDismiss={() => {
-                    if (pending?.kind === 'connector' && token) {
-                      void declineConnectorRun(token, pending.proposal.runId);
-                    }
-                    setPending(null);
-                    setProposalFields(null);
-                  }}
-                />
-              )}
-
               {priceHistory && priceHistory.length > 0 && (
                 <PriceHistory
                   history={priceHistory}
                   priceChanged={priceChanged}
                 />
               )}
-
-              {saveNote && <p className="wc-note">{saveNote}</p>}
 
               {/*
                 Before the first action there is genuinely nothing to show, and
@@ -1296,7 +1441,7 @@ export function App() {
                   <EmptyState title="Nothing read yet">
                     Pick an action above and the result appears here. WalkCroach
                     reads this page at that moment — not before. Anything you
-                    save is recallable from <strong>Recall</strong>, on every
+                    save is findable in <strong>Recall</strong>, on every
                     WalkCroach surface.
                   </EmptyState>
                 )}
@@ -1340,7 +1485,7 @@ export function App() {
             id="wc-pane-recall"
             role="tabpanel"
             aria-labelledby="wc-tab-recall"
-            className="wc-section"
+            className="wc-section wc-pane"
           >
             <h2 className="wc-section__title">Recall</h2>
             <p className="wc-muted wc-small">
@@ -1348,14 +1493,32 @@ export function App() {
               {activeWsName ? ` in “${activeWsName}”` : ' across all workspaces'}
               .
             </p>
-            {!streamText && !streaming && (
+            {!recallAttempted && !streamText && !streaming && (
               <EmptyState title="Your memory, across surfaces">
                 Anything you save from Chrome is recallable here — and in
                 WalkCroach Web, if the workspace is linked to a project.
               </EmptyState>
             )}
+            {recallAttempted && !streaming && !streamText && (
+              <EmptyState title="Nothing matched">
+                No captures matched that question
+                {activeWsName ? ` in “${activeWsName}”` : ''}. Try different
+                words, or widen the search by clearing the active workspace.
+              </EmptyState>
+            )}
             <RecallSources sources={recallSources} />
-            <Stream text={streamText} streaming={streaming} />
+            <Stream
+              text={streamText}
+              streaming={streaming}
+              onCopy={() => {
+                void navigator.clipboard
+                  .writeText(streamText)
+                  .then(() => setSaveNote('Copied to clipboard.'))
+                  .catch(() =>
+                    setError('Could not copy — select the text manually.'),
+                  );
+              }}
+            />
           </div>
         )}
 
@@ -1365,9 +1528,14 @@ export function App() {
             id="wc-pane-saved"
             role="tabpanel"
             aria-labelledby="wc-tab-saved"
-            className="wc-section"
+            className="wc-section wc-pane"
           >
-            <h2 className="wc-section__title">Workspaces</h2>
+            <h2 className="wc-section__title">Saved</h2>
+            <p className="wc-muted wc-small">
+              Workspaces group your captures. Link one to a Web project to share
+              memory across surfaces.
+            </p>
+            <h3 className="wc-section__title">Workspaces</h3>
             <div className="wc-ask">
               <label className="wc-sr-only" htmlFor="wc-new-ws">
                 New workspace name
@@ -1392,15 +1560,11 @@ export function App() {
                       setNewWsName('');
                     })
                     .catch((err) =>
-                      setError(
-                        err instanceof Error
-                          ? err.message
-                          : 'create workspace failed',
-                      ),
+                      setError(formatUiError(err, 'Couldn’t create the workspace. Try again.')),
                     );
                 }}
               >
-                Create
+                Create workspace
               </button>
             </div>
 
@@ -1425,20 +1589,13 @@ export function App() {
                     type="button"
                     className="wc-btn wc-btn--danger"
                     aria-label={`Delete workspace ${w.name}`}
+                    disabled={committing}
                     onClick={() =>
-                      void deleteWorkspace(token, w.id)
-                        .then(async () => {
-                          const next = await listWorkspaces(token);
-                          setWorkspaces(next);
-                          setActiveWs(next[0]?.id ?? '');
-                        })
-                        .catch((err) =>
-                          setError(
-                            err instanceof Error
-                              ? err.message
-                              : 'delete workspace failed',
-                          ),
-                        )
+                      setPending({
+                        kind: 'delete_workspace',
+                        workspaceId: w.id,
+                        workspaceName: w.name,
+                      })
                     }
                   >
                     Delete
@@ -1449,8 +1606,8 @@ export function App() {
 
             {!workspaces.length && (
               <EmptyState title="No workspaces yet">
-                Workspaces group what you save — “Leads”, “Suppliers”,
-                “Candidates”. Create one above, or just hit Save on a page and
+                Workspaces group what you save — “Hiring”, “Leads”,
+                “Pricing”. Create one above, or just hit Save on a page and
                 WalkCroach will make one for you.
               </EmptyState>
             )}
@@ -1493,9 +1650,7 @@ export function App() {
                             );
                           })
                           .catch((err) =>
-                            setError(
-                              err instanceof Error ? err.message : 'link failed',
-                            ),
+                            setError(formatUiError(err, 'Couldn’t link that project. Try again.')),
                           )
                           .finally(() => setLinking(false));
                       }}
@@ -1504,6 +1659,11 @@ export function App() {
                       {webProjects.map((p) => (
                         <option key={p.id} value={p.id}>
                           {p.name}
+                          {p.kind === 'knowledge'
+                            ? ' · Project'
+                            : p.kind === 'app'
+                              ? ' · App Builder'
+                              : ''}
                         </option>
                       ))}
                     </select>
@@ -1529,9 +1689,18 @@ export function App() {
                 )}
 
                 <h3 className="wc-section__title">
-                  Saved in {activeWsName || 'this workspace'}
+                  Captures in {activeWsName || 'this workspace'}
                 </h3>
-                {captures.length ? (
+                {capturesLoading && !captures.length ? (
+                  <div className="wc-skeleton-stack" aria-busy="true">
+                    <span className="wc-sr-only" role="status">
+                      Loading captures
+                    </span>
+                    <div className="wc-skeleton" style={{ width: '65%' }} />
+                    <div className="wc-skeleton" style={{ width: '88%' }} />
+                    <div className="wc-skeleton" style={{ width: '52%' }} />
+                  </div>
+                ) : captures.length ? (
                   <ul className="wc-list">
                     {captures.map((c) => (
                       <li key={c.id}>
@@ -1563,16 +1732,14 @@ export function App() {
                           type="button"
                           className="wc-btn wc-btn--danger"
                           aria-label={`Delete ${c.title || c.url}`}
+                          disabled={committing}
                           onClick={() =>
-                            void deleteCapture(token, c.id)
-                              .then(() => refreshCaptures(activeWs, token))
-                              .catch((err) =>
-                                setError(
-                                  err instanceof Error
-                                    ? err.message
-                                    : 'delete capture failed',
-                                ),
-                              )
+                            setPending({
+                              kind: 'delete_capture',
+                              captureId: c.id,
+                              captureTitle: c.title || c.url,
+                              workspaceId: activeWs,
+                            })
                           }
                         >
                           Delete
@@ -1597,7 +1764,7 @@ export function App() {
             id="wc-pane-account"
             role="tabpanel"
             aria-labelledby="wc-tab-account"
-            className="wc-section"
+            className="wc-section wc-pane"
           >
             <h2 className="wc-section__title">Account &amp; sites</h2>
             <p className="wc-muted wc-small">
@@ -1605,7 +1772,26 @@ export function App() {
               sites you have allowed. Opening this panel uploads nothing.
             </p>
 
-            <CreditMeter credits={credits} />
+            <CreditMeter
+              credits={credits}
+              error={creditsError}
+              onRetry={
+                session?.source === 'cognito' && session.accessToken
+                  ? () =>
+                      void refreshCredits(
+                        session.accessToken,
+                        session.source,
+                      )
+                  : undefined
+              }
+            />
+
+            {!remoteProfilesEnabled() && (
+              <p className="wc-muted wc-small">
+                Using packaged site profiles. Remote profile updates stay off
+                until this build includes a signing key.
+              </p>
+            )}
 
             <ConnectorsPanel
               providers={connectors?.providers ?? []}
@@ -1625,9 +1811,17 @@ export function App() {
             />
 
             <h3 className="wc-section__title">Session</h3>
-            <p className="wc-muted wc-small wc-mono">
-              {session?.ownerId ?? '—'} · {session?.source ?? 'device'}
+            <p className="wc-muted wc-small">
+              {describeSessionSource(session?.source)}
             </p>
+            {session?.ownerId ? (
+              <p
+                className="wc-muted wc-small wc-mono"
+                title={session.ownerId}
+              >
+                Ref {shortenSessionRef(session.ownerId)}
+              </p>
+            ) : null}
 
             {session?.source === 'device' && (
               <>
@@ -1655,14 +1849,13 @@ export function App() {
                           outcome.session.accessToken,
                           outcome.session.source,
                         );
-                        setCredits(
-                          await fetchCredits(outcome.session.accessToken),
+                        await refreshCredits(
+                          outcome.session.accessToken,
+                          outcome.session.source,
                         );
                       })
                       .catch((err) =>
-                        setError(
-                          err instanceof Error ? err.message : 'sign-in failed',
-                        ),
+                        setError(formatUiError(err, 'Couldn’t complete sign-in. Try again.')),
                       )
                       .finally(() => setSigningIn(false));
                   }}
@@ -1670,50 +1863,17 @@ export function App() {
                   {signingIn ? 'Signing in…' : 'Sign in with WalkCroach'}
                 </button>
                 <p className="wc-muted wc-small">
-                  Same login as WalkCroach Web and the IDE extension. Anything
-                  you saved on this device merges into your account.
+                  Opens WalkCroach Web — same account flow as the IDE extension.
+                  Device captures merge into your account after you sign in.
                 </p>
-                <details>
-                  <summary className="wc-muted wc-small">
-                    Advanced: paste a Cognito token
-                  </summary>
-                  <div className="wc-ask" style={{ marginTop: '0.5rem' }}>
-                    <label className="wc-sr-only" htmlFor="wc-cognito-token">
-                      Cognito access or ID token
-                    </label>
-                    <input
-                      id="wc-cognito-token"
-                      className="wc-input"
-                      placeholder="Paste token, then press Enter"
-                      onKeyDown={(e) => {
-                        if (e.key !== 'Enter') return;
-                        const el = e.target as HTMLInputElement;
-                        const v = el.value.trim();
-                        if (!v) return;
-                        void upgradeToCognito(v)
-                          .then(async (s) => {
-                            setSession(s);
-                            setError(null);
-                            el.value = '';
-                            setWorkspaces(await listWorkspaces(s.accessToken));
-                            await refreshWebProjects(s.accessToken, s.source);
-                          })
-                          .catch((err) =>
-                            setError(
-                              err instanceof Error
-                                ? err.message
-                                : 'upgrade failed',
-                            ),
-                          );
-                      }}
-                    />
-                  </div>
-                </details>
               </>
             )}
 
             {session?.source === 'cognito' && (
               <div>
+                <p className="wc-muted wc-small" style={{ marginBottom: '0.5rem' }}>
+                  Signed in with your WalkCroach account (same as Web and IDE).
+                </p>
                 <button
                   type="button"
                   className="wc-btn"
@@ -1723,6 +1883,7 @@ export function App() {
                         setSession(s);
                         setWebProjects([]);
                         setCredits(null);
+                        setCreditsError(null);
                         setLinkHint(
                           'Sign in under Account to link a WalkCroach Web project.',
                         );
@@ -1730,9 +1891,7 @@ export function App() {
                         setError(null);
                       })
                       .catch((err) =>
-                        setError(
-                          err instanceof Error ? err.message : 'sign-out failed',
-                        ),
+                        setError(formatUiError(err, 'Couldn’t sign out. Try again.')),
                       )
                   }
                 >

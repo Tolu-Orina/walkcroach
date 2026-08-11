@@ -1,4 +1,14 @@
 import type { SiteProfile } from '../../../lib/site-profiles/matcher';
+import { IconExternal } from './icons';
+
+/** Truncate long workspace names so Save stays readable at ~250px panel width. */
+export function formatSaveLabel(workspaceName: string, maxChars = 16): string {
+  const name = workspaceName.trim();
+  if (!name) return 'Save';
+  const clipped =
+    name.length > maxChars ? `${name.slice(0, Math.max(1, maxChars - 1))}…` : name;
+  return `Save → ${clipped}`;
+}
 
 /**
  * Page verbs: one-shot actions *about the page you are looking at*, kept beside
@@ -41,6 +51,10 @@ export function PrimaryActions({
 }) {
   const busy = disabled || streaming;
   const primaryClass = primaryDemoted ? 'wc-btn' : 'wc-btn wc-btn--primary';
+  const saveLabel = formatSaveLabel(activeWorkspaceName);
+  const saveTitle = activeWorkspaceName.trim()
+    ? `Save to ${activeWorkspaceName.trim()}`
+    : 'Save';
 
   return (
     <div className="wc-section">
@@ -57,13 +71,19 @@ export function PrimaryActions({
             </button>
             <div className="wc-actions__secondary">
               <button type="button" className="wc-btn" disabled={busy} onClick={onSummarize}>
-                Summarize
+                Summarize page
               </button>
               <button type="button" className="wc-btn" disabled={busy} onClick={onDraft}>
-                Draft
+                Draft reply
               </button>
-              <button type="button" className="wc-btn" disabled={busy} onClick={onSave}>
-                Save
+              <button
+                type="button"
+                className="wc-btn"
+                disabled={busy}
+                title={saveTitle}
+                onClick={onSave}
+              >
+                {saveLabel}
               </button>
             </div>
           </>
@@ -79,10 +99,16 @@ export function PrimaryActions({
             </button>
             <div className="wc-actions__secondary">
               <button type="button" className="wc-btn" disabled={busy} onClick={onDraft}>
-                Draft
+                Draft reply
               </button>
-              <button type="button" className="wc-btn" disabled={busy} onClick={onSave}>
-                Save{activeWorkspaceName ? ` → ${activeWorkspaceName}` : ''}
+              <button
+                type="button"
+                className="wc-btn"
+                disabled={busy}
+                title={saveTitle}
+                onClick={onSave}
+              >
+                {saveLabel}
               </button>
             </div>
           </>
@@ -97,6 +123,7 @@ export function PrimaryActions({
           onClick={onOpenInWebChat}
         >
           Open in Web Chat
+          <IconExternal className="wc-btn__icon" />
         </button>
       </div>
     </div>

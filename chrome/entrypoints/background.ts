@@ -21,8 +21,8 @@ import { downscaleToJpeg, type CapturedScreenshot } from '../lib/screenshot';
 import { routeMessage, type RouterDeps } from '../lib/message-router';
 import {
   isUsableSelection,
-  normalizeSelection,
   putPendingSelection,
+  resolveSelectionCapture,
   takePendingSelection,
 } from '../lib/selection';
 import {
@@ -99,13 +99,14 @@ export default defineBackground(() => {
     }
 
     openSidePanel({ tabId, windowId });
-    if (typeof tabId === 'number') void warmTab(tabId);
+    // Do not extract here — page text only leaves the tab on an explicit panel
+    // action (or Save selection). Toolbar click still grants activeTab so the
+    // classifier can see the URL.
   });
 
   chrome.contextMenus.onClicked.addListener((info, tab) => {
     if (info.menuItemId === CONTEXT_MENU_ID) {
       openSidePanel({ tabId: tab?.id, windowId: tab?.windowId });
-      if (typeof tab?.id === 'number') void warmTab(tab.id);
       return;
     }
 
@@ -215,45 +216,31 @@ async function captureSelection(
   tab: chrome.tabs.Tab | undefined,
 ): Promise<void> {
   const fallback = info.selectionText ?? '';
-  let text = fallback;
-  let truncated = Boolean(fallback);
+  let injected: string | null = null;
 
   if (typeof tab?.id === 'number') {
     try {
-      const injected = await chrome.scripting.executeScript({
+      const results = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         func: () => window.getSelection()?.toString() ?? '',
       });
-      const full = injected[0]?.result;
-      if (typeof full === 'string' && full.trim().length > text.trim().length) {
-        text = full;
-        truncated = false;
-      }
+      const full = results[0]?.result;
+      injected = typeof full === 'string' ? full : null;
     } catch {
       // Restricted page or no access — the fallback still carries something.
     }
   }
 
-  const normalized = normalizeSelection(text);
-  if (!isUsableSelection(normalized)) return;
+  const { text, truncated } = resolveSelectionCapture(injected, fallback);
+  if (!isUsableSelection(text)) return;
 
   await putPendingSelection({
-    text: normalized,
+    text,
     url: info.pageUrl ?? tab?.url ?? '',
     title: tab?.title ?? '',
     truncated,
     capturedAt: Date.now(),
   });
-}
-
-/** Spend a fresh activeTab grant on one extract, and keep it. */
-async function warmTab(tabId: number): Promise<void> {
-  try {
-    const extract = await runExtract(tabId);
-    if (extract) await writeCachedExtract(tabId, extract);
-  } catch {
-    // Restricted page or grant already gone — the panel will classify it.
-  }
 }
 
 async function currentAccess(): Promise<PageAccess> {
@@ -291,8 +278,14 @@ const routerDeps: RouterDeps = {
     );
   },
   takeSelection: takePendingSelection,
-  captureScreenshot: async () => {
-    const pngDataUrl = await chrome.tabs.captureVisibleTab({ format: 'png' });
+  captureScreenshot: async (tabId) => {
+    // captureVisibleTab is window-scoped — must target the tab's window, not
+    // whatever the service worker considers "current" (often wrong when the
+    // side panel or another window holds focus).
+    const tab = await chrome.tabs.get(tabId);
+    const pngDataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
+      format: 'png',
+    });
     return downscaleToJpeg(pngDataUrl);
   },
 };

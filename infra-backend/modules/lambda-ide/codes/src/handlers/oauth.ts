@@ -7,7 +7,7 @@ import { metricLog, parseJsonBody } from '../util.js';
 
 /** Accept known editor schemes; reject arbitrary custom schemes. */
 const REDIRECT_PATTERN =
-  /^(vscode|cursor|vscode-insiders|vscodium|windsurf|code-oss):\/\/walkcroach\.walkcroach-ide\/auth$/;
+  /^(vscode|cursor|vscode-insiders|vscodium|windsurf|code-oss|walkcroach):\/\/walkcroach\.walkcroach-ide\/auth$/;
 
 /**
  * The CLI cannot receive a custom scheme, so it listens on the loopback
@@ -16,7 +16,8 @@ const REDIRECT_PATTERN =
  * Deliberately a separate check rather than a widened `REDIRECT_PATTERN`: the
  * editor pattern is duplicated in `web/src/app/auth/ConnectIdePage.tsx` and
  * annotated "must stay in sync". Editing it here would silently break IDE
- * sign-in for every editor, to add a case the IDE never uses.
+ * sign-in for every editor, to add a case the IDE never uses. Desktop uses the
+ * same path with scheme `walkcroach` (product urlProtocol).
  *
  * Parsed rather than regex-matched, because the interesting failures are
  * hosts that only *look* like loopback — `127.0.0.1.attacker.example` matches

@@ -125,7 +125,7 @@ export function SignInPage() {
               navigate(next, { replace: true });
             }}
           >
-            Continue as Builder (local)
+            Continue locally (dev)
           </button>
           <p className="text-center text-[11px] text-mist">
             Or open the{' '}

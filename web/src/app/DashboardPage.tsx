@@ -9,22 +9,20 @@ import {
 import type { ProjectSummary } from '../api/types';
 import { useAuth } from '../auth/useAuth';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { NameCreateDialog } from '../components/product/NameCreateDialog';
+import { ProductEmptyState } from '../components/product/ProductEmptyState';
+import { ProductErrorBanner } from '../components/product/ProductErrorBanner';
+import { ProductPageHeader } from '../components/product/ProductPageHeader';
 import { ProjectCardSkeleton } from '../components/Skeleton';
-import { BuilderIconLink } from '../features/builder/BuilderIconLink';
-import { NewProjectDialog } from '../features/projects/NewProjectDialog';
 
-function statusLabel(status: string): string {
-  switch (status) {
-    case 'draft':
-      return 'Draft';
-    case 'building':
-      return 'Building';
-    case 'ready':
-      return 'Ready';
-    case 'archived':
-      return 'Archived';
-    default:
-      return status;
+function formatUpdated(iso: string): string {
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    }).format(new Date(iso));
+  } catch {
+    return iso;
   }
 }
 
@@ -37,53 +35,54 @@ function ProjectCard({
   onArchive: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
+  const excerpt =
+    project.description?.trim() ||
+    project.memorySummary?.trim() ||
+    'No description yet — open to add standing context.';
+
   return (
-    <div className="surface interactive p-5 transition hover:border-signal/35">
-      <div className="flex items-start justify-between gap-3">
-        <Link
-          to={`/app/projects/${project.id}`}
-          className="interactive min-w-0 flex-1 font-display text-xl font-bold tracking-tight text-paper hover:text-signal"
-        >
-          {project.name}
-        </Link>
-        <div className="flex shrink-0 items-center gap-2">
-          <BuilderIconLink projectId={project.id} />
-          <span className="rounded-[var(--radius-control)] border border-line px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-mist">
-            {statusLabel(project.status)}
-          </span>
-        </div>
-      </div>
-      {project.description ? (
-        <p className="mt-2.5 line-clamp-2 text-sm leading-relaxed text-mist">
-          {project.description}
+    <article className="surface interactive group relative flex min-h-[9.5rem] flex-col p-5 transition duration-150 hover:border-signal/35">
+      <Link
+        to={`/app/projects/${project.id}`}
+        className="absolute inset-0 rounded-[var(--radius-surface)]"
+        aria-label={`Open project ${project.name}`}
+      />
+      <h2 className="relative z-[1] pointer-events-none font-display text-xl font-bold tracking-tight text-paper group-hover:text-signal">
+        {project.name}
+      </h2>
+      <p className="relative z-[1] pointer-events-none mt-2 line-clamp-2 flex-1 text-sm leading-relaxed text-mist">
+        {excerpt}
+      </p>
+      <div className="relative z-[1] mt-4 flex items-center justify-between gap-2">
+        <p className="pointer-events-none text-xs text-mist">
+          Updated {formatUpdated(project.updatedAt)}
         </p>
-      ) : project.memorySummary ? (
-        <p className="mt-2.5 line-clamp-2 text-sm leading-relaxed text-mist">
-          {project.memorySummary}
-        </p>
-      ) : null}
-      <div className="mt-4 flex items-center justify-between gap-2">
-        <p className="text-[11px] text-mist/80">
-          Updated {new Date(project.updatedAt).toLocaleString()}
-        </p>
-        <div className="flex gap-1 text-[12px]">
+        <div className="flex gap-1">
           <button
             type="button"
-            onClick={() => onArchive(project.id)}
-            className="btn-ghost min-h-8 px-2 text-xs"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onArchive(project.id);
+            }}
+            className="btn-ghost relative z-[2] min-h-8 px-2 text-xs"
           >
             Archive
           </button>
           <button
             type="button"
-            onClick={() => onDelete(project.id)}
-            className="interactive min-h-8 rounded-[var(--radius-control)] px-2 text-xs text-ember/90 hover:bg-ember/10 hover:text-ember"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onDelete(project.id);
+            }}
+            className="interactive relative z-[2] min-h-8 rounded-[var(--radius-control)] px-2 text-xs text-ember/90 hover:bg-ember/10 hover:text-ember"
           >
             Delete
           </button>
         </div>
       </div>
-    </div>
+    </article>
   );
 }
 
@@ -102,10 +101,15 @@ export function DashboardPage() {
     setLoading(true);
     setError(null);
     try {
-      const list = await listProjects();
+      const list = await listProjects({ kind: 'knowledge' });
       setProjects(list);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const raw = err instanceof Error ? err.message : '';
+      setError(
+        !raw || raw === 'Failed to fetch'
+          ? 'Could not load projects — check your connection and try again.'
+          : raw,
+      );
     } finally {
       setLoading(false);
     }
@@ -120,13 +124,16 @@ export function DashboardPage() {
     setCreating(true);
     setError(null);
     try {
-      // Knowledge container — no app template. Starters live in Builder.
-      const { id } = await createProject(name);
+      const { id } = await createProject(name, null, { kind: 'knowledge' });
       setCreateOpen(false);
       setCreating(false);
       navigate(`/app/projects/${id}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Could not create the project — try again.',
+      );
       setCreating(false);
     }
   };
@@ -137,12 +144,12 @@ export function DashboardPage() {
       await archiveProject(id);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Could not archive the project — try again.',
+      );
     }
-  };
-
-  const handleDelete = async (id: string) => {
-    setDeleteTarget(id);
   };
 
   const confirmDelete = async () => {
@@ -154,76 +161,76 @@ export function DashboardPage() {
       setDeleteTarget(null);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Could not delete the project — try again.',
+      );
     } finally {
       setDeleteBusy(false);
     }
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col px-5 py-9 sm:px-8">
-      <header className="border-b border-line pb-7">
-        <p className="eyebrow">Projects</p>
-        <div className="mt-3 flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <h1 className="font-display text-3xl font-extrabold tracking-tight text-paper">
-              Your projects
-            </h1>
-            <p className="mt-1.5 text-sm text-mist">
-              {user?.displayName ?? 'You'} · chats, docs, and standing context
-              across each project’s life
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setCreateOpen(true)}
-            disabled={creating}
-            className="btn-primary text-xs"
-          >
-            {creating ? 'Creating…' : 'New project'}
-          </button>
-        </div>
-      </header>
+    <div className="flex h-full min-h-0 flex-col px-5 py-8 sm:px-8">
+      <div className="wc-enter">
+        <ProductPageHeader
+          eyebrow="Projects"
+          title="Your projects"
+          support={`${user?.displayName ?? 'You'} · chats, documents, and standing instructions — separate from App Builder`}
+          primaryLabel="New project"
+          onPrimary={() => setCreateOpen(true)}
+          busy={creating}
+          primaryBusyLabel="Creating…"
+        />
+      </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto py-6">
+      <div className="min-h-0 flex-1 overflow-y-auto py-8">
         {loading && (
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-6 sm:grid-cols-2" aria-busy="true">
             <ProjectCardSkeleton />
             <ProjectCardSkeleton />
             <ProjectCardSkeleton />
             <ProjectCardSkeleton />
           </div>
         )}
-        {error && <p className="text-sm text-ember">{error}</p>}
+
+        {!loading && error && (
+          <ProductErrorBanner message={error} onRetry={() => void load()} />
+        )}
+
         {!loading && !error && projects.length === 0 && (
-          <div className="rounded-sm border border-dashed border-line px-6 py-12 text-center">
-            <p className="text-sm text-mist">No projects yet.</p>
-            <button
-              type="button"
-              onClick={() => setCreateOpen(true)}
-              className="interactive mt-4 text-sm text-signal underline-offset-2 hover:underline"
-            >
-              Create your first project
-            </button>
+          <div className="wc-enter-delay">
+            <ProductEmptyState
+              title="No projects yet"
+              body="Create a project for chats that share standing instructions, documents, and memory. App Builder is a separate place to ship apps."
+              actionLabel="New project"
+              onAction={() => setCreateOpen(true)}
+            />
           </div>
         )}
-        {!loading && (
-          <div className="grid gap-4 sm:grid-cols-2">
+
+        {!loading && !error && projects.length > 0 && (
+          <div className="wc-stagger grid gap-6 sm:grid-cols-2">
             {projects.map((p) => (
               <ProjectCard
                 key={p.id}
                 project={p}
                 onArchive={(id) => void handleArchive(id)}
-                onDelete={(id) => void handleDelete(id)}
+                onDelete={(id) => setDeleteTarget(id)}
               />
             ))}
           </div>
         )}
       </div>
 
-      <NewProjectDialog
+      <NameCreateDialog
         open={createOpen}
         creating={creating}
+        title="New project"
+        description="A place for chats, documents, and standing instructions."
+        defaultName="Untitled project"
+        confirmLabel="Create project"
         onClose={() => setCreateOpen(false)}
         onCreate={(name) => void handleCreate(name)}
       />
@@ -231,7 +238,7 @@ export function DashboardPage() {
         open={deleteTarget !== null}
         title="Delete project?"
         message="This removes the project from your account. Access is revoked immediately; data is soft-deleted and cannot be recovered from the UI."
-        confirmLabel="Delete"
+        confirmLabel="Delete project"
         destructive
         busy={deleteBusy}
         onConfirm={() => void confirmDelete()}

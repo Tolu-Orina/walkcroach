@@ -21,6 +21,7 @@ import {
   consumePendingChatContext,
   formatChatHandoffDraft,
 } from '../lib/pending-chat-context';
+import { ProductErrorBanner } from '../components/product/ProductErrorBanner';
 
 /**
  * Chat home — welcome + templates when empty; thread when active.
@@ -193,8 +194,16 @@ export function ChatHomePage() {
 
   if (status === 'error') {
     return (
-      <div className="grid h-full place-items-center px-6 text-center text-sm text-ember">
-        {bootError ?? 'Could not start chat'}
+      <div className="grid h-full place-items-center px-6">
+        <div className="w-full max-w-md">
+          <ProductErrorBanner
+            message={
+              bootError ??
+              'Could not start Chat — check your connection and try again.'
+            }
+            onRetry={() => window.location.reload()}
+          />
+        </div>
       </div>
     );
   }

@@ -154,7 +154,7 @@ Each phase has: **intent**, **work packages**, **exit criteria (fitness function
 
 **Non-goals:** npm publish marketing; agent-engine public API; GDPR erase yet.
 
-**Parallel OK:** Desktop dogfood fixes that don’t change memory contracts.
+**Parallel OK:** Desktop packaging / unsigned-preview fixes that don’t change memory contracts.
 
 ---
 

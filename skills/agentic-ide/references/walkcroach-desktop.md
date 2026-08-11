@@ -101,15 +101,11 @@ Memory "baseline" for Desktop is still the IDE BFF + engine bridges, not the pub
 
 ## 8. Known gaps (STATUS-aligned)
 
-Do not describe these as done:
+Do not overclaim distribution:
 
-- CRDB panels / skills aux: mostly **demo fixtures**
-- Diff commentary / first-class diff review UX: incomplete
-- DurableMemoryStore in Agent Host: constructed then unused in places
-- FileSecrets: plaintext JSON risk
-- PKCE: paste-token paths remain
-- Approval fan-out across fleet sessions: race risk
+- Skills aux: still **demo content**
+- Terminal prefer-hook / chat fork: stubbed or unwired
 - Nested vscode **untracked** WalkCroach files vs committed pin — git hygiene is a product risk
-- Auto-update / code signing: deferred
+- Auto-update / code signing: deferred (**unsigned preview** channel)
 
-**Verdict language to use externally:** "preview-capable / dogfood" — not "production Desktop IDE."
+**Verdict language to use externally:** "production-grade WalkCroach Desktop IDE on an unsigned preview channel" — parity with other surfaces; **not** dogfood; **not** signed/auto-updating.

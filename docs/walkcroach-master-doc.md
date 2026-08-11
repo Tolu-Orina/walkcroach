@@ -24,7 +24,7 @@ WalkCroach is a multi-surface agentic platform whose differentiator is **one Coc
 | **IDE Extension** | `walkcroach/ide` | **agent-engine** + `/ide/v1` BFF | `walkcroach-ide` **0.2.0** | **Published path** — Open VSX workflow; VS Marketplace still commented out |
 | **CLI** | `walkcroach/cli` | **agent-engine** | `@walkcroach/cli` **0.3.0** | **Published path** — npm OIDC publish workflow |
 | **SDK** | `packages/sdk` (+ `sdk-mcp`, `sdk-host`) | No loop in SDK; content runs use **sdk-host → agent-engine** | sdk **0.2.0**, sdk-mcp **0.2.0**, sdk-host **0.1.0** | **Built and first-party-wired**; publish workflow for sdk + sdk-mcp; **sdk-host unpublished** |
-| **Desktop IDE** | `walkcroach-desktop/` (sibling) | **agent-engine** via `desktop-agent` + Agent Host | Desktop parent **0.1.0**; upstream pin **1.131.0** | **Preview / dogfood** — unsigned Windows portable tooling; not production-signed |
+| **Desktop IDE** | `walkcroach-desktop/` (sibling) | **agent-engine** via `desktop-agent` + Agent Host | Desktop parent **0.1.0**; upstream pin **1.131.0** | **Production-grade** (parity with IDE/CLI); **unsigned preview** distribution only |
 
 **Shared modules (not surfaces):** `@walkcroach/agent-engine` (private), `@walkcroach/agent-harness` (under `infra-backend/packages/`), `@walkcroach/db` (37 migrations), `@walkcroach/connectors`, `@walkcroach/ledger`, `@walkcroach/storage`, `@walkcroach/memory-contracts`, `@walkcroach/templates`, `@walkcroach/agent-protocol`.
 
@@ -37,7 +37,7 @@ WalkCroach is a multi-surface agentic platform whose differentiator is **one Coc
 | SDK agent path “never executed” / no publish story | Content/runs handlers + `sdk-host` exist; **publish-sdk.yml** tags `sdk-v*` / `sdk-mcp-v*`. Live-prod golden remains **env-gated** |
 | No developer portal | Web routes `/app/developer/*` (overview, keys, ops, governance, docs) |
 | Chrome ~0.5.x / “submission gate” as primary story | Package + store kit **0.6.1**; treat CWS live status as ops, not code |
-| Desktop “scaffold / never compiled” | Native Agent Host + Path B fleet **work in-repo**; CRDB panels still demo; unsigned packaging tooling ready |
+| Desktop “scaffold / never compiled” | Native Agent Host + Path B fleet + live CRDB/MCP when configured; **production-grade**; unsigned preview packaging |
 | agent-engine MCP is HTTP-only / stdio forever deferred | Engine supports **HTTP + host-gated stdio**; harness and sdk-mcp remain HTTP-only |
 | Empty monitoring | **observability-memory** + **observability-creative** modules exist; platform-wide Lambda SLOs still incomplete |
 
@@ -54,7 +54,7 @@ WalkCroach is a multi-surface agentic platform whose differentiator is **one Coc
 
 ### 0.3 Assumptions this audit was written against
 
-- Nested `walkcroach-desktop/vscode/` may be present on a dogfood machine but is **gitignored by the parent** — Desktop completeness is judged from contrib/packages/product + STATUS, not from whether a zip exists in this workspace.
+- Nested `walkcroach-desktop/vscode/` may be present on a local build machine but is **gitignored by the parent** — Desktop completeness is judged from contrib/packages/product + STATUS, not from whether a zip exists in this workspace.
 - Whether creative ECR/`latest` and CWS listing are live in production **right now** is **inferred** from `prod.tfvars` / store kit, not from a live AWS/CWS probe in this pass.
 - npm registry “currently published” versions were **not** re-queried remotely; maturity for CLI/IDE/SDK uses **in-repo version + publish workflow** as the packaging signal.
 
@@ -422,7 +422,7 @@ agent-ui / settings-ui (webview IIFEs)
 
 ### 8.5 External language
 
-Use **“preview-capable / dogfood”** — not “production Desktop IDE,” not “signed,” not “auto-updating.”
+Use **“production-grade WalkCroach Desktop IDE on an unsigned preview channel”** — not “dogfood,” not “incomplete relative to IDE/CLI,” not “signed,” not “auto-updating.”
 
 ---
 
@@ -568,9 +568,9 @@ Approximate `*.test.ts(x)` inventories from this review:
 
 | # | Gap | Why it matters | Status |
 |---|---|---|---|
-| 1 | Desktop preview ≠ signed production | SmartScreen, trust, auto-update | Open — tooling only |
-| 2 | Desktop CRDB/skills panes are demo | Easy to overclaim in demos | Open |
-| 3 | Desktop approval fan-out / plaintext secrets | Fleet safety + credential risk | Open vs ADR-0003 bar |
+| 1 | Desktop unsigned preview ≠ signed installer | SmartScreen, trust, auto-update | Open — product-grade; signing deferred |
+| 2 | Desktop skills aux still demo content | Easy to overclaim skills UI | Open (CRDB panels are live when configured) |
+| 3 | Desktop approval / secrets hardening debt | Fleet safety + credential risk | Track vs ADR-0003 bar |
 | 4 | Live SDK/agent golden env-gated | “Works in prod” needs evidence | Open as continuous proof |
 | 5 | Connectors/creatives code-complete ≠ user-reachable without secrets | Marketing must lag wiring | Open |
 | 6 | Dual Stripe config footgun | Silent breakage | Open (docs + discipline) |
@@ -663,6 +663,6 @@ Approximate `*.test.ts(x)` inventories from this review:
 
 ## 19. Decision / Ask
 
-**Decision this document asserts:** WalkCroach is a **six-surface platform on one memory graph with two intentional agent loops**. Four client surfaces are shipping-capable (Web mature; Chrome/IDE/CLI published or publish-workflowed); the SDK is a real memory/content product with first-party adoption; Desktop is preview/dogfood only.
+**Decision this document asserts:** WalkCroach is a **six-surface platform on one memory graph with two intentional agent loops**. Client surfaces are shipping-capable at production maturity (Web mature; Chrome/IDE/CLI published or publish-workflowed; Desktop production-grade on an **unsigned preview** channel); the SDK is a real memory/content product with first-party adoption.
 
 **Ask of readers:** When updating marketing, hackathon copy, or architecture recommendations, cite **this file + code**, not archived PRDs. If a claim here disagrees with a demo script, **change the script** or label the gap — do not paper over status drift.

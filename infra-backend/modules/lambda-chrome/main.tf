@@ -63,6 +63,12 @@ variable "cors_allow_origin" {
   default     = "*"
 }
 
+variable "chrome_extension_id" {
+  type        = string
+  description = "Published CWS extension ID for CHROME_EXTENSION_IDS (empty = allow any chrome-extension Origin)."
+  default     = ""
+}
+
 variable "tags" {
   type    = map(string)
   default = {}
@@ -139,23 +145,28 @@ resource "aws_lambda_function" "chrome" {
   source_code_hash = filebase64sha256(var.zip_path)
 
   environment {
-    variables = {
-      ENVIRONMENT          = var.environment
-      BEDROCK_REGION       = var.bedrock_region
-      NOVA_MODEL_ID        = var.nova_model_id
-      TITAN_EMBED_MODEL_ID = var.titan_embed_model_id
-      RUNTIME_SECRET_ARN   = var.runtime_secret_arn
-      COGNITO_USER_POOL_ID = var.cognito_user_pool_id
-      COGNITO_CLIENT_ID    = var.cognito_client_id
-      ALLOW_DEV_AUTH       = var.allow_dev_auth ? "true" : "false"
-      CORS_ALLOW_ORIGIN    = var.cors_allow_origin
-      CAPTURES_BUCKET      = aws_s3_bucket.captures.bucket
-      WEB_APP_URL          = var.web_app_url
-      # Prefix under which connector OAuth tokens are stored. Tokens never live
-      # in CockroachDB — `connectors.secret_ref` points here.
-      CONNECTOR_SECRET_PREFIX = "walkcroach/${var.environment}/connectors"
-      NODE_OPTIONS            = "--enable-source-maps"
-    }
+    variables = merge(
+      {
+        ENVIRONMENT          = var.environment
+        BEDROCK_REGION       = var.bedrock_region
+        NOVA_MODEL_ID        = var.nova_model_id
+        TITAN_EMBED_MODEL_ID = var.titan_embed_model_id
+        RUNTIME_SECRET_ARN   = var.runtime_secret_arn
+        COGNITO_USER_POOL_ID = var.cognito_user_pool_id
+        COGNITO_CLIENT_ID    = var.cognito_client_id
+        ALLOW_DEV_AUTH       = var.allow_dev_auth ? "true" : "false"
+        CORS_ALLOW_ORIGIN    = var.cors_allow_origin
+        CAPTURES_BUCKET      = aws_s3_bucket.captures.bucket
+        WEB_APP_URL          = var.web_app_url
+        # Prefix under which connector OAuth tokens are stored. Tokens never live
+        # in CockroachDB — `connectors.secret_ref` points here.
+        CONNECTOR_SECRET_PREFIX = "walkcroach/${var.environment}/connectors"
+        NODE_OPTIONS            = "--enable-source-maps"
+      },
+      var.chrome_extension_id != "" ? {
+        CHROME_EXTENSION_IDS = var.chrome_extension_id
+      } : {},
+    )
   }
 
   depends_on = [

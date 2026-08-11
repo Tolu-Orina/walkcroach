@@ -6,6 +6,7 @@ import { isUuid, metricLog, parseJsonBody } from '../util.js';
 type ProjectSummary = {
   id: string;
   name: string;
+  kind: string;
   status: string;
   updated_at: string;
 };
@@ -75,11 +76,12 @@ export async function handleListMyProjects(
   const db = createDbClient();
   try {
     const { rows } = await db.query<ProjectSummary>(
-      `SELECT id, name, status, updated_at
+      `SELECT id, name, kind, status, updated_at
        FROM projects
        WHERE owner_id = $1
          AND deleted_at IS NULL
          AND archived_at IS NULL
+         AND kind IN ('app', 'knowledge')
        ORDER BY updated_at DESC
        LIMIT 100`,
       [auth.ownerId],

@@ -266,13 +266,15 @@ export async function listMessages(
 export async function getLatestSessionForProject(
   db: DbClient,
   projectId: string,
+  mode: 'chat' | 'builder',
 ): Promise<{ id: string } | null> {
   const { rows } = await db.query<{ id: string }>(
     `SELECT id FROM sessions
      WHERE project_id = $1::uuid
+       AND COALESCE(mode, 'builder') = $2
      ORDER BY updated_at DESC
      LIMIT 1`,
-    [projectId],
+    [projectId, mode],
   );
   return rows[0] ?? null;
 }

@@ -65,7 +65,7 @@ describe('getSdkAccessToken', () => {
     expect(await getSdkAccessToken()).toBe('access-token');
   });
 
-  it('falls back to id_token then bearer', async () => {
+  it('does not fall back to id_token or BFF bearer', async () => {
     storage.wc_device_key = 'dk';
     storage.wc_access_token = 'bearer';
     storage.wc_owner_id = 'o';
@@ -73,7 +73,7 @@ describe('getSdkAccessToken', () => {
     storage.wc_id_token = 'id-only';
 
     const { getSdkAccessToken } = await import('./sdkClient');
-    expect(await getSdkAccessToken()).toBe('id-only');
+    expect(await getSdkAccessToken()).toBeUndefined();
   });
 });
 

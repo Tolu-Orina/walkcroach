@@ -65,7 +65,7 @@ export function labelType(captureType: string): string {
     case 'listing':
       return 'listing';
     case 'selection':
-      return 'highlight';
+      return 'selection';
     case 'draft':
       return 'draft';
     default:

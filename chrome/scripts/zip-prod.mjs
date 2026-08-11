@@ -207,5 +207,29 @@ if (!sawWeb) {
   fail(`baked Web URL not found in build output: ${webUrl}`);
 }
 
+const chromeMv3 = join(outputDir, 'chrome-mv3');
+for (const icon of [
+  'icon-16.png',
+  'icon-32.png',
+  'icon-48.png',
+  'icon-128.png',
+]) {
+  if (!existsSync(join(chromeMv3, 'icon', icon)) && !existsSync(join(chromeMv3, icon))) {
+    // WXT may nest under icon/ or flatten into the root — accept either.
+    const found = files.some((f) => f.replace(/\\/g, '/').endsWith(`/${icon}`));
+    if (!found) fail(`store icon missing from build output: ${icon}`);
+  }
+}
+
+if (!existsSync(join(chromeMv3, 'auth.html'))) {
+  fail('auth.html missing from chrome-mv3 (required for tab sign-in fallback)');
+}
+
+if (!(process.env.WALKCROACH_PROFILES_PUBLIC_KEY ?? '').trim()) {
+  console.warn(
+    'zip:prod warning: WALKCROACH_PROFILES_PUBLIC_KEY unset — remote site profiles remain disabled (packaged profiles only).',
+  );
+}
+
 console.log(`zip:prod OK — version ${pkg.version}`);
 console.log(`zip:prod artifact: ${zip}`);

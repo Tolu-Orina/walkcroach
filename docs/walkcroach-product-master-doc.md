@@ -21,7 +21,7 @@ Status labels used throughout:
 | **Ready** | Built and usable for the intended audience (may still need secrets/ops for full production) |
 | **Shipped / publishable** | Distribution path exists (store, npm, Open VSX, or hosted web) |
 | **Gated** | Code exists but stays off or inert until secrets, entitlements, or ops steps land |
-| **Preview / dogfood** | Works for internal use; not production-hardened or not signed |
+| **Preview (unsigned)** | Production-grade product on a preview channel; not code-signed / notarized yet |
 | **Demo only** | UI looks real; data or backend is fake — **do not demo as live** |
 | **Out of scope** | Explicitly not a product promise today |
 
@@ -33,7 +33,7 @@ WalkCroach is an **agentic work platform**: AI that can help people build softwa
 
 **The product bet:** the same project memory follows the user across six surfaces (Web, Browser Extension, IDE Extension, CLI, SDK, Desktop IDE). An insight captured in Chrome can matter later in the IDE; a decision made while building on the Web can be recalled from the CLI. That shared memory is the moat competitors usually lack.
 
-**What we do *not* claim:** that every surface is equally mature, that Desktop is a signed production IDE, that connectors work without OAuth setup, that creatives are unlimited, or that “time travel” through memory goes back years.
+**What we do *not* claim:** that connectors work without OAuth setup, that creatives are unlimited, that “time travel” through memory goes back years, or that Desktop is a **signed** installer (it is production-grade on an **unsigned preview** channel).
 
 ### 0.1 Status at a glance
 
@@ -44,7 +44,7 @@ WalkCroach is an **agentic work platform**: AI that can help people build softwa
 | **IDE Extension** | Developers in VS Code / compatible editors | **Publishable (Open VSX)** | Local coding agent with project link + shared memory |
 | **CLI** | Developers / automation in the terminal | **Publishable (npm)** | Same coding agent as IDE, scriptable; browser sign-in for humans, token for CI |
 | **SDK** | External (and first-party) developers integrating memory/content | **Built; portal exists; publish path for packages** | Memory + content APIs + keys — **not** “host a full coding agent in our cloud for you” as the public product |
-| **Desktop IDE** | Developers who want a WalkCroach-native editor | **Preview / dogfood only** | Real agent + multi-agent window; Cockroach panels mostly **demo**; unsigned Windows preview |
+| **Desktop IDE** | Developers who want a WalkCroach-native editor | **Production-grade** (unsigned preview) | Full agent + multi-agent window + live CRDB/MCP when configured; Web PKCE auth; unsigned Windows preview channel |
 
 ### 0.2 What “good” looks like for WalkCroach (evaluation lens)
 
@@ -128,7 +128,7 @@ Exact creative caps that marketing and QA must keep true (paid):
 | **Professional developer** | IDE, CLI, optionally Desktop | Agent-assisted coding with approvals, checkpoints, shared project memory |
 | **Automation / CI user** | CLI (+ tokens), SDK | Scripted auth, memory ops, content publish without a GUI |
 | **Platform / API developer** | Web developer portal + SDK | Create API keys, call memory/content APIs, read docs |
-| **Internal dogfooder / evaluator** | All, especially Desktop preview | Validate cross-surface memory and trust gates before external claims |
+| **Evaluator / release checker** | All surfaces | Validate cross-surface memory and trust gates; Desktop checks unsigned-preview install path |
 
 **Not primary personas today:** end-customers of *generated* apps (custom domains / end-user auth for those apps remain out of scope), ops admins needing a full internal admin console (not built as a product surface).
 
@@ -145,7 +145,7 @@ Exact creative caps that marketing and QA must keep true (paid):
 | Link IDE / CLI / Chrome from Web | Ready | Connect pages mint one-time handoffs with proof-of-possession (PKCE) |
 | CLI browser sign-in | Ready | Loopback local listener; `--token` for CI |
 | IDE paste-token fallback | Ready | Exists alongside Hosted UI |
-| Desktop auth | Preview | Paste-token heavy; treat as dogfood UX |
+| Desktop auth | Ready | Web `/connect/ide` PKCE (IDE parity) + paste-token emergency fallback |
 | API keys (`wc_live_…`) | Ready in product/API | Create/list/revoke from developer portal; keys cannot mint other keys; **do not** put secret keys in browser apps |
 
 ### 3.2 Projects & collaboration skeleton
@@ -372,41 +372,41 @@ Engineering has dashboards/alarms for **memory health** and **creative spend/bud
 
 **Product job:** A WalkCroach-native desktop editor (fork of VS Code / Code OSS) with a first-class multi-agent experience and shared memory.
 
-**Maturity: Preview / dogfood — not production-signed.**
+**Maturity: Production-grade** — parity with IDE / CLI / other WalkCroach surfaces. **Not dogfood.** Distribution: **unsigned preview** channel until signing/notarization.
 
-**Works in dogfood (when set up):**
+**Works (when set up):**
 
 - Chat / Plan / Agent modes with Bedrock key  
 - Approvals and questions  
 - **Agents Window** with multiple agent tabs/grid (soft cap **6**, with force)  
 - Settings UI; theme/branding  
+- Web PKCE Connect + paste-token fallback  
 - Online project memory when signed in and project-linked  
-- Unsigned Windows portable / Setup.exe **packaging tooling** (operator builds the artifact)
+- Live CockroachDB Schema / Query / Audit / ccloud / Telemetry when MCP/ccloud configured  
+- Unsigned Windows portable / Setup.exe **packaging** (operator builds the artifact)
 
-**Demo-only or incomplete — do not sell as live:**
+**Gaps / deferred — do not confuse with soft product maturity:**
 
 | Area | Truth |
 |---|---|
-| CockroachDB schema / query / cloud-admin style panels | **Demo fixtures** |
-| Skills auxiliary lists | **Demo content** |
-| Offline durable memory buffer | Not wired into the product path |
-| Secrets storage on disk | Effectively plaintext today — dogfood risk |
-| Auto-update / code signing / notarization | Deferred |
-| macOS / Linux as production channels | Not the interim promise |
+| Skills auxiliary lists | Demo content |
+| Auto-update / code signing / notarization | Deferred — unsigned preview channel |
+| macOS / Linux as public channels | Not the interim promise |
 
 **Distribution policy (product language):**
 
 - Channel: **insider / preview**  
 - Windows unsigned Setup.exe / zip — users may see SmartScreen (“More info → Run anyway”)  
 - Extensions gallery: **Open VSX only** (never Microsoft Marketplace proxy)  
-- First public Release is still an **operator step**, not “automatically shipping from CI as a signed installer”
+- First public Release may still be an **operator step**, not “automatically shipping from CI as a signed installer”  
+- External wording: **production-grade Desktop IDE, unsigned preview** — never “dogfood”
 
 **QA focus (Desktop)**
 
 - Label builds **Preview** in test reports  
 - Agent turn + approval + fleet with 2–3 parallel agents  
-- Confirm memory pane shows live data only when linked; otherwise demo fallback is obvious  
-- Never mark CRDB panels as passed “integration” if they only show fixtures  
+- Confirm memory pane shows live data when linked  
+- CRDB panels: live when configured; empty/configure when not — never fixture schema  
 - Packaging: checksum (`SHA512SUMS`) present for any shared build  
 - Regression watch: approvals applying to the **wrong** agent tab (known risk area)
 
@@ -450,11 +450,11 @@ Use these as scenario outlines. Pass/fail should cite the surface and whether a 
 2. Upgrade to Cognito account preserves or merges expected data without orphaning captures.  
 **Pass:** No stranded data; clear prompts. **Fail:** Lost captures or duplicate confused identity.
 
-### Journey F — Desktop preview honesty
+### Journey F — Desktop unsigned-preview honesty
 
-1. Installer/preview build launches; Agent completes a turn with key present.  
-2. Tester opens CRDB panels — records **demo** in the report unless eng certifies live wiring.  
-**Pass:** Preview labelled; agent path works. **Fail:** Report calls Desktop “production ready” or CRDB “live.”
+1. Preview-channel unsigned installer launches; Agent completes a turn with key present.  
+2. With MCP configured, Schema/Query show live data; without, configure empty state (no fixtures).  
+**Pass:** Build labelled unsigned preview; agent + CRDB paths honest. **Fail:** Report calls Desktop “dogfood,” or treats unsigned as incomplete product maturity.
 
 ---
 
@@ -488,7 +488,7 @@ These are the practical “feature flags” Product/BA/QA hit — even when no U
 - Paid creative hard caps as listed in §1.5.  
 - Free tier does **not** include full Canvas / Reel / Pro creative orchestration.  
 - Shared Web/Chrome credit pool where the product surfaces it.  
-- Desktop interim builds are **unsigned preview**.  
+- Desktop builds are **production-grade** on an **unsigned preview** channel (signing deferred).  
 - Public SDK is a **memory/content/keys** product.
 
 ### 7.2 Claims that must not appear
@@ -500,9 +500,9 @@ These are the practical “feature flags” Product/BA/QA hit — even when no U
 | Credits remove hard caps | False |
 | Always-on background scraping (as a Web claim) | Chrome policy is separate; do not bleed |
 | Desktop is signed / notarized / auto-updating | Not true today |
+| Desktop is dogfood / incomplete vs IDE/CLI | False — production-grade; unsigned preview only |
 | Multi-year memory time travel | Only ~25h operational asOf |
 | SDK = full hosted coding agent for everyone | Misstates the product |
-| All six surfaces are equally production-mature | False — Desktop preview; gates elsewhere |
 | Microsoft Marketplace listing for IDE (unless workflow enabled) | Not enabled |
 | HubSpot connector “live” while UI/code say coming soon | False |
 
@@ -523,7 +523,7 @@ When choosing the next bet, prefer work that strengthens the **evaluation lens**
 | **1. Make the differentiator undeniable** | Wins demos and reviews | Cross-surface memory polish, provenance clarity, portal docs honesty |
 | **2. Trust & money paths** | Enterprise and margin | Confirm gates, quota UX, Stripe/Connect secret hygiene, claims sign-off |
 | **3. Finish gated “almost live” features** | Avoid code-complete theatre | Connector secrets, creative/video pipeline authenticity |
-| **4. Desktop honesty + hardening** | Prevent false “sixth surface shipped” narrative | Label preview; fix approval/fleet risks; encrypt secrets; replace demo panes or mark them |
+| **4. Desktop signing + polish** | Close distribution gap only | Keep production-grade claims; fund signing/notarization; label unsigned preview honestly |
 | **5. New surface scope** | Lowest leverage while gates remain | Avoid until 1–4 are healthier |
 
 **Explicit non-goals (for now):** merging the two agent styles into one for neatness; publishing the internal coding engine as “the SDK”; Marketplace proxy on Desktop; multi-year asOf marketing.
@@ -568,7 +568,7 @@ When choosing the next bet, prefer work that strengthens the **evaluation lens**
 - IDE: install VSIX/Open VSX build, link, one approved file change  
 - CLI: pack or installed binary, loopback auth, one run  
 - SDK: portal key + one memory call  
-- Desktop: preview build only; agent turn; **explicit demo-panel notes**
+- Desktop: unsigned preview build; agent turn; CRDB live when configured (or configure empty state)
 
 **P2 — regression / soak**
 
@@ -583,7 +583,7 @@ When choosing the next bet, prefer work that strengthens the **evaluation lens**
 |---|---|---|
 | Connector buttons do nothing useful | Missing OAuth secrets (gated) | Don’t file as “agent dumb”; track as ops gate |
 | Video shows stub / odd failure | Pipeline not fully wired | Don’t claim studio live |
-| Desktop CRDB empty/fake | Demo fixtures | Not a Sev-1 “database down” unless eng says live path |
+| Desktop CRDB empty | Unconfigured MCP or Host RPC error | Point to Configure CockroachDB; not “demo fixtures” |
 | Checkout fails, Connect works (or reverse) | Wrong Stripe secret family | Ops, not copy tweak |
 | Memory missing across surfaces | Wrong project link / auth | Check project + account before “memory broken” epic |
 
@@ -593,7 +593,7 @@ When choosing the next bet, prefer work that strengthens the **evaluation lens**
 
 | # | Item | Owner lens | Recommendation |
 |---|---|---|---|
-| 1 | When to call Desktop “available” | Product | Only with Preview badge + unsigned disclosure + no CRDB-live claims |
+| 1 | When to call Desktop “available” | Product | With production-grade wording + unsigned preview disclosure |
 | 2 | Chrome store live version vs repo 0.6.1 | Product + Ops | Confirm console before press/sales |
 | 3 | Claims audit Product sign-off | Product | Block external creative/connector campaigns until signed |
 | 4 | Connector launch set (which 2–3 first) | Product | Ship fewer live connectors over many inert ones |
@@ -613,8 +613,8 @@ Use stages in planning docs so status cannot silently inflate:
 | Stage | Meaning | Surfaces roughly here |
 |---|---|---|
 | **S0 — Prototype** | Works on a laptop for authors | — |
-| **S1 — Dogfood** | Internal users daily; sharp edges OK | Desktop |
-| **S2 — Closed preview** | Friendly externals; explicit limitations list | SDK early adopters, selective Desktop |
+| **S1 — Internal daily** | Operators and engineers on unsigned preview builds | Desktop + all surfaces |
+| **S2 — Closed preview** | Friendly externals; explicit unsigned/signing limitations | SDK early adopters, selective Desktop |
 | **S3 — General availability** | Supportable, claims-signed, gated features either live or hidden | Web (near), Chrome/IDE/CLI (distribution-ready with ops) |
 | **S4 — Scale / enterprise pack** | Admin, SSO depth, retention productisation, signed desktop, full SLOs | Aspirational |
 
@@ -641,7 +641,7 @@ Promoting a surface a stage requires **evidence** (smoke + claims sign-off + gat
 | **SDK** | Programmatic client for memory/content/keys |
 | **MCP** | Model Context Protocol — tool bridge; our public MCP focus is memory |
 | **Open VSX** | Open extension marketplace used by Desktop/IDE distribution |
-| **Preview / insider** | Non-production Desktop quality channel |
+| **Preview / insider** | Desktop (and similar) **distribution channel** — not a maturity demotion; still production-grade product |
 | **Gate** | External dependency (secret, entitlement, publish) without which a feature is inert |
 | **Demo fixture** | Fake UI data — must not be accepted as integration success |
 | **asOf** | Point-in-time memory view — short window only today |
@@ -666,11 +666,11 @@ Promoting a surface a stage requires **evidence** (smoke + claims sign-off + gat
 
 ## 14. Decision / Ask
 
-**This document’s product assertion:** WalkCroach is a **six-surface platform with shared memory and strict confirmation on sensitive actions**, at **uneven maturity**. Web is the richest Ready surface; Chrome/IDE/CLI are distribution-ready with ops gates; SDK is a real developer product centred on memory/content; Desktop is **Preview**.
+**This document’s product assertion:** WalkCroach is a **six-surface platform with shared memory and strict confirmation on sensitive actions**. Web is the richest Ready surface; Chrome/IDE/CLI are distribution-ready with ops gates; SDK is a real developer product centred on memory/content; Desktop is **production-grade on an unsigned preview channel** (parity with other surfaces — not dogfood).
 
 **Ask of PM / BA / QA readers:**
 
 1. Use **§0 and §7** before any external narrative.  
-2. Write acceptance criteria that name **gates** (secrets, entitlements, preview).  
-3. Fail demos that present **demo fixtures** or **unsigned Desktop** as GA.  
+2. Write acceptance criteria that name **gates** (secrets, entitlements, unsigned preview).  
+3. Fail demos that present **unsigned Desktop** as signed/GA, or Desktop as dogfood/incomplete vs IDE/CLI.  
 4. When engineering status and this doc disagree, escalate — then update **this file** so Product truth does not drift again.

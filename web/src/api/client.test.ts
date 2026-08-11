@@ -42,15 +42,41 @@ describe('listProjects', () => {
     const result = await listProjects();
     expect(result).toEqual([{ id: 'p1', name: 'Foo' }]);
   });
+
+  it('passes kind query when filtering', async () => {
+    mockFetch({ projects: [] });
+    const { listProjects } = await loadClient();
+    await listProjects({ kind: 'knowledge' });
+    expect((fetch as ReturnType<typeof vi.fn>).mock.calls[0][0]).toContain(
+      '/projects?kind=knowledge',
+    );
+  });
 });
 
 describe('createProject', () => {
   it('sends POST and returns id', async () => {
-    mockFetch({ id: 'p2', templateId: 'blank' });
+    mockFetch({ id: 'p2', templateId: 'blank', kind: 'app' });
     const { createProject } = await loadClient();
     const result = await createProject('Test', 'blank');
     expect(result.id).toBe('p2');
-    expect((fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].method).toBe('POST');
+    expect((fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].method).toBe(
+      'POST',
+    );
+    const body = JSON.parse(
+      (fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string,
+    );
+    expect(body).toEqual({ name: 'Test', kind: 'app', templateId: 'blank' });
+  });
+
+  it('sends kind=knowledge without templateId', async () => {
+    mockFetch({ id: 'p3', templateId: null, kind: 'knowledge' });
+    const { createProject } = await loadClient();
+    await createProject('Knowledge', 'blank', { kind: 'knowledge' });
+    const body = JSON.parse(
+      (fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string,
+    );
+    expect(body).toEqual({ name: 'Knowledge', kind: 'knowledge' });
+    expect(body.templateId).toBeUndefined();
   });
 });
 
@@ -82,11 +108,14 @@ describe('deleteProject', () => {
 });
 
 describe('getLatestSession', () => {
-  it('fetches latest session', async () => {
-    mockFetch({ sessionId: 's1', projectId: 'p1' });
+  it('fetches latest session with mode query', async () => {
+    mockFetch({ sessionId: 's1', projectId: 'p1', mode: 'builder' });
     const { getLatestSession } = await loadClient();
-    const result = await getLatestSession('p1');
+    const result = await getLatestSession('p1', 'builder');
     expect(result.sessionId).toBe('s1');
+    expect((fetch as ReturnType<typeof vi.fn>).mock.calls[0][0]).toContain(
+      '/sessions/latest?mode=builder',
+    );
   });
 });
 

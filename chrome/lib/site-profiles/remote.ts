@@ -30,6 +30,11 @@ export const PROFILES_PUBLIC_KEY =
     ? __WALKCROACH_PROFILES_PUBLIC_KEY__
     : '';
 
+/** True when this build can verify remote profile bundles. */
+export function remoteProfilesEnabled(): boolean {
+  return Boolean(PROFILES_PUBLIC_KEY.trim());
+}
+
 const CACHE_KEY = 'wc_profiles_cache_v1';
 export const PROFILES_TTL_MS = 12 * 60 * 60 * 1000;
 

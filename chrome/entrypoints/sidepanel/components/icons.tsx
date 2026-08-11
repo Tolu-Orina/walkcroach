@@ -1,9 +1,9 @@
 /**
  * Inline SVG icons — no icon dependency, no remote fetch.
  *
- * 17px stroke set at 1.6 to stay legible in a 250px panel. `aria-hidden` on all
- * of them: every icon here sits beside a text label or an aria-label, so
- * announcing them would only duplicate.
+ * 16px stroke set at 1.6 on a 24 viewBox — the icon-system 16px grid. Every
+ * icon here sits beside a text label or an aria-label, so `aria-hidden` keeps
+ * readers from hearing them twice.
  */
 type IconProps = { className?: string };
 

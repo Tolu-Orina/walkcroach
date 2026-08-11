@@ -67,7 +67,10 @@ describe('unknown messages', () => {
       { type: 'NOT_A_REAL_TYPE' } as never,
       deps,
     );
-    expect(res).toEqual({ ok: false, error: 'unhandled' });
+    expect(res).toEqual({
+      ok: false,
+      error: 'Something went wrong. Try again.',
+    });
   });
 
   it('PING never touches the page', async () => {
@@ -124,8 +127,15 @@ describe('GET_ACTIVE_EXTRACT — the main read path', () => {
     expect(deps.readCache).not.toHaveBeenCalled();
   });
 
-  it('still attempts once on needs-grant, since activeTab may be live', async () => {
+  it('refuses needs-grant — durable Allow required before page text leaves', async () => {
     access = needsGrant;
+    const res = await routeMessage({ type: 'GET_ACTIVE_EXTRACT' }, deps);
+    expect(deps.extract).not.toHaveBeenCalled();
+    expect(res).toEqual({ ok: false, access: needsGrant });
+  });
+
+  it('still attempts once on unknown, since activeTab may reveal the URL', async () => {
+    access = unknown;
     const res = await routeMessage({ type: 'GET_ACTIVE_EXTRACT' }, deps);
     expect(deps.extract).toHaveBeenCalledWith(7);
     expect(res).toMatchObject({ ok: true });
@@ -146,23 +156,21 @@ describe('WARM_PAGE_CONTEXT', () => {
     expect(res).toMatchObject({ ok: true, warmed: false });
   });
 
-  it('spends a live activeTab window when the url is hidden', async () => {
+  it('classifies without extracting — even when activeTab could read the page', async () => {
     access = unknown;
     const res = await routeMessage({ type: 'WARM_PAGE_CONTEXT' }, deps);
-    expect(deps.extract).toHaveBeenCalledWith(7);
-    expect(res).toMatchObject({ warmed: true });
+    expect(deps.extract).not.toHaveBeenCalled();
+    expect(res).toMatchObject({ warmed: false });
   });
 
-  it('does not re-extract when the cache is already warm', async () => {
+  it('does not extract on an already-allowed origin', async () => {
     deps.readCache = vi.fn(async () => extract('https://acme.test/q'));
     const res = await routeMessage({ type: 'WARM_PAGE_CONTEXT' }, deps);
-    expect(res).toMatchObject({ warmed: true });
     expect(deps.extract).not.toHaveBeenCalled();
+    expect(res).toMatchObject({ warmed: false });
   });
 
-  it('does not warm on a needs-grant origin', async () => {
-    // Warming runs on panel open, with no user action — extracting here would
-    // read a page the user has not allowed.
+  it('does not warm-extract on a needs-grant origin', async () => {
     access = needsGrant;
     const res = await routeMessage({ type: 'WARM_PAGE_CONTEXT' }, deps);
     expect(deps.extract).not.toHaveBeenCalled();
@@ -177,9 +185,8 @@ describe('CAPTURE_SCREENSHOT — stricter than page text', () => {
     expect(deps.captureScreenshot).toHaveBeenCalledWith(7);
   });
 
-  it('refuses on needs-grant, where extraction would still try', async () => {
-    // The deliberate asymmetry: an image of the screen shows whatever else is
-    // on it, so it is only ever taken on a site the user has allowed.
+  it('refuses on needs-grant (same bar as page text for known origins)', async () => {
+    // Screenshots stay ready-only; page extract also refuses needs-grant now.
     access = needsGrant;
     const res = await routeMessage({ type: 'CAPTURE_SCREENSHOT' }, deps);
     expect(res).toEqual({ ok: false, access: needsGrant });
@@ -210,14 +217,14 @@ describe('CAPTURE_SCREENSHOT — stricter than page text', () => {
     deps.captureScreenshot = vi.fn(async () => null);
     const res = await routeMessage({ type: 'CAPTURE_SCREENSHOT' }, deps);
     expect(res.ok).toBe(false);
-    expect(String(res.error)).toMatch(/encode/);
+    expect(String(res.error)).toMatch(/Couldn’t capture the screenshot/i);
   });
 });
 
 describe('INSERT_DRAFT', () => {
   it('requires text', async () => {
     const res = await routeMessage({ type: 'INSERT_DRAFT', payload: {} }, deps);
-    expect(res).toEqual({ ok: false, error: 'text required' });
+    expect(res).toEqual({ ok: false, error: 'Nothing to insert.' });
     expect(deps.getAccess).not.toHaveBeenCalled();
   });
 

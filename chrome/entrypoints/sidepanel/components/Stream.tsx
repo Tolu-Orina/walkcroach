@@ -92,7 +92,7 @@ export function Stream({
         )}
         {!streaming && text && onCopy && (
           <button type="button" className="wc-btn wc-btn--ghost" onClick={onCopy}>
-            Copy
+            Copy response
           </button>
         )}
       </div>

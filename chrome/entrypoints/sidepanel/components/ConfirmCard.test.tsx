@@ -163,6 +163,37 @@ describe('ConfirmCard — the write gate', () => {
     ).toBeInTheDocument();
   });
 
+  it('uses busyLabel while committing irreversible deletes', () => {
+    render(
+      <ConfirmCard
+        title="Delete workspace?"
+        confirmLabel="Delete workspace"
+        busyLabel="Deleting…"
+        busy
+        irreversible
+        onConfirm={noop}
+        onDismiss={noop}
+      />,
+    );
+    expect(
+      screen.getByRole('button', { name: 'Deleting…' }),
+    ).toBeInTheDocument();
+  });
+
+  it('uses Cancel instead of Discard for irreversible actions', () => {
+    render(
+      <ConfirmCard
+        title="Delete workspace?"
+        irreversible
+        dismissLabel="Cancel"
+        onConfirm={noop}
+        onDismiss={noop}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Discard' })).toBeNull();
+  });
+
   it('is announced as a named form region', () => {
     render(<ConfirmCard title="Save this page?" onConfirm={noop} onDismiss={noop} />);
     expect(

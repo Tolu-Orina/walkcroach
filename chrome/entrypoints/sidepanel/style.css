@@ -258,7 +258,7 @@ body {
   margin: 0;
   font-family: var(--font-display);
   font-weight: 700;
-  font-size: 1.18rem;
+  font-size: var(--text-lg);
   line-height: 1.1;
   letter-spacing: -0.035em;
   color: var(--paper);
@@ -274,7 +274,7 @@ body {
 .wc-chip {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: var(--space-1);
   border: 1px solid var(--line);
   background: color-mix(in oklab, var(--raised) 55%, transparent);
   border-radius: 999px;
@@ -487,7 +487,7 @@ body {
 .wc-stream h4 {
   margin: var(--space-4) 0 var(--space-2);
   line-height: 1.3;
-  font-weight: 650;
+  font-weight: 600;
 }
 
 /* Headings step down gently: the model reaches for `###` freely, and UA sizing
@@ -530,7 +530,7 @@ body {
 .wc-stream pre {
   margin: 0 0 var(--space-3);
   padding: var(--space-2);
-  border-radius: var(--radius-2, 6px);
+  border-radius: var(--radius-control);
   background: color-mix(in srgb, var(--line) 45%, transparent);
   /* The one place pre-wrap still belongs. `overflow-wrap: anywhere` above would
      otherwise break identifiers mid-token and make code unreadable. */
@@ -548,7 +548,7 @@ body {
   margin: 0 0 var(--space-3);
   padding-left: var(--space-3);
   border-left: 2px solid var(--line);
-  color: var(--muted, inherit);
+  color: var(--mist);
 }
 
 .wc-stream table {
@@ -770,6 +770,18 @@ body {
   animation: wc-fade-up var(--dur-mid) var(--ease-out) both;
 }
 
+/*
+  Pane entrance owns the fade when a tab is selected. Nested sections inside a
+  pane stay still so Workspaces / Captures / Project memory do not cascade.
+*/
+.wc-pane {
+  animation: wc-fade-up var(--dur-mid) var(--ease-out) both;
+}
+
+.wc-pane .wc-section {
+  animation: none;
+}
+
 .wc-section__title {
   margin: 0;
   font-family: var(--font-display);
@@ -932,7 +944,7 @@ body {
 .wc-sources__meta {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: var(--space-1);
   flex-wrap: wrap;
   font-size: 0.68rem;
   color: var(--mist);
@@ -948,7 +960,7 @@ body {
 .wc-credits {
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
+  gap: var(--space-1);
 }
 
 .wc-credits__bar {
@@ -971,6 +983,21 @@ body {
 
 .wc-credits__fill--spent {
   background: var(--ember);
+}
+
+.wc-credits__status {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--mist);
+}
+
+.wc-credits__status--low {
+  color: var(--signal);
+}
+
+.wc-credits__status--spent {
+  color: var(--ember);
 }
 
 
@@ -1017,7 +1044,7 @@ body {
   border-radius: var(--radius-control);
   padding: 0.5rem 0.65rem;
   font: inherit;
-  font-size: 0.85rem;
+  font-size: var(--text-md);
   line-height: 1.45;
   transition:
     border-color var(--dur-fast) var(--ease-out),
@@ -1062,11 +1089,11 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0.15rem;
+  gap: var(--space-1);
   border: none;
   background: none;
   color: var(--mist);
-  padding: 0.5rem 0.25rem;
+  padding: var(--space-2) var(--space-1);
   font: inherit;
   font-size: 0.64rem;
   font-weight: 500;
@@ -1095,8 +1122,14 @@ body {
 }
 
 .wc-rail__icon {
-  width: 17px;
-  height: 17px;
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+
+.wc-btn__icon {
+  width: 16px;
+  height: 16px;
   flex: none;
 }
 
@@ -1157,8 +1190,30 @@ body {
 
 .wc-note {
   color: var(--steel);
-  font-size: 0.8rem;
+  font-size: var(--text-sm);
   margin: 0;
+}
+
+/* ── Project memory ────────────────────────────────────────────────── */
+
+.wc-project-memory {
+  margin-top: var(--space-3);
+}
+
+.wc-project-memory__toggle {
+  width: 100%;
+  justify-content: space-between;
+}
+
+.wc-project-memory__title {
+  margin: 0;
+}
+
+.wc-skeleton-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
 }
 
 /* ── Skeleton (bootstrap) ──────────────────────────────────────────── */
@@ -1230,6 +1285,20 @@ body {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+/*
+  Opaque glass fallback. Blurred translucent chrome is atmospheric, not load-bearing —
+  when the user asks for reduced transparency, solid --panel keeps contrast intact.
+*/
+@media (prefers-reduced-transparency: reduce) {
+  .wc-brandbar,
+  .wc-composer,
+  .wc-rail {
+    background: var(--panel);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
 }
 

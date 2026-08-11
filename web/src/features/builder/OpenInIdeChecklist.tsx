@@ -91,7 +91,7 @@ export function OpenInIdeChecklist({
               Open in IDE
             </p>
             <p className="mt-1 text-[11px] leading-relaxed text-mist">
-              IDE continues via project memory and Git — this Builder sandbox
+              IDE continues via project memory and Git — this App Builder sandbox
               session does not hand off.
             </p>
           </div>

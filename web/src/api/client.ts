@@ -3,6 +3,7 @@ import type {
   AgentEvent,
   AgentMode,
   CheckpointSummary,
+  CreatableProjectKind,
   PlanDecision,
   ProjectDetail,
   ProjectDocument,
@@ -85,6 +86,38 @@ async function parseJson<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+/** Agent API fetch with a hard timeout so list UIs don’t stick on skeletons. */
+async function agentFetch(
+  path: string,
+  init?: RequestInit,
+  timeoutMs = 15_000,
+): Promise<Response> {
+  const signal =
+    init?.signal ??
+    (typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal
+      ? AbortSignal.timeout(timeoutMs)
+      : undefined);
+  try {
+    return await fetch(`${API_URL}${path}`, {
+      ...init,
+      headers: { ...authHeaders(), ...(init?.headers as Record<string, string>) },
+      signal,
+    });
+  } catch (err) {
+    if (err instanceof Error && err.name === 'TimeoutError') {
+      throw new Error(
+        'Could not reach the API in time — is `infra-backend` running on :3001?',
+      );
+    }
+    if (err instanceof TypeError) {
+      throw new Error(
+        'Could not reach the API — start it with `cd infra-backend && npm run dev`.',
+      );
+    }
+    throw err;
+  }
+}
+
 /** Like parseJson but preserves API error payloads for confirm flows (402/429). */
 async function parseJsonSoft<T extends { ok?: boolean; error?: string }>(
   res: Response,
@@ -109,10 +142,12 @@ async function parseJsonSoft<T extends { ok?: boolean; error?: string }>(
   return body as T;
 }
 
-export async function listProjects(): Promise<ProjectSummary[]> {
-  const res = await fetch(`${API_URL}/projects`, {
-    headers: authHeaders(),
-  });
+export async function listProjects(opts?: {
+  kind?: CreatableProjectKind;
+}): Promise<ProjectSummary[]> {
+  const qs =
+    opts?.kind != null ? `?kind=${encodeURIComponent(opts.kind)}` : '';
+  const res = await agentFetch(`/projects${qs}`);
   const data = await parseJson<{ projects: ProjectSummary[] }>(res);
   return data.projects ?? [];
 }
@@ -126,17 +161,23 @@ export async function getProject(projectId: string): Promise<ProjectDetail> {
 
 export async function createProject(
   name: string,
-  templateId?: string,
-  opts?: { kind?: 'app' | 'general' },
-): Promise<{ id: string; templateId?: string; kind?: string }> {
+  templateId?: string | null,
+  opts?: { kind?: CreatableProjectKind },
+): Promise<{ id: string; templateId?: string | null; kind?: string }> {
+  const kind = opts?.kind ?? 'app';
+  const body: {
+    name: string;
+    kind: string;
+    templateId?: string;
+  } = { name, kind };
+  // knowledge: never send templateId — server forces NULL (ADR-0004).
+  if (kind !== 'knowledge' && templateId != null && templateId !== '') {
+    body.templateId = templateId;
+  }
   const res = await fetch(`${API_URL}/projects`, {
     method: 'POST',
     headers: authHeaders(),
-    body: JSON.stringify({
-      name,
-      templateId,
-      kind: opts?.kind ?? 'app',
-    }),
+    body: JSON.stringify(body),
   });
   return parseJson(res);
 }
@@ -301,10 +342,14 @@ export async function deleteProject(projectId: string): Promise<void> {
 
 export async function getLatestSession(
   projectId: string,
-): Promise<{ sessionId: string; projectId: string }> {
-  const res = await fetch(`${API_URL}/projects/${projectId}/sessions/latest`, {
-    headers: authHeaders(),
-  });
+  mode: 'chat' | 'builder',
+): Promise<{ sessionId: string; projectId: string; mode: 'chat' | 'builder' }> {
+  const res = await fetch(
+    `${API_URL}/projects/${projectId}/sessions/latest?mode=${encodeURIComponent(mode)}`,
+    {
+      headers: authHeaders(),
+    },
+  );
   return parseJson(res);
 }
 
@@ -324,6 +369,8 @@ export type SessionDetail = {
   id: string;
   projectId: string;
   status: string;
+  /** Session store mode — chat vs App Builder. */
+  mode?: 'chat' | 'builder';
   pendingTool: {
     toolCallId: string;
     tool: string;

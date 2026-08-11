@@ -389,7 +389,12 @@ export function useChatSession(opts?: {
             try {
               const stored = JSON.parse(storedRaw) as { sessionId: string };
               const detail = await getSession(stored.sessionId);
-              if (!cancelled && detail.projectId === id) {
+              const sessionMode = detail.mode ?? 'builder';
+              if (
+                !cancelled &&
+                detail.projectId === id &&
+                sessionMode === 'chat'
+              ) {
                 setSessionId(detail.id);
                 setMessages(storedToChat(detail.messages));
                 setStatus('ready');
@@ -402,10 +407,15 @@ export function useChatSession(opts?: {
           }
 
           try {
-            const latest = await getLatestSession(id);
+            const latest = await getLatestSession(id, 'chat');
             if (!cancelled && latest.sessionId) {
               const detail = await getSession(latest.sessionId);
-              if (!cancelled && detail.projectId === id) {
+              const sessionMode = detail.mode ?? 'builder';
+              if (
+                !cancelled &&
+                detail.projectId === id &&
+                sessionMode === 'chat'
+              ) {
                 localStorage.setItem(
                   storageKey(id),
                   JSON.stringify({ sessionId: detail.id }),

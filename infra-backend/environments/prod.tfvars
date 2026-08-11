@@ -8,6 +8,7 @@ web_app_url                     = "https://walkcroach.rinegansolutions.com"
 allow_dev_auth                  = false
 allow_github_pat                = false
 enable_apigw_cognito_authorizer = true
+chrome_extension_id             = "oljdeopppkgfjeoobgochpddchlhmeaj"
 
 # Creative Lambda (slides, flyers, images) and the video state machine that
 # keys off its ARN. `enabled` is the intent; the tag is which image.
