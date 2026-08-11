@@ -67,6 +67,19 @@ jobs:
           # Matches the other two release paths; Node 20 is past end-of-life.
           node-version: 22
 
+      # Chrome depends on `@walkcroach/sdk` via `file:../packages/sdk` (dist is
+      # gitignored). Same order as chrome/buildspec.yml — without this, typecheck
+      # fails with TS2307 Cannot find module '@walkcroach/sdk'.
+      - name: Build memory-contracts + SDK (file: deps)
+        run: |
+          set -eu
+          cd packages/memory-contracts
+          npm ci --include=dev
+          npm run build
+          cd ../sdk
+          npm ci --include=dev
+          npm run build
+
       - name: Install, typecheck, test
         working-directory: chrome
         run: |

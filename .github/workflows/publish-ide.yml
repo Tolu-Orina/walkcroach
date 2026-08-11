@@ -47,10 +47,22 @@ jobs:
           # anyway so both release paths build on the same runtime.
           node-version: 22
 
-      - name: Build the engine the extension bundles
-        working-directory: packages/agent-engine
+      # Mirror ide/buildspec.yml: file: deps (memory-contracts, sdk, agent-engine)
+      # ship without dist/. Building agent-engine alone leaves memory-contracts
+      # unresolved (TS2307) and leaves ide without a built SDK.
+      - name: Build private packages the extension bundles
         run: |
-          npm ci
+          set -eu
+          cd packages/memory-contracts
+          npm ci --include=dev
+          npm run build
+
+          cd ../sdk
+          npm ci --include=dev
+          npm run build
+
+          cd ../agent-engine
+          npm ci --include=dev
           npm run eval:gate
           npm run build
 
