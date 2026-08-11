@@ -66,6 +66,8 @@ export type PersistedChatTurn = {
     name: string;
     status: 'pending' | 'running' | 'done' | 'error';
     detail?: string;
+    /** Memory recall provenance chips (P4). */
+    hits?: Array<{ sourceSurface: string; kind?: string; text: string }>;
   }>;
   subagents?: Array<{
     id: string;
@@ -148,6 +150,8 @@ export type HostToWebviewMessage =
       name: string;
       status: 'pending' | 'running' | 'done' | 'error';
       detail?: string;
+      /** Memory recall provenance for coding UX chips (P4). */
+      hits?: Array<{ sourceSurface: string; kind?: string; text: string }>;
     }
   | { type: 'PHASE'; phase: 'gather' | 'act' | 'verify' }
   | {
@@ -250,6 +254,25 @@ export function isWebviewToHostType(value: unknown): value is WebviewToHostType 
 const TOOL_STATUSES = new Set(['pending', 'running', 'done', 'error']);
 const SUB_STATUSES = new Set(['running', 'done', 'error']);
 
+function parseToolHits(
+  raw: unknown,
+): Array<{ sourceSurface: string; kind?: string; text: string }> | undefined {
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  const hits: Array<{ sourceSurface: string; kind?: string; text: string }> = [];
+  for (const row of raw) {
+    if (!row || typeof row !== 'object') continue;
+    const h = row as Record<string, unknown>;
+    if (typeof h.sourceSurface !== 'string' || !h.sourceSurface) continue;
+    if (typeof h.text !== 'string') continue;
+    hits.push({
+      sourceSurface: h.sourceSurface,
+      text: h.text,
+      kind: typeof h.kind === 'string' ? h.kind : undefined,
+    });
+  }
+  return hits.length ? hits : undefined;
+}
+
 export function parsePersistedChatTurns(raw: unknown): PersistedChatTurn[] {
   if (!Array.isArray(raw)) return [];
   const out: PersistedChatTurn[] = [];
@@ -284,6 +307,7 @@ export function parsePersistedChatTurns(raw: unknown): PersistedChatTurn[] {
             PersistedChatTurn['tools']
           >[number]['status'],
           detail: typeof g.detail === 'string' ? g.detail : undefined,
+          hits: parseToolHits(g.hits),
         });
       }
       if (tools.length) turn.tools = tools;

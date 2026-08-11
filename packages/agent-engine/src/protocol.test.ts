@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { TokenDeltaCoalescer } from './coalesce.js';
 import {
   parseWebviewToHostMessage,
+  parsePersistedChatTurns,
   WEBVIEW_TO_HOST,
   HOST_TO_WEBVIEW,
 } from './protocol.js';
@@ -46,6 +47,36 @@ describe('protocol allowlist', () => {
       'STOP_MCP_SERVER',
       'REVOKE_MCP_CONSENT',
     ]);
+  });
+
+  it('round-trips tool_card hits on persisted turns (P4 provenance)', () => {
+    const turns = parsePersistedChatTurns([
+      {
+        id: 't1',
+        role: 'assistant',
+        text: 'ok',
+        tools: [
+          {
+            id: 'c1',
+            name: 'recall_project_memory',
+            status: 'done',
+            detail: '1 hit(s) · chrome',
+            hits: [
+              {
+                sourceSurface: 'chrome',
+                kind: 'decision',
+                text: 'Prefer Drizzle',
+              },
+            ],
+          },
+        ],
+      },
+    ]);
+    expect(turns[0]?.tools?.[0]?.hits?.[0]).toEqual({
+      sourceSurface: 'chrome',
+      kind: 'decision',
+      text: 'Prefer Drizzle',
+    });
   });
 
   it('parses SIGN_IN', () => {
