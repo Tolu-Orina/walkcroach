@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Attach from Google Drive</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+        background: #111;
+        color: #eee;
+        font: 14px/1.4 system-ui, sans-serif;
+      }
+      #status {
+        padding: 1.25rem 1.5rem;
+      }
+      #status.error {
+        color: #f87171;
+      }
+    </style>
+  </head>
+  <body>
+    <p id="status">Loading Google Drive…</p>
+    <!--
+      Served without COEP (see CloudFront behavior + Vite middleware).
+      Google Picker cannot run inside a COEP-isolated document; this page is
+      opened as a popup from the main SPA and posts picked file ids back.
+    -->
+    <script src="https://apis.google.com/js/api.js"></script>
+    <script>
+      (function () {
+        const statusEl = document.getElementById('status');
+        const params = new URLSearchParams(window.location.search);
+        const expectedOrigin = params.get('origin');
+        if (!expectedOrigin) {
+          statusEl.className = 'error';
+          statusEl.textContent = 'Missing opener origin.';
+          return;
+        }
+
+        let settled = false;
+        const finish = (payload) => {
+          if (settled) return;
+          settled = true;
+          try {
+            window.opener &&
+              window.opener.postMessage(
+                { source: 'wc-drive-picker', ...payload },
+                expectedOrigin,
+              );
+          } catch (err) {
+            console.error(err);
+          }
+          window.close();
+        };
+
+        const fail = (message) => {
+          statusEl.className = 'error';
+          statusEl.textContent = message;
+          finish({ type: 'error', message });
+        };
+
+        window.addEventListener('message', (event) => {
+          if (event.origin !== expectedOrigin) return;
+          if (!event.data || event.data.source !== 'wc-drive-picker-host') return;
+          if (event.data.type !== 'config') return;
+          startPicker(event.data);
+        });
+
+        // Tell opener we are ready to receive tokens (never put secrets in the URL).
+        try {
+          window.opener.postMessage(
+            { source: 'wc-drive-picker', type: 'ready' },
+            expectedOrigin,
+          );
+        } catch (err) {
+          fail('Could not reach the WalkCroach window. Allow popups and try again.');
+        }
+
+        function startPicker(cfg) {
+          const { accessToken, apiKey, appId, maxItems } = cfg;
+          if (!accessToken || !apiKey || !appId) {
+            fail('Picker configuration incomplete.');
+            return;
+          }
+
+          const gapi = window.gapi;
+          if (!gapi) {
+            fail('Google API failed to load.');
+            return;
+          }
+
+          gapi.load('picker', () => {
+            const pickerNs = window.google && window.google.picker;
+            if (!pickerNs) {
+              fail('Google Picker failed to initialize.');
+              return;
+            }
+
+            let view = pickerNs.ViewId.DOCS;
+            if (pickerNs.DocsView && pickerNs.DocsViewMode && pickerNs.DocsViewMode.LIST) {
+              view = new pickerNs.DocsView(pickerNs.ViewId.DOCS)
+                .setMode(pickerNs.DocsViewMode.LIST)
+                .setIncludeFolders(true)
+                .setSelectFolderEnabled(false);
+              if (view.setEnableDrives) view.setEnableDrives(true);
+            }
+
+            let builder = new pickerNs.PickerBuilder()
+              .addView(view)
+              .enableFeature(pickerNs.Feature.MULTISELECT_ENABLED)
+              .setOAuthToken(accessToken)
+              .setDeveloperKey(apiKey)
+              .setAppId(String(appId))
+              .setOrigin(window.location.protocol + '//' + window.location.host)
+              .setCallback((data) => {
+                if (data.action === pickerNs.Action.CANCEL) {
+                  finish({ type: 'cancel' });
+                  return;
+                }
+                if (data.action === pickerNs.Action.PICKED) {
+                  const ids = (data.docs || [])
+                    .map((d) => d.id)
+                    .filter(Boolean);
+                  finish({ type: 'picked', fileIds: ids });
+                }
+              });
+
+            if (pickerNs.Feature.NAV_HIDDEN) {
+              builder = builder.enableFeature(pickerNs.Feature.NAV_HIDDEN);
+            }
+            if (pickerNs.Feature.SUPPORT_DRIVES) {
+              builder = builder.enableFeature(pickerNs.Feature.SUPPORT_DRIVES);
+            }
+            if (builder.setMaxItems && maxItems) {
+              builder = builder.setMaxItems(maxItems);
+            }
+            if (builder.setTitle) {
+              builder = builder.setTitle('Attach from Google Drive');
+            }
+            if (builder.setSize) {
+              builder = builder.setSize(
+                Math.min(1050, window.innerWidth - 24),
+                Math.min(650, window.innerHeight - 24),
+              );
+            }
+
+            statusEl.textContent = '';
+            builder.build().setVisible(true);
+          });
+        }
+
+        window.addEventListener('beforeunload', () => {
+          if (!settled) finish({ type: 'cancel' });
+        });
+      })();
+    </script>
+  </body>
+</html>

@@ -44,11 +44,11 @@ resource "aws_cloudfront_origin_access_control" "web" {
 }
 
 # Required for WebContainer (SharedArrayBuffer / cross-origin isolation).
-# COEP is credentialless (not require-corp) so Google Picker / third-party
-# iframes can load; require-corp blocks docs.google.com/picker (blank iframe).
+# Note: Google Picker is incompatible with ANY COEP (including credentialless);
+# see aws_cloudfront_response_headers_policy.drive_picker + ordered behavior.
 resource "aws_cloudfront_response_headers_policy" "webcontainer" {
   name    = "${var.name_prefix}-webcontainer-${var.environment}"
-  comment = "COOP/COEP credentialless for WebContainer + third-party frames"
+  comment = "COOP/COEP credentialless for WebContainer"
 
   custom_headers_config {
     items {
@@ -60,6 +60,35 @@ resource "aws_cloudfront_response_headers_policy" "webcontainer" {
       header   = "Cross-Origin-Embedder-Policy"
       override = true
       value    = "credentialless"
+    }
+  }
+
+  security_headers_config {
+    content_type_options {
+      override = true
+    }
+    frame_options {
+      frame_option = "SAMEORIGIN"
+      override     = true
+    }
+    referrer_policy {
+      referrer_policy = "strict-origin-when-cross-origin"
+      override        = true
+    }
+  }
+}
+
+# Popup host for Google Picker: keep COOP so window.opener works with the SPA,
+# omit COEP so docs.google.com/picker can load (SO 72193438 / Chrome COEP docs).
+resource "aws_cloudfront_response_headers_policy" "drive_picker" {
+  name    = "${var.name_prefix}-drive-picker-${var.environment}"
+  comment = "COOP only — no COEP — for Google Drive picker popup"
+
+  custom_headers_config {
+    items {
+      header   = "Cross-Origin-Opener-Policy"
+      override = true
+      value    = "same-origin"
     }
   }
 
@@ -91,6 +120,23 @@ resource "aws_cloudfront_distribution" "web" {
     domain_name              = var.s3_bucket_regional_domain_name
     origin_id                = "s3-web"
     origin_access_control_id = aws_cloudfront_origin_access_control.web.id
+  }
+
+  ordered_cache_behavior {
+    path_pattern               = "/drive-picker.html"
+    allowed_methods            = ["GET", "HEAD", "OPTIONS"]
+    cached_methods             = ["GET", "HEAD"]
+    target_origin_id           = "s3-web"
+    viewer_protocol_policy     = "redirect-to-https"
+    compress                   = true
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.drive_picker.id
+
+    forwarded_values {
+      query_string = true
+      cookies {
+        forward = "none"
+      }
+    }
   }
 
   default_cache_behavior {

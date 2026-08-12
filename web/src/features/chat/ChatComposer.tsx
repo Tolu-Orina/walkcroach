@@ -332,7 +332,9 @@ export function ChatComposer({
       )}
       {busy && (
         <p className="mb-2 text-center text-[12px] text-mist">
-          {busy === 'drive' ? 'Opening Google Drive…' : 'Loading documents…'}
+          {busy === 'drive'
+            ? 'Opening Google Drive in a new window…'
+            : 'Loading documents…'}
         </p>
       )}
 

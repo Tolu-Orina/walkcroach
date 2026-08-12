@@ -12,7 +12,8 @@ Before promoting backend + web:
    - `e2b_api_key` (Builder cloud sandbox; omit only if intentional WC-only)
    - `chrome_device_signing_key` (Chrome device sessions; otherwise Chrome returns 503)
    - Full key catalogue (connectors + Stripe Billing): [`runtime-secrets-and-ssm.md`](./runtime-secrets-and-ssm.md)
-3. Confirm CloudFront still sends COOP/COEP (WebContainer fallback).
+3. Confirm CloudFront still sends COOP/COEP on the SPA (WebContainer fallback).
+   `/drive-picker.html` must be COOP-only (no COEP) — Google Picker breaks under any COEP.
 4. Smoke: Chat new thread, Project docs create, Builder prompt → preview, Deploy (optional).
 
 ## REV-30 — Six-surface smoke
