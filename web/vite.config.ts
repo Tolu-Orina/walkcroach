@@ -4,37 +4,74 @@ import tailwindcss from '@tailwindcss/vite'
 
 /**
  * WebContainer needs COOP + COEP on the SPA.
- * Google Picker cannot run under any COEP (including credentialless) — Chrome
- * still requires CORP on cross-origin iframes. Serve /drive-picker.html with
- * COOP only (no COEP) so the popup can host docs.google.com/picker.
+ * Google Picker cannot run under any COEP. Strip COEP (and only COEP) on
+ * /drive-picker.html — wrap both setHeader and writeHead; Vite may use either.
  */
 function drivePickerNoCoep(): Plugin {
-  const stripCoep = (
+  const isPicker = (url?: string) => {
+    const path = (url ?? '').split('?')[0]
+    return path === '/drive-picker.html' || path.endsWith('/drive-picker.html')
+  }
+
+  const strip = (
     req: { url?: string },
     res: {
-      setHeader: (name: string, value: number | string | readonly string[]) => unknown
+      setHeader: (name: string, value: unknown) => unknown
+      removeHeader?: (name: string) => void
+      writeHead: (...args: unknown[]) => unknown
     },
     next: () => void,
   ) => {
-    const url = req.url?.split('?')[0] ?? ''
-    if (url === '/drive-picker.html' || url.endsWith('/drive-picker.html')) {
-      const originalSetHeader = res.setHeader.bind(res)
-      res.setHeader = (name: string, value: number | string | readonly string[]) => {
-        if (String(name).toLowerCase() === 'cross-origin-embedder-policy') {
-          return res
-        }
-        return originalSetHeader(name, value)
-      }
+    if (!isPicker(req.url)) {
+      next()
+      return
     }
+
+    const originalSetHeader = res.setHeader.bind(res)
+    res.setHeader = (name: string, value: unknown) => {
+      if (String(name).toLowerCase() === 'cross-origin-embedder-policy') {
+        return res
+      }
+      return originalSetHeader(name, value)
+    }
+
+    const originalWriteHead = res.writeHead.bind(res)
+    res.writeHead = (...args: unknown[]) => {
+      try {
+        res.removeHeader?.('Cross-Origin-Embedder-Policy')
+      } catch {
+        /* ignore */
+      }
+      const headers = args.find(
+        (a) => a && typeof a === 'object' && !Array.isArray(a),
+      ) as Record<string, unknown> | undefined
+      if (headers) {
+        for (const key of Object.keys(headers)) {
+          if (key.toLowerCase() === 'cross-origin-embedder-policy') {
+            delete headers[key]
+          }
+        }
+      }
+      return originalWriteHead(...args)
+    }
+
     next()
+    res.removeHeader?.('Cross-Origin-Embedder-Policy')
   }
+
   return {
     name: 'drive-picker-no-coep',
     configureServer(server) {
-      server.middlewares.use(stripCoep)
+      server.middlewares.use(strip)
+      return () => {
+        server.middlewares.use(strip)
+      }
     },
     configurePreviewServer(server) {
-      server.middlewares.use(stripCoep)
+      server.middlewares.use(strip)
+      return () => {
+        server.middlewares.use(strip)
+      }
     },
   }
 }

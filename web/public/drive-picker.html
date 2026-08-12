@@ -9,93 +9,88 @@
       body {
         margin: 0;
         min-height: 100%;
-        background: #111;
-        color: #eee;
-        font: 14px/1.4 system-ui, sans-serif;
+        background: #161410;
+        color: #f4efe6;
+        font: 14px/1.45 system-ui, sans-serif;
       }
       #status {
-        padding: 1.25rem 1.5rem;
+        padding: 1.5rem 1.75rem;
+        max-width: 36rem;
       }
       #status.error {
-        color: #f87171;
+        color: #f0a8a0;
+      }
+      #status code {
+        font-size: 12px;
       }
     </style>
   </head>
   <body>
     <p id="status">Loading Google Drive…</p>
-    <!--
-      Served without COEP (see CloudFront behavior + Vite middleware).
-      Google Picker cannot run inside a COEP-isolated document; this page is
-      opened as a popup from the main SPA and posts picked file ids back.
-    -->
     <script src="https://apis.google.com/js/api.js"></script>
     <script>
       (function () {
+        const CFG_PREFIX = 'wc-drive-picker:cfg:';
+        const OUT_PREFIX = 'wc-drive-picker:out:';
         const statusEl = document.getElementById('status');
-        const params = new URLSearchParams(window.location.search);
-        const expectedOrigin = params.get('origin');
-        if (!expectedOrigin) {
+        const sid = new URLSearchParams(window.location.search).get('sid');
+
+        if (!sid) {
           statusEl.className = 'error';
-          statusEl.textContent = 'Missing opener origin.';
+          statusEl.textContent = 'Missing picker session. Close this window and try Attach again.';
           return;
         }
 
+        const cfgKey = CFG_PREFIX + sid;
+        const outKey = OUT_PREFIX + sid;
+        let started = false;
+        let loaded = false;
         let settled = false;
-        const finish = (payload) => {
+
+        const writeOut = (payload) => {
           if (settled) return;
           settled = true;
           try {
-            window.opener &&
-              window.opener.postMessage(
-                { source: 'wc-drive-picker', ...payload },
-                expectedOrigin,
-              );
+            localStorage.setItem(outKey, JSON.stringify(payload));
           } catch (err) {
             console.error(err);
           }
-          window.close();
         };
 
-        const fail = (message) => {
+        const failStayOpen = (message) => {
           statusEl.className = 'error';
           statusEl.textContent = message;
-          finish({ type: 'error', message });
+          writeOut({ type: 'error', message: message });
         };
 
-        window.addEventListener('message', (event) => {
-          if (event.origin !== expectedOrigin) return;
-          if (!event.data || event.data.source !== 'wc-drive-picker-host') return;
-          if (event.data.type !== 'config') return;
-          startPicker(event.data);
-        });
-
-        // Tell opener we are ready to receive tokens (never put secrets in the URL).
-        try {
-          window.opener.postMessage(
-            { source: 'wc-drive-picker', type: 'ready' },
-            expectedOrigin,
+        if (window.crossOriginIsolated) {
+          failStayOpen(
+            'This window is still cross-origin isolated (COEP). Google Drive cannot load here. Close this window — /drive-picker.html must be served without Cross-Origin-Embedder-Policy.',
           );
-        } catch (err) {
-          fail('Could not reach the WalkCroach window. Allow popups and try again.');
+          return;
         }
 
-        function startPicker(cfg) {
-          const { accessToken, apiKey, appId, maxItems } = cfg;
+        const startPicker = (cfg) => {
+          if (started) return;
+          started = true;
+          localStorage.removeItem(cfgKey);
+
+          const { accessToken, apiKey, appId, maxItems } = cfg || {};
           if (!accessToken || !apiKey || !appId) {
-            fail('Picker configuration incomplete.');
+            failStayOpen('Picker configuration incomplete. Close this window and try again.');
             return;
           }
 
           const gapi = window.gapi;
           if (!gapi) {
-            fail('Google API failed to load.');
+            failStayOpen('Google API failed to load. Check the network tab for apis.google.com.');
             return;
           }
 
           gapi.load('picker', () => {
             const pickerNs = window.google && window.google.picker;
             if (!pickerNs) {
-              fail('Google Picker failed to initialize.');
+              failStayOpen('Google Picker failed to initialize.');
               return;
             }
 
@@ -108,29 +103,36 @@
               if (view.setEnableDrives) view.setEnableDrives(true);
             }
 
+            const visibleAt = Date.now();
             let builder = new pickerNs.PickerBuilder()
               .addView(view)
               .enableFeature(pickerNs.Feature.MULTISELECT_ENABLED)
               .setOAuthToken(accessToken)
               .setDeveloperKey(apiKey)
               .setAppId(String(appId))
-              .setOrigin(window.location.protocol + '//' + window.location.host)
+              .setOrigin(window.location.origin)
               .setCallback((data) => {
-                if (data.action === pickerNs.Action.CANCEL) {
-                  finish({ type: 'cancel' });
+                const action = data && data.action;
+                if (action === pickerNs.Action.LOADED) {
+                  loaded = true;
+                  statusEl.textContent = '';
                   return;
                 }
-                if (data.action === pickerNs.Action.PICKED) {
-                  const ids = (data.docs || [])
-                    .map((d) => d.id)
-                    .filter(Boolean);
-                  finish({ type: 'picked', fileIds: ids });
+                if (action === pickerNs.Action.PICKED) {
+                  const ids = (data.docs || []).map((d) => d.id).filter(Boolean);
+                  writeOut({ type: 'picked', fileIds: ids });
+                  window.close();
+                  return;
+                }
+                if (action === pickerNs.Action.CANCEL) {
+                  // Picker often fires CANCEL as it mounts; ignore until it has loaded
+                  // and a short grace period has passed.
+                  if (!loaded || Date.now() - visibleAt < 1200) return;
+                  writeOut({ type: 'cancel' });
+                  window.close();
                 }
               });
 
-            if (pickerNs.Feature.NAV_HIDDEN) {
-              builder = builder.enableFeature(pickerNs.Feature.NAV_HIDDEN);
-            }
             if (pickerNs.Feature.SUPPORT_DRIVES) {
               builder = builder.enableFeature(pickerNs.Feature.SUPPORT_DRIVES);
             }
@@ -142,19 +144,40 @@
             }
             if (builder.setSize) {
               builder = builder.setSize(
-                Math.min(1050, window.innerWidth - 24),
-                Math.min(650, window.innerHeight - 24),
+                Math.max(640, window.innerWidth - 16),
+                Math.max(480, window.innerHeight - 16),
               );
             }
 
-            statusEl.textContent = '';
             builder.build().setVisible(true);
           });
-        }
+        };
 
-        window.addEventListener('beforeunload', () => {
-          if (!settled) finish({ type: 'cancel' });
-        });
+        const tryReadCfg = () => {
+          const raw = localStorage.getItem(cfgKey);
+          if (!raw) return false;
+          try {
+            startPicker(JSON.parse(raw));
+            return true;
+          } catch (err) {
+            failStayOpen('Could not read picker configuration.');
+            return true;
+          }
+        };
+
+        if (!tryReadCfg()) {
+          const wait = window.setInterval(() => {
+            if (tryReadCfg() || started) window.clearInterval(wait);
+          }, 50);
+          window.setTimeout(() => {
+            window.clearInterval(wait);
+            if (!started) {
+              failStayOpen(
+                'Timed out waiting for WalkCroach to send picker credentials. Close this window and try Attach again.',
+              );
+            }
+          }, 8000);
+        }
       })();
     </script>
   </body>

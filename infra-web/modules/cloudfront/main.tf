@@ -78,8 +78,8 @@ resource "aws_cloudfront_response_headers_policy" "webcontainer" {
   }
 }
 
-# Popup host for Google Picker: keep COOP so window.opener works with the SPA,
-# omit COEP so docs.google.com/picker can load (SO 72193438 / Chrome COEP docs).
+# Popup host for Google Picker: omit COEP so docs.google.com/picker can load.
+# Handshake is localStorage (not window.opener / window.closed — those lie under COOP).
 resource "aws_cloudfront_response_headers_policy" "drive_picker" {
   name    = "${var.name_prefix}-drive-picker-${var.environment}"
   comment = "COOP only — no COEP — for Google Drive picker popup"
