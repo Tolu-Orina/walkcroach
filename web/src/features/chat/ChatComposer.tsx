@@ -260,6 +260,7 @@ export function ChatComposer({
       const fileIds = await openGoogleDrivePicker({
         accessToken: session.accessToken,
         apiKey: session.apiKey,
+        appId: session.appId,
         clientId: session.clientId,
         maxItems: remainingSlots,
       });

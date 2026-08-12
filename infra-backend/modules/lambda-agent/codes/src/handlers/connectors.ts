@@ -71,6 +71,20 @@ function oauthRedirectUri(): string {
   return `${base}/app/settings/connections/callback`;
 }
 
+/**
+ * Cloud project number for PickerBuilder.setAppId.
+ * Required for drive.file — prefer explicit env; else derive from OAuth client id prefix.
+ */
+export function resolveGooglePickerAppId(clientId: string): string | null {
+  const explicit =
+    process.env.GOOGLE_CLOUD_PROJECT_NUMBER?.trim() ||
+    process.env.GOOGLE_PICKER_APP_ID?.trim() ||
+    '';
+  if (/^\d{6,}$/.test(explicit)) return explicit;
+  const prefix = clientId.trim().split('-')[0] ?? '';
+  return /^\d{6,}$/.test(prefix) ? prefix : null;
+}
+
 /** GET /connectors */
 export async function handleListConnectorsWeb(
   db: DbClient,
@@ -422,7 +436,7 @@ export async function handleListConnectorRuns(
 
 /**
  * POST /connectors/google_drive/picker-session
- * Short-lived access token + public client id + Picker API key for the browser.
+ * Short-lived access token + public client id + Picker API key + Cloud project number.
  */
 export async function handleGoogleDrivePickerSession(
   db: DbClient,
@@ -460,6 +474,16 @@ export async function handleGoogleDrivePickerSession(
     });
   }
 
+  const appId = resolveGooglePickerAppId(resolved.clientId);
+  if (!appId) {
+    return jsonResponse(503, {
+      error:
+        'Google Drive picker is not configured (missing Cloud project number). Add google_cloud_project_number to the runtime secret (Google Cloud Console → Project settings → Project number).',
+      code: 'picker_app_id_missing',
+      connectUrl: connectUrl(),
+    });
+  }
+
   const expiresIn = Math.max(
     60,
     Math.floor(((resolved.tokens.expiresAt ?? Date.now() + 3_600_000) - Date.now()) / 1000),
@@ -470,6 +494,7 @@ export async function handleGoogleDrivePickerSession(
     expiresIn,
     clientId: resolved.clientId,
     apiKey,
+    appId,
     connectUrl: connectUrl(),
   });
 }

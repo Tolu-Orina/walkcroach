@@ -1252,6 +1252,8 @@ export type DrivePickerSession = {
   expiresIn: number;
   clientId: string;
   apiKey: string;
+  /** Cloud project number — required by Google Picker for drive.file. */
+  appId: string;
   connectUrl: string;
 };
 

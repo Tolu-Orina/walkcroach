@@ -49,7 +49,8 @@ Providers only appear in Settings → Connections when **both** client id and se
 |---|---|---|
 | `google_oauth_client_id` | `GOOGLE_OAUTH_CLIENT_ID` | Calendar, Gmail, Sheets, **Drive** (shared Google app) |
 | `google_oauth_client_secret` | `GOOGLE_OAUTH_CLIENT_SECRET` | |
-| `google_api_key` | `GOOGLE_API_KEY` | Browser-restricted Google Picker key (Drive attach). Enable Drive API + Picker API on the Cloud project. |
+| `google_api_key` | `GOOGLE_API_KEY` | Browser-restricted Google Picker key (Drive attach). Enable **Drive API** + **Google Picker API** on the Cloud project. Restrict key to your web origin(s) + those APIs. |
+| `google_cloud_project_number` | `GOOGLE_CLOUD_PROJECT_NUMBER` | Cloud **project number** (digits only — Console → Project settings). **Required** by Google Picker when using `drive.file`. If omitted, we try to derive it from the OAuth client id prefix. |
 | `slack_oauth_client_id` | `SLACK_OAUTH_CLIENT_ID` | Slack |
 | `slack_oauth_client_secret` | `SLACK_OAUTH_CLIENT_SECRET` | |
 | `stripe_oauth_client_id` | `STRIPE_OAUTH_CLIENT_ID` | **Connect** OAuth (user’s Stripe account for balance/payments tools) |
@@ -114,6 +115,8 @@ On success, the SPA calls `POST /billing/confirm` with the session id so the pla
   "crdb_mcp_cluster_id": "…",
   "google_oauth_client_id": "….apps.googleusercontent.com",
   "google_oauth_client_secret": "…",
+  "google_api_key": "AIza…",
+  "google_cloud_project_number": "123456789012",
   "slack_oauth_client_id": "…",
   "slack_oauth_client_secret": "…",
   "stripe_oauth_client_id": "ca_…",
@@ -186,7 +189,7 @@ If `web_app_url` is empty, OAuth callback falls back to `CORS_ALLOW_ORIGIN` / lo
 
 Add to Secrets Manager JSON when enabling each feature:
 
-- [ ] Connectors (Google): `google_oauth_client_id`, `google_oauth_client_secret`
+- [ ] Connectors (Google): `google_oauth_client_id`, `google_oauth_client_secret`, `google_api_key`, `google_cloud_project_number` (Picker / Drive attach)
 - [ ] Connectors (Slack): `slack_oauth_client_id`, `slack_oauth_client_secret`
 - [ ] Connectors (Stripe Connect): `stripe_oauth_client_id`, `stripe_oauth_client_secret`
 - [ ] Connectors (HubSpot): `hubspot_oauth_client_id`, `hubspot_oauth_client_secret`
