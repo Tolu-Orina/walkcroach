@@ -4,10 +4,11 @@ Provisions S3 + CloudFront (+ optional ACM/Route53) for the builder SPA.
 
 **Demo / prod URL:** https://walkcroach.rinegansolutions.com
 
-**Critical headers (WebContainer):**
+**Critical headers (WebContainer + Google Picker):**
 
 - `Cross-Origin-Opener-Policy: same-origin`
-- `Cross-Origin-Embedder-Policy: require-corp`
+- `Cross-Origin-Embedder-Policy: credentialless`  
+  (`require-corp` breaks Google Drive Picker — blank/`docs.google.com refused to connect` iframe.)
 
 Region: **eu-west-2** (ACM for CloudFront is issued in **us-east-1**).
 

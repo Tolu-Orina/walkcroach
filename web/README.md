@@ -15,11 +15,11 @@ npm install
 npm run dev
 ```
 
-Open the Vite URL (COOP/COEP enabled). Set `VITE_API_URL` if the API is not on `http://localhost:3001`.
+Open the Vite URL (COOP/COEP `credentialless` enabled). Set `VITE_API_URL` if the API is not on `http://localhost:3001`.
 
 ## Prod
 
-Deployed to **https://walkcroach.rinegansolutions.com** (`infra-web` + pipeline). CloudFront must keep COOP/COEP for WebContainer.
+Deployed to **https://walkcroach.rinegansolutions.com** (`infra-web` + pipeline). CloudFront keeps COOP + COEP `credentialless` (WebContainer; `require-corp` breaks Google Picker).
 
 ## Third-party
 

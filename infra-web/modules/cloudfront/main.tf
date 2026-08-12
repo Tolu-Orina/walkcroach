@@ -44,9 +44,11 @@ resource "aws_cloudfront_origin_access_control" "web" {
 }
 
 # Required for WebContainer (SharedArrayBuffer / cross-origin isolation).
+# COEP is credentialless (not require-corp) so Google Picker / third-party
+# iframes can load; require-corp blocks docs.google.com/picker (blank iframe).
 resource "aws_cloudfront_response_headers_policy" "webcontainer" {
   name    = "${var.name_prefix}-webcontainer-${var.environment}"
-  comment = "COOP/COEP for WebContainer"
+  comment = "COOP/COEP credentialless for WebContainer + third-party frames"
 
   custom_headers_config {
     items {
@@ -57,7 +59,7 @@ resource "aws_cloudfront_response_headers_policy" "webcontainer" {
     items {
       header   = "Cross-Origin-Embedder-Policy"
       override = true
-      value    = "require-corp"
+      value    = "credentialless"
     }
   }
 

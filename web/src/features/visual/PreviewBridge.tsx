@@ -30,16 +30,17 @@ type PreviewBridgeProps = {
 type CredentiallessIFrame = HTMLIFrameElement & { credentialless: boolean };
 
 /**
- * WalkCroach Web sets COEP: require-corp (WebContainer / SharedArrayBuffer).
- * That policy is recursive: a normal cross-origin iframe (*.e2b.app) is blocked
- * even when the same URL works in a top-level tab.
+ * WalkCroach Web sets COEP: credentialless (WebContainer / SharedArrayBuffer).
+ * Cross-origin preview iframes (*.e2b.app) still need the `credentialless`
+ * iframe flag under isolation; require-corp was abandoned because it breaks
+ * Google Drive Picker (docs.google.com).
  *
  * Chrome 110+ lifts COEP for iframes with the `credentialless` flag. The IDL
  * property MUST be set before the first navigation — React applying `src` before
  * a spread `credentialless` prop is enough to fail the embed ("refused to connect").
  *
  * Firefox / Safari do not support credentialless iframes yet; Open tab is the
- * escape hatch there. Parent COEP:credentialless does NOT help nested documents.
+ * escape hatch there.
  *
  * @see https://developer.chrome.com/blog/iframe-credentialless
  * @see https://wicg.github.io/anonymous-iframe/
