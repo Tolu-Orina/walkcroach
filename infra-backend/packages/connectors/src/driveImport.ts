@@ -1,9 +1,8 @@
 /**
  * Google Drive file import for chat attachments.
  *
- * Uses the user's `google_drive` connector tokens (`drive.file` only). The
- * Google Picker association is what makes a picked file readable under that
- * scope — we never list or search the whole drive server-side.
+ * Uses the user's `google_drive` connector tokens (`drive.readonly`). Listing
+ * happens in `driveBrowse.ts`; this module only downloads selected file ids.
  */
 import type { TokenSet } from './oauth.js';
 

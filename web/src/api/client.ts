@@ -1281,6 +1281,60 @@ export async function createGoogleDrivePickerSession(): Promise<DrivePickerSessi
   return res.json() as Promise<DrivePickerSession>;
 }
 
+export type DriveBrowserView = 'my_drive' | 'shared' | 'recent' | 'shared_drives';
+
+export type DriveBrowserItem = {
+  id: string;
+  name: string;
+  mimeType: string;
+  isFolder: boolean;
+  size?: number;
+  modifiedTime?: string;
+};
+
+export type DriveSharedDrive = { id: string; name: string };
+
+export type DriveBrowserPage = {
+  items: DriveBrowserItem[];
+  nextPageToken?: string;
+  drives?: DriveSharedDrive[];
+};
+
+export async function listGoogleDriveFiles(input: {
+  view: DriveBrowserView;
+  folderId?: string;
+  driveId?: string;
+  q?: string;
+  pageToken?: string;
+}): Promise<DriveBrowserPage> {
+  const qs = new URLSearchParams({ view: input.view });
+  if (input.folderId) qs.set('folderId', input.folderId);
+  if (input.driveId) qs.set('driveId', input.driveId);
+  if (input.q) qs.set('q', input.q);
+  if (input.pageToken) qs.set('pageToken', input.pageToken);
+  const res = await fetch(
+    `${API_URL}/connectors/google_drive/files?${qs.toString()}`,
+    { headers: authHeaders() },
+  );
+  if (!res.ok) {
+    const text = await res.text();
+    let code = '';
+    let message = text || `${res.status} ${res.statusText}`;
+    try {
+      const body = JSON.parse(text) as { error?: string; code?: string };
+      code = body.code ?? '';
+      message = body.error ?? message;
+    } catch {
+      /* raw text */
+    }
+    const err = new Error(message) as Error & { code?: string; status?: number };
+    err.code = code || (res.status === 404 ? 'not_connected' : undefined);
+    err.status = res.status;
+    throw err;
+  }
+  return res.json() as Promise<DriveBrowserPage>;
+}
+
 export type DriveImportedAttachment = {
   name: string;
   mime: string;

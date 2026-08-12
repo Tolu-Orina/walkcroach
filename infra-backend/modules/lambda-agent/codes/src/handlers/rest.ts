@@ -89,6 +89,7 @@ import {
   handleDeclineConnectorRun,
   handleDisconnectConnectorWeb,
   handleExecuteConnectorRun,
+  handleGoogleDriveBrowse,
   handleGoogleDriveImport,
   handleGoogleDrivePickerSession,
   handleListConnectorRuns,
@@ -1820,6 +1821,32 @@ export async function handleRest(
     const db = createDbClient();
     try {
       return await handleConnectorOauthCallback(db, authResult, body);
+    } finally {
+      await db.close();
+    }
+  }
+
+  if (
+    method === 'GET' &&
+    (path === '/connectors/google_drive/files' ||
+      path.endsWith('/connectors/google_drive/files'))
+  ) {
+    const authResult = await requireAuth(headers);
+    if ('error' in authResult) {
+      return jsonResponse(authResult.status, { error: authResult.error });
+    }
+    const qs = new URLSearchParams(
+      queryString.startsWith('?') ? queryString.slice(1) : queryString,
+    );
+    const db = createDbClient();
+    try {
+      return await handleGoogleDriveBrowse(db, authResult, {
+        view: qs.get('view') ?? undefined,
+        folderId: qs.get('folderId') ?? undefined,
+        driveId: qs.get('driveId') ?? undefined,
+        q: qs.get('q') ?? undefined,
+        pageToken: qs.get('pageToken') ?? undefined,
+      });
     } finally {
       await db.close();
     }

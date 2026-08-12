@@ -4,10 +4,7 @@ import { Link } from 'react-router-dom';
 import { clsx } from 'clsx';
 import { motion, useReducedMotion } from 'motion/react';
 import {
-  createGoogleDrivePickerSession,
-  importGoogleDriveFiles,
   listConnectors,
-  startConnectorOauth,
 } from '../../api/client';
 import {
   ATTACH_ACCEPT,
@@ -16,7 +13,7 @@ import {
   sourceLabel,
   type ChatAttachment,
 } from './attachTypes';
-import { openGoogleDrivePicker } from './googleDrivePicker';
+import { GoogleDrivePicker } from './GoogleDrivePicker';
 import { ProjectDocsPicker } from './ProjectDocsPicker';
 
 export type { ChatAttachment } from './attachTypes';
@@ -126,7 +123,7 @@ export function ChatComposer({
   const [attachError, setAttachError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [docsOpen, setDocsOpen] = useState(false);
-  const [busy, setBusy] = useState<null | 'drive' | 'docs'>(null);
+  const [driveOpen, setDriveOpen] = useState(false);
   const [driveConnected, setDriveConnected] = useState<boolean | null>(null);
   const [focused, setFocused] = useState(false);
 
@@ -228,70 +225,18 @@ export function ChatComposer({
 
   const remainingSlots = Math.max(0, MAX_ATTACH_COUNT - attachments.length);
 
-  const attachFromDrive = async () => {
+  const attachFromDrive = () => {
     setMenuOpen(false);
     setAttachError(null);
     if (remainingSlots <= 0) {
       setAttachError(`You can attach at most ${MAX_ATTACH_COUNT} files.`);
       return;
     }
-    setBusy('drive');
-    try {
-      let session;
-      try {
-        session = await createGoogleDrivePickerSession();
-      } catch (err) {
-        const code =
-          err && typeof err === 'object' && 'code' in err
-            ? String((err as { code?: string }).code ?? '')
-            : '';
-        const status =
-          err && typeof err === 'object' && 'status' in err
-            ? Number((err as { status?: number }).status)
-            : 0;
-        if (code === 'not_connected' || status === 404) {
-          const { authorizeUrl } = await startConnectorOauth('google_drive', 'web');
-          window.location.assign(authorizeUrl);
-          return;
-        }
-        throw err;
-      }
-
-      const fileIds = await openGoogleDrivePicker({
-        accessToken: session.accessToken,
-        apiKey: session.apiKey,
-        appId: session.appId,
-        clientId: session.clientId,
-        maxItems: remainingSlots,
-      });
-      if (fileIds.length === 0) return;
-
-      const { attachments: imported } = await importGoogleDriveFiles(fileIds);
-      addAttachments(
-        imported.map((a) => ({
-          id: crypto.randomUUID(),
-          name: a.name,
-          mime: a.mime,
-          size: a.size,
-          textPreview: a.textPreview,
-          contentText: a.contentText,
-          contentBase64: a.contentBase64,
-          source: 'google_drive' as const,
-          sourceId: a.sourceId,
-        })),
-      );
-      setDriveConnected(true);
-    } catch (err) {
-      setAttachError(
-        err instanceof Error ? err.message : 'Could not attach from Google Drive.',
-      );
-    } finally {
-      setBusy(null);
-    }
+    setDriveOpen(true);
   };
 
   const canSend = Boolean(value.trim()) || attachments.length > 0;
-  const controlsDisabled = Boolean(disabled || streaming || busy);
+  const controlsDisabled = Boolean(disabled || streaming);
 
   return (
     <form onSubmit={onSubmit} className="w-full">
@@ -328,13 +273,6 @@ export function ChatComposer({
       {attachError && (
         <p className="mb-2 text-center text-[12px] text-ember" role="alert">
           {attachError}
-        </p>
-      )}
-      {busy && (
-        <p className="mb-2 text-center text-[12px] text-mist">
-          {busy === 'drive'
-            ? 'Google Drive is open in another window — pick files there, or press Cancel in that window.'
-            : 'Loading documents…'}
         </p>
       )}
 
@@ -458,15 +396,15 @@ export function ChatComposer({
                     type="button"
                     role="menuitem"
                     className="interactive flex w-full flex-col items-start px-3.5 py-2 text-left hover:bg-raised"
-                    onClick={() => void attachFromDrive()}
+                    onClick={attachFromDrive}
                   >
                     <span className="text-xs font-semibold text-paper">
                       Google Drive
                     </span>
                     <span className="text-[11px] text-mist">
                       {driveConnected
-                        ? 'Pick files you choose (not your whole drive)'
-                        : 'Connect, then pick files'}
+                        ? 'Browse files in this chat'
+                        : 'Connect, then browse files'}
                     </span>
                   </button>
 
@@ -521,7 +459,7 @@ export function ChatComposer({
               <button
                 type="submit"
                 className="interactive grid h-9 w-9 place-items-center rounded-full bg-signal text-ink transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-35"
-                disabled={disabled || !canSend || Boolean(busy)}
+                disabled={disabled || !canSend}
                 aria-label="Send"
                 title="Send"
               >
@@ -532,6 +470,18 @@ export function ChatComposer({
         </div>
         </div>
       </div>
+
+      <GoogleDrivePicker
+        open={driveOpen}
+        remainingSlots={remainingSlots}
+        onClose={() => setDriveOpen(false)}
+        onAttach={(files) => {
+          setAttachError(null);
+          addAttachments(files);
+          setDriveConnected(true);
+        }}
+        onError={(message) => setAttachError(message)}
+      />
 
       {projectId && (
         <ProjectDocsPicker

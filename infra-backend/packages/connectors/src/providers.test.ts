@@ -50,7 +50,7 @@ describe('coming-soon providers', () => {
     expect(drive).toBeDefined();
     expect(drive?.connectable).toBe(true);
     expect(drive?.scopes).toEqual([
-      'https://www.googleapis.com/auth/drive.file',
+      'https://www.googleapis.com/auth/drive.readonly',
     ]);
   });
 

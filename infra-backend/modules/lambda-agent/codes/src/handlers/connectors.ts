@@ -20,6 +20,7 @@ import {
   getProvider,
   hashState,
   importDriveFiles,
+  listDriveBrowser,
   isProviderId,
   listConnectors,
   listRuns,
@@ -33,6 +34,7 @@ import {
   upsertConnector,
   validateActionArgs,
   type ActionId,
+  type DriveBrowserView,
   type Surface,
 } from '@walkcroach/connectors';
 import {
@@ -497,6 +499,76 @@ export async function handleGoogleDrivePickerSession(
     appId,
     connectUrl: connectUrl(),
   });
+}
+
+/**
+ * GET /connectors/google_drive/files
+ * In-app Drive browser page (My Drive / shared / recent / shared drives).
+ */
+export async function handleGoogleDriveBrowse(
+  db: DbClient,
+  auth: AuthContext,
+  query: {
+    view?: string;
+    folderId?: string;
+    driveId?: string;
+    q?: string;
+    pageToken?: string;
+  },
+): Promise<RestResult> {
+  const viewRaw = (query.view ?? 'my_drive').trim();
+  const views: DriveBrowserView[] = [
+    'my_drive',
+    'shared',
+    'recent',
+    'shared_drives',
+  ];
+  if (!views.includes(viewRaw as DriveBrowserView)) {
+    return jsonResponse(400, { error: 'Invalid Drive view.', code: 'bad_request' });
+  }
+
+  const resolved = await resolveConnectorAccessToken(
+    db,
+    auth.ownerId,
+    'google_drive',
+  );
+  if (!resolved.ok) {
+    const status =
+      resolved.code === 'not_connected'
+        ? 404
+        : resolved.code === 'provider'
+          ? 503
+          : 401;
+    return jsonResponse(status, {
+      error: resolved.error,
+      code: resolved.code,
+      connectUrl: connectUrl(),
+    });
+  }
+
+  const listed = await listDriveBrowser({
+    tokens: resolved.tokens,
+    view: viewRaw as DriveBrowserView,
+    folderId: query.folderId?.trim() || undefined,
+    driveId: query.driveId?.trim() || undefined,
+    q: query.q?.trim() || undefined,
+    pageToken: query.pageToken?.trim() || undefined,
+  });
+  if ('error' in listed) {
+    const status =
+      listed.code === 'bad_request'
+        ? 400
+        : listed.code === 'insufficient_scope'
+          ? 403
+          : 502;
+    return jsonResponse(status, {
+      error: listed.error,
+      code: listed.code,
+      connectUrl: connectUrl(),
+    });
+  }
+
+  return jsonResponse(200, listed);
 }
 
 /**

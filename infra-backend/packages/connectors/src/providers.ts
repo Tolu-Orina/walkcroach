@@ -120,10 +120,10 @@ export const PROVIDERS: Record<ProviderId, ProviderDef> = {
     disclosure: 'Read and append rows in spreadsheets you choose.',
   },
   /**
-   * Chat Attach → Google Drive. `drive.file` is least privilege: only files the
-   * user opens or creates with WalkCroach (via the Google Picker), never the
-   * whole drive. This is an attachment source, not an agent write tool — there
-   * are no Drive actions in `actions.ts`.
+   * Chat Attach → Google Drive. `drive.readonly` is required for an in-app
+   * file list (Google Picker cannot be themed and cannot run under COEP).
+   * Read-only: no writes. Not an agent Drive tool — no Drive actions in
+   * `actions.ts`. Existing `drive.file` connections must reconnect.
    */
   google_drive: {
     id: 'google_drive',
@@ -131,13 +131,13 @@ export const PROVIDERS: Record<ProviderId, ProviderDef> = {
     tier: 1,
     authorizeUrl: GOOGLE_AUTH,
     tokenUrl: GOOGLE_TOKEN,
-    scopes: ['https://www.googleapis.com/auth/drive.file'],
+    scopes: ['https://www.googleapis.com/auth/drive.readonly'],
     usePkce: true,
     extraAuthParams: GOOGLE_AUTH_PARAMS,
     clientIdEnv: 'GOOGLE_OAUTH_CLIENT_ID',
     clientSecretEnv: 'GOOGLE_OAUTH_CLIENT_SECRET',
     disclosure:
-      'Pick files from Google Drive to attach in chat. WalkCroach can only access files you select — not your whole drive.',
+      'Browse Google Drive in WalkCroach and attach files you select. WalkCroach can read files in Drive you can already open — it cannot change or delete them.',
   },
   slack: {
     id: 'slack',
