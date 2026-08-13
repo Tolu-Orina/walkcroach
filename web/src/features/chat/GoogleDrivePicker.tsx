@@ -188,7 +188,7 @@ export function GoogleDrivePicker({
     };
   }, [open, view, folderId, driveId, debouncedQ]);
 
-  const rows = useMemo(() => {
+  const rows = useMemo((): Array<DriveBrowserItem & { isDrive: boolean }> => {
     if (view === 'shared_drives' && !driveId && !debouncedQ) {
       return drives.map((d) => ({
         id: d.id,

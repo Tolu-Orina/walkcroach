@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { projectNumberFromClientId } from './googleDrivePicker';
+import { projectNumberFromClientId } from './projectNumberFromClientId';
 
 describe('projectNumberFromClientId', () => {
   it('extracts numeric prefix from a standard OAuth web client id', () => {
