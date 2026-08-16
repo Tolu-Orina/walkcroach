@@ -7,6 +7,11 @@ import {
 import { createDbClient } from '@walkcroach/db';
 import type { AuthContext } from '../auth.js';
 import { metricLog, parseJsonBody } from '../util.js';
+import {
+  formatWebProjectBlock,
+  hasWebProjectContext,
+  loadWebProjectContext,
+} from './webProjectContext.js';
 
 type RecallHit = {
   id: string;
@@ -91,6 +96,8 @@ export async function* streamRecall(
   let hits: RecallHit[] = [];
   let runHits: WorkflowHit[] = [];
   let vecForRuns = '';
+  let webBlock = '';
+  let webHasContext = false;
   try {
     if (scope === 'workspace' && b.workspaceId) {
       const owned = await db.query(
@@ -179,6 +186,18 @@ export async function* streamRecall(
       // Pre-migration databases have no workflow_runs; recall still works.
       runHits = [];
     }
+
+    try {
+      const webCtx = await loadWebProjectContext(db, auth, {
+        workspaceId: b.workspaceId,
+        question,
+      });
+      webBlock = formatWebProjectBlock(webCtx);
+      webHasContext = hasWebProjectContext(webCtx);
+    } catch {
+      webBlock = '';
+      webHasContext = false;
+    }
   } finally {
     await db.close();
   }
@@ -207,10 +226,10 @@ export async function* streamRecall(
     } satisfies RecallSourcesEvent;
   }
 
-  if (!hits.length && !runHits.length) {
+  if (!hits.length && !runHits.length && !webHasContext) {
     yield {
       type: 'token',
-      text: 'I do not have any saved captures that match that yet. Save a page to a workspace first.',
+      text: 'I do not have a matching Chrome capture or WalkCroach Web chat for that yet. Save a page, or ask again after chatting in a Web project.',
     };
     yield { type: 'done', reason: 'complete' };
     return;
@@ -234,11 +253,12 @@ ${JSON.stringify(r.result ?? {}).slice(0, 500)}`,
   for await (const ev of streamConverse({
     system: [
       'You are WalkCroach recall.',
-      'Answer using only the saved captures and actions below. They are numbered.',
+      'Answer using the saved Chrome captures, executed actions, and WalkCroach Web project context below.',
       'Cite captures by their number like [2], and actions like [A1].',
-      'The panel renders the numbered sources beside your answer, so do not repeat their URLs.',
+      'The panel renders numbered Chrome sources beside your answer, so do not repeat their URLs.',
+      'Web project chat and memory are shared across surfaces — use them when the captures do not answer.',
       'Actions listed are things that already happened. Never describe a capture as an action, or an action as something still to do.',
-      'If the material does not answer the question, say so plainly rather than guessing.',
+      'If none of the material answers the question, say so plainly rather than guessing.',
     ].join(' '),
     messages: [
       {
@@ -248,6 +268,7 @@ ${JSON.stringify(r.result ?? {}).slice(0, 500)}`,
             text: [
               hits.length ? `Saved captures:\n${context}` : '',
               runHits.length ? `Actions you took:\n${runContext}` : '',
+              webBlock,
               `Question: ${question}`,
             ]
               .filter(Boolean)

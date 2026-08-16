@@ -378,6 +378,21 @@ describe('truncate + prompt cache order', () => {
     expect(t).toContain('Execution requirement');
     expect(t).toContain('relative');
   });
+
+  it('injects shared CRDB memory with surface provenance', () => {
+    const t = buildUserTurn({
+      prompt: 'fix auth',
+      sharedMemoryHits: [
+        {
+          kind: 'decision',
+          text: 'Use Cognito PKCE',
+          sourceSurface: 'web',
+        },
+      ],
+    });
+    expect(t).toContain('[web|decision] Use Cognito PKCE');
+    expect(t).toContain('Shared WalkCroach memory');
+  });
 });
 
 describe('fake host tool execution', () => {

@@ -76,7 +76,7 @@ import {
 import { TelemetrySink } from './telemetry.js';
 import { attachEnvExporters } from './telemetry-exporters.js';
 import { resolvePermissionMode } from './permission-mode.js';
-import type { ProjectMemoryBridge } from './project-memory.js';
+import type { ProjectMemoryBridge, ProjectMemoryHit } from './project-memory.js';
 import type { SharedSkillsBridge } from './shared-skills.js';
 import { cloneMessages, trimSessionMessages, appendUserFollowUp, sanitizeConverseMessages } from './session.js';
 import { compactSessionMessages } from './compact.js';
@@ -911,9 +911,48 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
   const prior = params.priorMessages?.length
     ? cloneMessages(params.priorMessages)
     : [];
+
+  let sharedMemoryHits: ProjectMemoryHit[] = [];
+  if (params.projectMemory) {
+    try {
+      sharedMemoryHits = await params.projectMemory.recall({
+        query: params.prompt,
+        limit: 5,
+      });
+      if (sharedMemoryHits.length) {
+        const surfacesSeen = [
+          ...new Set(
+            sharedMemoryHits.map((h) =>
+              (h.sourceSurface ?? 'unknown').toLowerCase(),
+            ),
+          ),
+        ];
+        host.emit({
+          type: 'telemetry',
+          name: 'memory_recall',
+          detail: String(sharedMemoryHits.length),
+        });
+        host.emit({
+          type: 'tool_card',
+          id: 'auto-recall',
+          name: 'recall_project_memory',
+          status: 'done',
+          detail: `${sharedMemoryHits.length} hit(s) · ${surfacesSeen.join(', ')}`,
+          hits: sharedMemoryHits.map((h) => ({
+            sourceSurface: (h.sourceSurface ?? 'unknown').toLowerCase(),
+            kind: h.kind,
+            text: h.text.slice(0, 160),
+          })),
+        });
+      }
+    } catch {
+      /* offline / unsigned — local tools still run */
+    }
+  }
+
   const userText =
     params.followUp || prior.length > 0
-      ? buildFollowUpTurn(prompt, liveTodos)
+      ? buildFollowUpTurn(prompt, liveTodos, sharedMemoryHits)
       : buildUserTurn({
           prompt,
           gitStatus: meta.gitStatus,
@@ -925,6 +964,7 @@ async function runFullLoop(params: RunLoopParams): Promise<void> {
           verifyCommands: policy.verify.commands,
           todos: liveTodos,
           actionBias,
+          sharedMemoryHits,
         });
 
   const attachmentBlocks = attachmentsToContentBlocks(params.attachments);

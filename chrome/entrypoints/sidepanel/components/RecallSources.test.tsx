@@ -22,7 +22,8 @@ describe('labelType', () => {
   it('translates storage keys into user-facing words', () => {
     expect(labelType('candidate')).toBe('candidate');
     expect(labelType('selection')).toBe('selection');
-    expect(labelType('price')).toBe('price');
+    expect(labelType('web_chat')).toBe('Web chat');
+    expect(labelType('memory')).toBe('memory');
   });
 
   it('falls back to "page" for anything unrecognised', () => {
@@ -65,12 +66,12 @@ describe('RecallSources', () => {
 
   it('counts the captures the answer was built from', () => {
     render(<RecallSources sources={[src(), src({ captureId: 'c2' })]} />);
-    expect(screen.getByText(/Answered from 2 captures/)).toBeInTheDocument();
+    expect(screen.getByText(/Answered from 2 sources/)).toBeInTheDocument();
   });
 
   it('uses the singular for one capture', () => {
     render(<RecallSources sources={[src()]} />);
-    expect(screen.getByText(/Answered from 1 capture/)).toBeInTheDocument();
+    expect(screen.getByText(/Answered from 1 source/)).toBeInTheDocument();
   });
 
   it('links each source to the page it came from', () => {
@@ -106,8 +107,14 @@ describe('RecallSources', () => {
     expect(screen.queryByText('also in Web')).toBeNull();
   });
 
-  it('does not render the raw distance score', () => {
-    render(<RecallSources sources={[src({ distance: 0.1234 })]} />);
-    expect(screen.queryByText(/0\.12/)).toBeNull();
+  it('does not link Web chat sources that have no URL', () => {
+    render(
+      <RecallSources
+        sources={[src({ url: '', title: 'Agentic Project chat', captureType: 'web_chat' })]}
+      />,
+    );
+    expect(screen.queryByRole('link')).toBeNull();
+    expect(screen.getByText('Agentic Project chat')).toBeInTheDocument();
+    expect(screen.getByText('Web chat')).toBeInTheDocument();
   });
 });

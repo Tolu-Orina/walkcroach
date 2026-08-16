@@ -60,6 +60,12 @@ export async function writeMemoryEntryDetailed(params: {
   actorKeyId?: string | null;
   /** Optional request / event id for lineage (Oracle/Attestor pattern). */
   sourceEventId?: string | null;
+  /**
+   * Pin which live row this write replaces (Chrome capture refresh).
+   * Skips nearest-neighbour matching so a similar page cannot retire a
+   * different capture.
+   */
+  supersedeEntryId?: string | null;
 }): Promise<SupersedeWriteResult> {
   const embedStarted = Date.now();
   let embedding: number[];
@@ -85,8 +91,8 @@ export async function writeMemoryEntryDetailed(params: {
   const result = await params.db.withTransaction(async (tx) => {
     // Nearest live neighbour of the same kind, read BEFORE the insert so the new
     // row cannot match itself at distance 0.
-    let supersededId: string | null = null;
-    if (threshold > 0) {
+    let supersededId: string | null = params.supersedeEntryId ?? null;
+    if (!supersededId && threshold > 0) {
       /**
        * Same index contract as recall: pin both prefix columns and add nothing
        * else. `kind` is deliberately NOT in the WHERE clause — it is not a

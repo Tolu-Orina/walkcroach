@@ -699,7 +699,12 @@ export function App() {
     await runStream(
       streamAsk(
         token,
-        { ...page, question: question.trim(), webSearchEnabled: webSearch },
+        {
+          ...page,
+          question: question.trim(),
+          webSearchEnabled: webSearch,
+          workspaceId: activeWs || null,
+        },
         beginStream(),
       ),
     );
@@ -1113,9 +1118,9 @@ export function App() {
     if (tab === 'recall') {
       return {
         value: recallQ,
-        placeholder: 'What did I capture about…',
-        label: 'Search page captures',
-        submitLabel: 'Search captures',
+        placeholder: 'What did we decide in Web chat…',
+        label: 'Search captures and Web chat',
+        submitLabel: 'Search',
         disabled: !session,
         onChange: setRecallQ,
         onSubmit: () => void onRecall(),
@@ -1480,7 +1485,7 @@ export function App() {
           </div>
         )}
 
-        {/* ── Capture Recall (page captures via chrome BFF — not /v1 project memory) ── */}
+        {/* ── Recall: Chrome captures + WalkCroach Web project chat ── */}
         {!loading && session && tab === 'recall' && (
           <div
             id="wc-pane-recall"
@@ -1488,26 +1493,23 @@ export function App() {
             aria-labelledby="wc-tab-recall"
             className="wc-section wc-pane"
           >
-            <h2 className="wc-section__title">Capture Recall</h2>
+            <h2 className="wc-section__title">Recall</h2>
             <p className="wc-muted wc-small">
-              Search page captures you saved in Chrome
-              {activeWsName ? ` in “${activeWsName}”` : ' across all workspaces'}
-              . Cross-surface project memory lives under{' '}
-              <strong>Saved</strong>.
+              Search Chrome captures
+              {activeWsName ? ` in “${activeWsName}”` : ''} and your WalkCroach
+              Web project chat.
             </p>
             {!recallAttempted && !streamText && !streaming && (
-              <EmptyState title="Search your captures">
-                This tab searches Chrome page captures only — not the shared
-                project memory graph. Link a workspace and open{' '}
-                <strong>Saved → Project memory</strong> for decisions and
-                preferences across surfaces.
+              <EmptyState title="Search captures and Web chat">
+                Ask about a page you saved here, or a project chat you had on
+                WalkCroach Web. Link a workspace under Saved to pin a project.
               </EmptyState>
             )}
             {recallAttempted && !streaming && !streamText && (
               <EmptyState title="Nothing matched">
-                No captures matched that question
-                {activeWsName ? ` in “${activeWsName}”` : ''}. Try different
-                words, or widen the search by clearing the active workspace.
+                Nothing matched in Chrome captures or Web chat
+                {activeWsName ? ` for “${activeWsName}”` : ''}. Try different
+                words, or link the right Web project under Saved.
               </EmptyState>
             )}
             <RecallSources sources={recallSources} />

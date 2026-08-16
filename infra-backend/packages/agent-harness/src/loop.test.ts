@@ -325,7 +325,7 @@ describe('runPromptTurn — memory recall', () => {
     await run();
     expect(converseCalls[0]?.system).toContain('Project memory');
     expect(converseCalls[0]?.system).toContain('Use CockroachDB for all persistence');
-    expect(converseCalls[0]?.system).toContain('[decision]');
+    expect(converseCalls[0]?.system).toContain('[ide|decision]');
   });
 
   it('omits the memory block entirely when there is nothing to recall', async () => {
@@ -339,7 +339,14 @@ describe('runPromptTurn — memory tools', () => {
   it('recall_project_memory returns hits with distances and logs a build event', async () => {
     recallProjectMemory
       .mockResolvedValueOnce([]) // pre-turn recall
-      .mockResolvedValueOnce([{ kind: 'decision', text: 'Use Postgres', distance: 0.0421 }]);
+      .mockResolvedValueOnce([
+        {
+          kind: 'decision',
+          text: 'Use Postgres',
+          distance: 0.0421,
+          sourceSurface: 'ide',
+        },
+      ]);
     turnScripts = [
       {
         assistantContent: [{ text: 'checking' }],
@@ -356,7 +363,7 @@ describe('runPromptTurn — memory tools', () => {
       JSON.stringify(m.content).includes('toolResult'),
     );
     const text = JSON.stringify(toolMsg?.content);
-    expect(text).toContain('[decision]');
+    expect(text).toContain('[ide|decision]');
     expect(text).toContain('dist=0.042');
     expect(buildEvents).toContainEqual({ tool: 'recall_project_memory', summary: 'hits=1' });
   });

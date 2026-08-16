@@ -189,6 +189,7 @@ export async function handlePriceTrack(
           extractedText: summaryText,
           embedding: vec,
           captureType: 'price',
+          actorOwnerId: auth.ownerId,
         });
       }
       metricLog('chrome.capture.price_append', {

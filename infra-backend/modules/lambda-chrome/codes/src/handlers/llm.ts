@@ -8,6 +8,10 @@ import {
 import { createDbClient } from '@walkcroach/db';
 import type { AuthContext } from '../auth.js';
 import { getLinkedProjectId } from './link.js';
+import {
+  formatWebProjectBlock,
+  loadWebProjectContext,
+} from './webProjectContext.js';
 import { assertRateLimit, metricLog, truncateExtract } from '../util.js';
 
 export type PageContextBody = {
@@ -119,12 +123,39 @@ export async function* streamAsk(
     }
   }
 
-  const system = searchBlock
-    ? 'You are WalkCroach. Prefer the provided page content for page-specific questions. You may also use the web search results when helpful — cite titles and URLs when you do. Be concise and practical. If neither source answers, say so.'
-    : 'You are WalkCroach. Answer using only the provided page content unless the user asks for general knowledge. Be concise and practical. If the page lacks the answer, say so.';
+  let webBlock = '';
+  const db = createDbClient();
+  try {
+    const webCtx = await loadWebProjectContext(db, auth, {
+      workspaceId: body.workspaceId,
+      question,
+    });
+    webBlock = formatWebProjectBlock(webCtx);
+  } catch (err) {
+    metricLog('chrome.ask.web_context', {
+      ok: false,
+      error: err instanceof Error ? err.message.slice(0, 80) : 'error',
+    });
+  } finally {
+    await db.close();
+  }
+
+  const system = [
+    'You are WalkCroach, a browser copilot that shares memory with WalkCroach Web.',
+    'Prefer the current page for questions about what is on screen.',
+    'When a WalkCroach Web project chat or project memory is provided, use it for questions about that project, prior decisions, design systems, or anything the page does not cover.',
+    'Do not claim the page lacks an answer if the Web project context has it.',
+    searchBlock
+      ? 'You may also use the web search results — cite titles and URLs when you do.'
+      : '',
+    'Be concise and practical.',
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   const userText = [
     pageBlock({ ...body, extractedText: text }),
+    webBlock,
     searchBlock,
     `Question: ${question}`,
   ]

@@ -347,6 +347,7 @@ export {
   assembleSystemBlocks,
   buildUserTurn,
   buildFollowUpTurn,
+  formatSharedMemoryBlock,
   looksLikeActionTask,
   shouldTreatAsActionTask,
   AGENT_SYSTEM_PROMPT,

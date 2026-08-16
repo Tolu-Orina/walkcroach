@@ -237,11 +237,14 @@ ${antiLeak}`;
 }
 
 function memoryBlockFromHits(
-  hits: Array<{ kind: string; text: string }>,
+  hits: Array<{ kind: string; text: string; sourceSurface?: string }>,
 ): string {
   if (hits.length === 0) return '';
-  return `Project memory (use when relevant):\n${hits
-    .map((h) => `- [${h.kind}] ${h.text}`)
+  return `Project memory (use when relevant; tagged by originating surface):\n${hits
+    .map((h) => {
+      const surface = (h.sourceSurface ?? 'unknown').toLowerCase();
+      return `- [${surface}|${h.kind}] ${h.text}`;
+    })
     .join('\n')}`;
 }
 
@@ -265,7 +268,7 @@ async function buildSystemForTurn(params: {
   db: import('@walkcroach/db').DbClient;
   projectId: string;
   mode: LoopMode;
-  memoryHits: Array<{ kind: string; text: string }>;
+  memoryHits: Array<{ kind: string; text: string; sourceSurface?: string }>;
   query?: string;
   webSearchEnabled?: boolean;
 }): Promise<string> {
@@ -381,10 +384,10 @@ async function executeServerTool(params: {
                 hits.length === 0
                   ? 'No matching memories.'
                   : hits
-                      .map(
-                        (h) =>
-                          `[${h.kind}] (dist=${h.distance?.toFixed(3) ?? '?'}) ${h.text}`,
-                      )
+                      .map((h) => {
+                        const surface = (h.sourceSurface ?? 'unknown').toLowerCase();
+                        return `[${surface}|${h.kind}] (dist=${h.distance?.toFixed(3) ?? '?'}) ${h.text}`;
+                      })
                       .join('\n'),
             },
           ],

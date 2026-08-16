@@ -1,5 +1,4 @@
 import {
-  formatVector,
   writeMemoryEntryDetailed,
   type MemoryKind,
 } from '@walkcroach/agent-harness';
@@ -174,10 +173,6 @@ function captureMemoryText(params: {
     .join('\n');
 }
 
-function toVec(embedding: number[] | string): string {
-  return typeof embedding === 'string' ? embedding : formatVector(embedding);
-}
-
 export async function mirrorCaptureToProjectMemory(params: {
   db: Db;
   projectId: string;
@@ -216,7 +211,10 @@ export async function mirrorCaptureToProjectMemory(params: {
   return id;
 }
 
-/** Refresh mirrored memory after a price-track append / capture edit. */
+/** Refresh mirrored memory after a price-track append / capture edit.
+ * Inserts a new row and retires the previous capture-marker row (never in-place
+ * UPDATE — asOf / time-travel must still see the old text).
+ */
 export async function updateMirroredCaptureMemory(params: {
   db: Db;
   projectId: string;
@@ -226,21 +224,32 @@ export async function updateMirroredCaptureMemory(params: {
   extractedText: string;
   embedding: number[] | string;
   captureType?: string;
+  actorOwnerId?: string | null;
 }): Promise<void> {
   const marker = `[chrome-capture:${params.captureId}]`;
   const text = captureMemoryText(params);
-  const vec = toVec(params.embedding);
-  const updated = await params.db.query(
-    `UPDATE memory_entries
-     SET text = $3, embedding = $4::vector
-     WHERE project_id = $1::uuid
-       AND text LIKE $2
-       AND superseded_by IS NULL`,
-    [params.projectId, `${marker}%`, text, vec],
+  const existing = await params.db.query<{ id: string }>(
+    `SELECT id FROM memory_entries
+      WHERE project_id = $1::uuid
+        AND text LIKE $2
+        AND superseded_by IS NULL
+        AND erased_at IS NULL
+      LIMIT 1`,
+    [params.projectId, `${marker}%`],
   );
-  if (!updated.rowCount) {
+  if (!existing.rows[0]) {
     await mirrorCaptureToProjectMemory(params);
+    return;
   }
+  await writeMemoryEntryDetailed({
+    db: params.db as never,
+    projectId: params.projectId,
+    sourceSurface: 'chrome',
+    kind: 'capture',
+    text,
+    actorOwnerId: params.actorOwnerId ?? null,
+    supersedeEntryId: existing.rows[0].id,
+  });
 }
 
 async function backfillWorkspaceCapturesToMemory(

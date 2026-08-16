@@ -21,7 +21,7 @@ export const AGENT_SYSTEM_PROMPT = [
   'CockroachDB: call load_skill for official CockroachDB Agent Skills (bundled from cockroachlabs/cockroachdb-skills); use cockroach_mcp for interactive schema/data (read-only default); ccloud only for cloud provisioning/lifecycle (always approval-gated). Prefer cockroachdb-walkcroach-tools when unsure which surface to use.',
   'Skills: the catalog lists name + short description only (bundled coding, CockroachDB, workspace, ~/.cursor/skills, and shared CRDB skills when signed in). Call load_skill by name before following a skill\'s procedure — do not invent skill bodies. Prefer a relevant skill over improvising for CockroachDB ops, auth, MCP, or project conventions.',
   'For any other MCP server configured in .walkcroach/mcp.json, use mcp_call with the server name (never cockroach_mcp for those). Every mcp_call requires explicit user approval.',
-  'When linked to a WalkCroach project, use recall_project_memory for prior decisions from Web/Chrome/IDE, and mirror_project_memory for distilled decisions (never raw chat dumps).',
+  'When linked to a WalkCroach project, shared CockroachDB memory from Web, Chrome, IDE, CLI, Desktop, and SDK is injected into the task. Call recall_project_memory for more, and mirror_project_memory for distilled decisions (never raw chat dumps).',
   'CRITICAL — execution bias: When the user asks to scaffold, create, implement, fix, or start something, you MUST call write_file / edit_file / run_terminal in that session. Do not end your turn after only list_dir/read_file/search/glob. Do not replace doing the work with a long status summary. Do not re-explore the whole monorepo when the task names a specific folder. Prefer a small working app over perfect architecture.',
 ].join(' ');
 
@@ -121,6 +121,18 @@ export function shouldTreatAsActionTask(
   return looksLikeActionTask(prompt);
 }
 
+export function formatSharedMemoryBlock(
+  hits: Array<{ kind: string; text: string; sourceSurface?: string }>,
+): string {
+  if (!hits.length) return '';
+  return `# Shared WalkCroach memory (CockroachDB)\n\nPrior decisions/preferences from Web, Chrome, IDE, CLI, Desktop, and SDK. Use when relevant; call recall_project_memory if you need more.\n\n${hits
+    .map((h) => {
+      const surface = (h.sourceSurface ?? 'unknown').toLowerCase();
+      return `- [${surface}|${h.kind}] ${h.text}`;
+    })
+    .join('\n')}`;
+}
+
 export function buildUserTurn(params: {
   prompt: string;
   gitStatus?: string;
@@ -134,6 +146,12 @@ export function buildUserTurn(params: {
   todos?: AgentTodo[];
   /** Prefer Agent-mode flag over regex (default auto). */
   actionBias?: ActionBias;
+  /** Auto-recalled CRDB hits for this turn (coding surfaces). */
+  sharedMemoryHits?: Array<{
+    kind: string;
+    text: string;
+    sourceSurface?: string;
+  }>;
 }): string {
   const parts = [`# Task\n\n${params.prompt.trim()}`];
   if (params.workspaceRoot) {
@@ -172,6 +190,10 @@ export function buildUserTurn(params: {
       '\n# WalkCroach project link\n\nNot linked (optional). Proceed with the local task; do not block on sign-in or project linking unless the user asked for memory sync.',
     );
   }
+  const memoryBlock = formatSharedMemoryBlock(params.sharedMemoryHits ?? []);
+  if (memoryBlock) {
+    parts.push(`\n${memoryBlock}`);
+  }
   if (params.mcpConnected) {
     const tools =
       params.mcpTools?.length
@@ -192,11 +214,20 @@ export function buildUserTurn(params: {
 export function buildFollowUpTurn(
   prompt: string,
   todos?: AgentTodo[],
+  sharedMemoryHits?: Array<{
+    kind: string;
+    text: string;
+    sourceSurface?: string;
+  }>,
 ): string {
   const parts = [`# Follow-up\n\n${prompt.trim()}`];
   const todoBlock = formatTodosChecklistBlock(todos ?? []);
   if (todoBlock) {
     parts.push(`\n${todoBlock}`);
+  }
+  const memoryBlock = formatSharedMemoryBlock(sharedMemoryHits ?? []);
+  if (memoryBlock) {
+    parts.push(`\n${memoryBlock}`);
   }
   return parts.join('\n');
 }

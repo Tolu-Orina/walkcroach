@@ -27,8 +27,8 @@ const TABS: Array<{
  * width-driven, so it responds to the panel the user dragged rather than to
  * their monitor.
  *
- * `Captures` is Capture Recall (`/chrome/v1/recall`) — page captures only, not
- * `/v1` project memory (that lives under Saved → Project memory). P1 dual-funnel.
+ * `Captures` is recall (`/chrome/v1/recall`) — Chrome page captures plus the
+ * linked (or most recent) WalkCroach Web project chat.
  *
  * `tablist` semantics rather than links: this switches panes in place, and a
  * reader should hear "tab 2 of 4", not "link". Arrow keys move one step;

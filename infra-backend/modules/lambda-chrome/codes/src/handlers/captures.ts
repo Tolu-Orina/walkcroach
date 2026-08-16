@@ -259,6 +259,7 @@ export async function handlePatchCapture(
         extractedText: nextText,
         embedding: nextEmbedding,
         captureType: row.capture_type,
+        actorOwnerId: auth.ownerId,
       });
     }
 

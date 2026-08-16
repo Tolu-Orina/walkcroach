@@ -85,6 +85,26 @@ describe('writeMemoryEntryDetailed — supersede lifecycle', () => {
     text: 'Use dark mode by default',
   };
 
+  it('pins supersedeEntryId instead of nearest-neighbour search', async () => {
+    const { db, calls } = fakeDb([
+      [/INSERT INTO memory_entries/, { rows: [{ id: 'new-cap' }] }],
+    ]);
+
+    const result = await writeMemoryEntryDetailed({
+      db,
+      ...base,
+      kind: 'capture',
+      text: '[chrome-capture:abc]\nupdated extract',
+      sourceSurface: 'chrome',
+      supersedeEntryId: 'old-cap',
+    });
+
+    expect(result).toEqual({ id: 'new-cap', supersededId: 'old-cap' });
+    expect(calls.some((c) => /embedding <=>/.test(c.sql))).toBe(false);
+    const update = calls.find((c) => /UPDATE memory_entries/.test(c.sql));
+    expect(update?.params).toEqual(['old-cap', 'new-cap']);
+  });
+
   it('retires the nearest entry when the new one restates it', async () => {
     const { db, calls } = fakeDb([
       [

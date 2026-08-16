@@ -19,7 +19,7 @@ export function RecallSources({ sources }: { sources: RecallSource[] }) {
     <section className="wc-section" aria-labelledby="wc-sources-title">
       <h3 className="wc-eyebrow" id="wc-sources-title">
         Answered from {sources.length}{' '}
-        {sources.length === 1 ? 'capture' : 'captures'}
+        {sources.length === 1 ? 'source' : 'sources'}
       </h3>
       <ol className="wc-sources">
         {sources.map((source, i) => (
@@ -28,15 +28,19 @@ export function RecallSources({ sources }: { sources: RecallSource[] }) {
               {i + 1}
             </span>
             <div className="wc-list__body">
-              <a
-                className="wc-sources__link"
-                href={source.url}
-                target="_blank"
-                rel="noreferrer"
-                title={source.url}
-              >
-                {source.title || source.url}
-              </a>
+              {source.url ? (
+                <a
+                  className="wc-sources__link"
+                  href={source.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={source.url}
+                >
+                  {source.title || source.url}
+                </a>
+              ) : (
+                <span className="wc-sources__link">{source.title || 'Web chat'}</span>
+              )}
               <span className="wc-sources__meta">
                 <span className="wc-sector">{labelType(source.captureType)}</span>
                 {source.workspace && <span>{source.workspace}</span>}
@@ -68,6 +72,10 @@ export function labelType(captureType: string): string {
       return 'selection';
     case 'draft':
       return 'draft';
+    case 'web_chat':
+      return 'Web chat';
+    case 'memory':
+      return 'memory';
     default:
       return 'page';
   }
